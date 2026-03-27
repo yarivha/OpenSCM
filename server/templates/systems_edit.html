@@ -1,0 +1,110 @@
+{% extends "base.html" %}
+{% block content %}
+
+
+<!-- Content Wrapper. Contains page content -->
+  <div class="content-wrapper">
+    <!-- Content Header (Page header) -->
+    <section class="content-header">
+      <div class="container-fluid">
+        <div class="row mb-2">
+          <div class="col-sm-6">
+            <h1>Edit System</h1>
+          </div>
+          <div class="col-sm-6">
+            <ol class="breadcrumb float-sm-right">
+              <li class="breadcrumb-item"><a href="/">Home</a></li>
+	      <li class="breadcrumb-item"><a href="/systems">Systems</a></li>
+              <li class="breadcrumb-item active">System Edit</li>
+            </ol>
+          </div>
+        </div>
+      </div><!-- /.container-fluid -->
+    </section>
+
+    <!-- Main content -->
+    <section class="content">
+      <div class="row">
+        <div class="col-md-8">
+          <div class="card card-primary">
+            <div class="card-header">
+              <h3 class="card-title">{{ system.name }}</h3>
+            </div>
+	    <form method="post">
+            <div class="card-body"> 
+	      <div class="form-group">
+                <label for="inputid">System ID</label>
+                <input type="text" name="id" placeholder="{{ system.id }}" class="form-control" disabled>
+              </div>
+              <div class="form-group">
+                <label for="inputName">System Name</label>
+                <input type="text" name="name" value="{{ system.name }}" class="form-control" required>
+              </div>
+              <div class="form-group">
+                <label for="inputIP">IP</label>
+                <input type="text" name="ip" value="{{ system.ip }}" class="form-control">
+              </div>
+	      <div class="form-group">
+                <label for="inputOS">Operating System</label>
+                <input type="text" name="os" value="{{ system.os }}" class="form-control">
+              </div>
+	      <div class="form-group">
+                <label for="inputARCH">Architecture</label>
+                <input type="text" name="arch" value="{{ system.arch }}" class="form-control">
+              </div>
+	      <div class="form-group">
+                  <label>System Groups</label>
+		  <select class="select2bs4" name="groups" multiple="multiple" data-placeholder="Select a Group" style="width: 100%;">
+  		  {% for group in groups %}
+    		    <option value="{{ group.id }}" id="group-option-{{ group.id }}" 
+		      {% for connection in systems_in_groups %}
+			{% if group.id == connection.group_id %}selected="selected"{% endif %}
+		      {% endfor %}>
+      		      {{ group.name }}
+    		    </option>
+  		  {% endfor %}
+		</select>
+                  </div>
+                </div>
+	      </div>
+	      <div class="form-group">
+                <button type="submit" class="btn btn-success">Save System</button>
+                <a href="/systems" class="btn btn-secondary">Cancel</a>
+              </div>
+	    </form>
+          </div>
+        </div>
+      </div>
+    </section>
+  </div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    // Find all elements with the 'datetime' class and convert to local timezone
+    const datetimeElements = document.querySelectorAll('.datetime');
+    
+    datetimeElements.forEach(function(element) {
+      const utcDateStr = element.getAttribute('data-utc');
+      if (utcDateStr) {
+        const utcDate = new Date(utcDateStr);
+        if (!isNaN(utcDate.getTime())) {
+          // Format the date in local timezone
+          const options = { 
+            year: 'numeric', 
+            month: '2-digit', 
+            day: '2-digit',
+            hour: '2-digit', 
+            minute: '2-digit', 
+            second: '2-digit',
+            hour12: false
+          };
+          element.textContent = utcDate.toLocaleDateString(navigator.language, options);
+        }
+      }
+    });
+  });
+</script>
+{% endblock %}
