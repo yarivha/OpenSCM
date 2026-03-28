@@ -1,7 +1,7 @@
 [package]
-name = "scmserver"
-version = "0.1.0"
-edition = "2021" # <--- CHANGE THIS TO 2021
+name = "OpenSCMServer"
+version = "0.0.1"
+edition = "2024" 
 
 [dependencies]
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
