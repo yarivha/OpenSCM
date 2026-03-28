@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenSCM Client Service
+After=network.target
+
+[Service]
+Type=simple
+WorkingDirectory=/opt/openscm
+ExecStart=scmclient
+Restart=on-failure
+User=root
+# Logs will go here
+StandardOutput=append:/var/log/openscm/scmclient_output.log
+StandardError=append:/var/log/openscm/scmclient_error.log
+
+[Install]
+WantedBy=multi-user.target

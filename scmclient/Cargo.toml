@@ -1,7 +1,21 @@
 [package]
-name = "OpenSCMClient"
+name = "scmclient"
 version = "0.0.1"
 edition = "2024"
+authors = ["Yariv Hakim <yariv@openscm.io>"]
+
+[package.metadata.deb]
+name = "scmclient"
+maintainer = ["Yariv Hakim <yariv@openscm.io>"]
+copyright = "2026, OpenSCM"
+license-file = ["LICENSE", "0"]
+# This prevents apt from overwriting the server IP during updates
+conf-files = ["/opt/openscm/scmclient.config"]
+maintainer-scripts = "debian/"
+assets = [
+    ["target/release/scmclient", "/opt/openscm/scmclient", "755"],
+    ["debian/scmclient.service", "/lib/systemd/system/scmclient.service", "644"],
+]
 
 
 [dependencies]
