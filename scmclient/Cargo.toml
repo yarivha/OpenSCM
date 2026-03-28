@@ -3,6 +3,9 @@ name = "scmclient"
 version = "0.0.2"
 edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
+license = "Apache-2.0"
+description = "Client for Open Security Compliance Manager"
+
 
 [package.metadata.deb]
 name = "scmclient"
@@ -19,11 +22,15 @@ assets = [
 ]
 
 
-[package.metadata.rpm]
+[package.metadata.generate-rpm]
 package = "scmclient"
 release = "1"
 # This ensures the binary is stripped of debug symbols to save space
 strip = true
+assets = [
+    { source = "target/release/scmclient", dest = "/opt/openscm/scmclient", mode = "755" },
+    { source = "redhat/scmclient.service", dest = "/lib/systemd/system/scmclient.service", mode = "644" },
+]
 
 [package.metadata.rpm.cargo]
 buildflags = ["--release"]
