@@ -32,18 +32,18 @@ assets = [
     { source = "redhat/scmclient.service", dest = "/lib/systemd/system/scmclient.service", mode = "644" },
 ]
 
-[package.metadata.rpm.cargo]
+[package.metadata.generate-rpm.cargo]
 buildflags = ["--release"]
 
-[package.metadata.rpm.targets]
+[package.metadata.generate-rpm.targets]
 # Maps the compiled binary to the install path
 scmclient = { path = "/opt/openscm/scmclient" }
 
-[package.metadata.rpm.files]
+[package.metadata.generate-rpm.files]
 # Maps your existing service and config files
 "/lib/systemd/system/scmclient.service" = { source = "redhat/scmclient.service", mode = "644" }
 
-[package.metadata.rpm.scripts]
+[package.metadata.generate-rpm.scripts]
 # RPM equivalent of postinst
 post_install = """
 # Setup log dir
