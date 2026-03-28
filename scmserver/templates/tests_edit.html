@@ -1,0 +1,328 @@
+{% extends "base.html" %}
+{% block content %}
+
+
+<!-- Content Wrapper. Contains page content -->
+  <div class="content-wrapper">
+    <!-- Content Header (Page header) -->
+    <section class="content-header">
+      <div class="container-fluid">
+        <div class="row mb-2">
+          <div class="col-sm-6">
+            <h1>Edit Test</h1>
+          </div>
+          <div class="col-sm-6">
+            <ol class="breadcrumb float-sm-right">
+              <li class="breadcrumb-item"><a href="/">Home</a></li>
+	      <li class="breadcrumb-item"><a href="/tests">Tests</a></li>
+              <li class="breadcrumb-item active">Test Edit</li>
+            </ol>
+          </div>
+        </div>
+      </div><!-- /.container-fluid -->
+    </section>
+
+    <!-- Main content -->
+    <section class="content">
+      <div class="row">
+        <div class="col-md-10">
+          <div class="card card-primary">
+            <div class="card-header">
+              <h3 class="card-title">Test</h3>
+            </div>
+	    <form method="post">
+            <div class="card-body"> 
+	      <div class="form-group">
+                <label for="inputid">Test ID</label>
+                <input type="text" name="id" placeholder="{{ test.id }}" class="form-control" disabled>
+              </div>
+              <div class="form-group">
+                <label for="inputName">Test Name</label>
+		<input type="text" name="name" value="{{ test.name }}" class="form-control" required>
+              </div>
+              <div class="form-group">
+                <label for="inputDescription">Description</label>
+		<textarea name="description" class="form-control" rows="4">{{ test.description }}</textarea>
+              </div>
+	      <div class="form-group">
+                <label for="inputRational">Severity</label>
+		<select name="severity" class="form-control" style="width: auto; display: inline-block; margin: 0 0.5rem;">
+		    <option value="0" {% if test.severity == "0" %}selected{% endif %}>Information</option>
+                    <option value="1" {% if test.severity == "1" %}selected{% endif %}>Low</option>
+		    <option value="2" {% if test.severity == "2" %}selected{% endif %}>Medium</option>
+		    <option value="3" {% if test.severity == "3" %}selected{% endif %}>High</option>
+		    <option value="4" {% if test.severity == "4" %}selected{% endif %}>Critical</option>
+                  </select>
+              </div>
+              <div class="form-group">
+                <label for="inputRational">Rational</label>
+		<textarea name="rational" class="form-control" rows="4">{{ test.rational }}</textarea>
+              </div>
+	      <div class="form-group">
+                <label for="inputRational">Remediation</label>
+		<textarea name="remediation" class="form-control" rows="4">{{ test.remediation }}</textarea>
+              </div>
+	      <div class="form-group">
+  		<h5 style="display: flex; align-items: center; gap: 0.5rem;">
+    		  This test match
+		  <select name="filter" class="form-control" style="width: auto; display: inline-block; margin: 0 0.5rem;">
+      		    <option {% if test.filter == "all" %}selected{% endif %}>all</option>
+      		    <option {% if test.filter == "any" %}selected{% endif %}>any</option>
+    		  </select>
+    		  of the following conditions:
+  		</h5>
+	      </div>
+              <h4>Conditions</h4>
+              <div id="conditionsContainer">
+                <div class="condition-row mb-2 row" data-id="cond_1">
+                  <div class="col-sm-2">
+                    <select name="element_1" class="form-control">
+			  <option value="" {% if test.element_1 == "None" %}selected{% endif %}></option>
+		      	  {% for element in elements %}
+       	 			<option {% if test.element_1 == element.name %}selected{% endif %} >{{ element.name }}</option>
+    			  {% endfor %}
+                    </select>
+                  </div>
+		  <div class="col-sm-3">
+			  <input type="text" name="input_1" value="{{ test.input_1 }}" class="form-control">
+                  </div>
+		  <div class="col-sm-2">
+                    <select name="selement_1" class="form-control">
+			 <option value="" {% if test.selement_1 == "None" %}selected{% endif %}></option>
+			 {% for selement in selements %}
+			 	<option {% if test.selement_1 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
+			 {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="condition_1" class="form-control">
+			 <option value="" {% if test.condition_1 == "None" %}selected{% endif %}></option>
+			 {% for condition in conditions %}   
+			 	<option {% if test.condition_1 == condition.name %}selected{% endif %} >{{ condition.name }}</option> 
+                    	 {% endfor %}
+		    </select>
+                  </div>
+		  <div class="col-sm-2">
+		    <input type="text" name="sinput_1" value="{{ test.sinput_1 }}" class="form-control">
+		  </div> 
+                </div>
+              </div>
+	      <div class="condition-row mb-2 row" data-id="cond_2" {% if test.element_2 == "None" %}style="display: none;"{% endif %} >
+                  <div class="col-sm-2">
+                    <select name="element_2" class="form-control">
+                        <option value="" {% if test.element_2 == "None" %}selected{% endif %}></option>
+			{% for element in elements %}
+                                <option {% if test.element_2 == element.name %}selected{% endif %} >{{ element.name }}</option>
+                        {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-3">
+                          <input type="text" name="input_2" value="{{ test.input_2 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="selement_2" class="form-control">
+                         <option value="" {% if test.selement_2 == "None" %}selected{% endif %}></option>
+			 {% for selement in selements %}
+			 	<option {% if test.selement_2 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="condition_2" class="form-control">
+                         <option value="" {% if test.condition_2 == "None" %}selected{% endif %}></option>
+			 {% for condition in conditions %}
+			 	<option {% if test.condition_2 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <input type="text" name="sinput_2" value="{{ test.sinput_2 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-1 float-sm-right">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                  </div>
+            </div>
+	    <div class="condition-row mb-2 row" data-id="cond_3" {% if test.element_3 == "None" %}style="display: none;"{% endif %}>
+                  <div class="col-sm-2">
+                    <select name="element_3" class="form-control">
+                        <option value="" {% if test.element_3 == "None" %}selected{% endif %}></option>
+			{% for element in elements %}
+                                <option {% if test.element_3 == element.name %}selected{% endif %} >{{ element.name }}</option>
+                        {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-3">
+                          <input type="text" name="input_3" value="{{ test.input_3 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="selement_3" class="form-control">
+                         <option value="" {% if test.selement_3 == "None" %}selected{% endif %}></option>
+			 {% for selement in selements %}
+				 <option {% if test.selement_3 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="condition_3" class="form-control">
+                         <option value="" {% if test.condition_3 == "None" %}selected{% endif %}></option>
+			 {% for condition in conditions %}
+			 	<option {% if test.condition_3 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <input type="text" name="sinput_3" value="{{ test.sinput_3 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-1">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                  </div>
+            </div>
+	    <div class="condition-row mb-2 row" data-id="cond_4" {% if test.element_4 == "None" %}style="display: none;"{% endif %}>
+                  <div class="col-sm-2">
+                    <select name="element_4" class="form-control">
+                        <option value="" {% if test.element_4 == "None" %}selected{% endif %}></option>
+			{% for element in elements %}
+                                <option {% if test.element_4 == element.name %}selected{% endif %} >{{ element.name }}</option>
+                        {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-3">
+                          <input type="text" name="input_4" value="{{ test.input_4 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="selement_4" class="form-control">
+                         <option value="" {% if test.selement_4 == "None" %}selected{% endif %}></option>
+			 {% for selement in selements %}
+			 	<option {% if test.selement_4 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="condition_4" class="form-control">
+                         <option value="" {% if test.condition_4 == "None" %}selected{% endif %}></option>
+			 {% for condition in conditions %}
+			 	<option {% if test.condition_2 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <input type="text" name="sinput_4" value="{{ test.sinput_4 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-1">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                  </div>
+            </div>
+	    <div class="condition-row mb-2 row" data-id="cond_5" {% if test.element_5 == "None" %}style="display: none;"{% endif %}>
+                  <div class="col-sm-2">
+                    <select name="element_5" class="form-control">
+                        <option value="" {% if test.element_5 == "None" %}selected{% endif %}></option>
+			{% for element in elements %}
+                                <option {% if test.element_5 == element.name %}selected{% endif %} >{{ element.name }}</option>
+                        {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-3">
+                          <input type="text" name="input_5" value="{{ test.input_5 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="selement_5" class="form-control">
+			 <option value="" {% if test.selement_5 == "None" %}selected{% endif %}></option>
+			 {% for selement in selements %}
+			 	<option {% if test.selement_5 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <select name="condition_5" class="form-control">
+                         <option value="" {% if test.condition_5 == "None" %}selected{% endif %}></option>
+			 {% for condition in conditions %}
+			 	<option {% if test.condition_5 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
+                         {% endfor %}
+                    </select>
+                  </div>
+                  <div class="col-sm-2">
+                    <input type="text" name="sinput_5" value="{{ test.sinput_5 }}" class="form-control">
+                  </div>
+                  <div class="col-sm-1">
+                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
+                        <i class="bi bi-trash"></i> Delete
+                    </button>
+                  </div>
+            </div>
+              <button type="button" class="btn btn-primary btn-sm" onclick="addCondition()">
+                <i class="bi bi-plus-square-dotted"></i> 
+		Add Condition
+              </button>
+              <div class="form-group mt-3">
+                <button type="submit" class="btn btn-success">Save Test</button>
+                <a href="/tests" class="btn btn-secondary">Cancel</a>
+              </div>
+	    </form>
+            </div>
+          </div>
+        </div>
+    </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+
+<script>
+ const maxConditions = 5;
+    let usedIndexes = new Set([1]); // First visible row is in use
+
+    function getNextAvailableIndex() {
+        for (let i = 1; i < maxConditions+1; i++) {
+            if (!usedIndexes.has(i)) {
+                return i;
+            }
+        }
+        return -1;
+    }
+
+    function addCondition() {
+      if (usedIndexes.size >= maxConditions) {
+          alert("Maximum number of conditions reached.");
+          return;
+      }
+
+      const conditionId = getNextAvailableIndex();
+      if (conditionId === -1) return;
+
+      usedIndexes.add(conditionId);
+      const row = document.querySelector(`.condition-row[data-id="cond_${conditionId}"]`);
+      if (row) {
+        row.style.display = 'flex'; // Or 'block', depending on layout
+      }
+    }
+	
+ 	function removeCondition(button) {
+ 	 const row = button.closest('.condition-row');
+  	 if (row) {
+    	   const dataId = row.getAttribute('data-id');
+    	   const conditionId = parseInt(dataId.replace('cond_', ''));
+
+    	   // Clear all inputs inside the row
+    	   row.querySelectorAll('input, select').forEach(el => {
+      	     if (el.tagName === 'SELECT') {
+        	el.selectedIndex = 0; // reset dropdown
+      	     } else {
+       	 	el.value = ''; // clear input
+      	     } 
+    	   });
+
+    	   row.style.display = 'none';
+    	   usedIndexes.delete(conditionId);
+  	 }
+	}
+
+</script>
+
+{% endblock %}

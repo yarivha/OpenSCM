@@ -1,0 +1,191 @@
+use serde::{Deserialize, Serialize};
+use sqlx::FromRow;
+
+#[derive(Deserialize)]
+pub struct ErrorQuery {
+    pub error_message: Option<String>,
+    pub success_message: Option<String>,
+}
+
+
+#[derive(Deserialize, Serialize)]
+pub struct User {
+    pub id: i32,
+    pub username: String,
+    pub role: String,
+    pub name: Option<String>,
+    pub email: Option<String>,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct System {
+    pub id: Option<i32>,
+    pub name: String,
+    pub ip: Option<String>,
+    pub os: Option<String>,
+    pub arch: Option<String>,
+    pub status: Option<String>,
+    pub groups: Option<String>,
+    pub auth_signature: Option<String>,
+    pub auth_public_key: Option<String>,
+    pub trust_challenge: Option<String>,
+    pub trust_proof: Option<String>,
+    pub created_date: Option<String>,
+    pub last_seen: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SystemGroup {
+    pub id: Option<i32>,
+    pub name: String,
+    pub description: Option<String>,
+    pub systems: Option<String>,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemInsideGroup {
+    pub system_id: i32,
+    pub group_id:  i32,
+}
+
+#[derive(Debug, Serialize, Deserialize, FromRow)]
+pub struct Test {
+    pub id: Option<i32>,
+    pub name: String,
+    pub description: Option<String>,
+    pub rational: Option<String>,
+    pub remediation: Option<String>,
+    pub severity: Option<String>,
+    pub filter: Option<String>,
+    pub element_1: Option<String>,
+    pub input_1: Option<String>,
+    pub selement_1: Option<String>,
+    pub condition_1: Option<String>,
+    pub sinput_1: Option<String>,
+    pub element_2: Option<String>,
+    pub input_2: Option<String>,
+    pub selement_2: Option<String>,
+    pub condition_2: Option<String>,
+    pub sinput_2: Option<String>,
+    pub element_3: Option<String>,
+    pub input_3: Option<String>,
+    pub selement_3: Option<String>,
+    pub condition_3: Option<String>,
+    pub sinput_3: Option<String>,
+    pub element_4: Option<String>,
+    pub input_4: Option<String>,
+    pub selement_4: Option<String>,
+    pub condition_4: Option<String>,
+    pub sinput_4: Option<String>,
+    pub element_5: Option<String>,
+    pub input_5: Option<String>,
+    pub selement_5: Option<String>,
+    pub condition_5: Option<String>,
+    pub sinput_5: Option<String>,
+}
+
+
+#[derive(Serialize, Deserialize)]
+pub struct Policy {
+    pub id: Option<i32>,
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct TestInsidePolicy {
+    pub policy_id: i32,
+    pub test_id:  i32,
+}
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemInsidePolicy {
+    pub policy_id: i32,
+    pub group_id:  i32,
+}
+
+#[derive(Debug, serde::Serialize)]
+pub struct Notification {
+    pub id: i64,
+    pub r#type: String,
+    pub timestamp: String,
+    pub message: String,
+}
+
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct UnsignedPayload {
+    pub id: String,
+    pub hostname: String,
+    pub ip: String,
+    pub os: String,
+    pub arch: String,
+    pub timestamp: String,
+    pub public_key: String,
+}
+
+
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SignedRequest<T> {
+    pub payload: T,
+    pub signature: String,
+}
+
+
+#[derive(Deserialize)]
+pub struct SignedResult {
+    pub payload: ComplianceResult,
+    pub signature: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct ComplianceResult {
+    pub client_id: i64,
+    pub test_id: i64,
+    pub result: String,
+}
+
+#[derive(Serialize, Deserialize, FromRow)]
+pub struct SystemCompliance {
+    pub system_name: String,
+    pub os: String,
+    pub compliance: f64,
+    pub passed_tests: i64,
+    pub failed_tests: i64,
+}
+
+#[derive(FromRow, Serialize, Deserialize)]
+pub struct PolicyCompliance {
+    policy_name: String,
+    policy_version: String,
+    compliance: f64,
+    passed_systems: i64,
+    failed_systems: i64,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Element {
+    pub id: i32,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+
+#[derive(Serialize, Deserialize)]
+pub struct SElement {
+    pub id: i32,
+    pub name: String,
+    pub description: Option<String>,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct Condition {
+    pub id: i32,
+    pub name: String,
+    pub description: Option<String>,
+}
+

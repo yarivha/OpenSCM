@@ -1,0 +1,101 @@
+{% extends "base.html" %}
+{% block content %}
+
+<!-- Content Wrapper. Contains page content -->
+  <div class="content-wrapper">
+    <!-- Content Header (Page header) -->
+    <div class="content-header">
+      <div class="container-fluid">
+        <div class="row mb-2">
+          <div class="col-sm-6">
+            <h1 class="m-0">Policies</h1>
+          </div><!-- /.col -->
+          <div class="col-sm-6">
+            <ol class="breadcrumb float-sm-right">
+              <li class="breadcrumb-item"><a href="/">Home</a></li>
+              <li class="breadcrumb-item active">Policies</li>
+            </ol>
+          </div><!-- /.col -->
+        </div><!-- /.row -->
+      </div><!-- /.container-fluid -->
+    </div>
+    <!-- /.content-header -->
+
+
+
+{% if error_message %}
+
+<div class="alert alert-danger alert-dismissible">
+ <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+ <h5><i class="icon fas fa-ban"></i> Error</h5>
+ {{error_message}}
+</div>
+
+{% endif %}
+
+{% if success_message %}      
+
+<div class="alert alert-success alert-dismissible">
+  <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+  <h5><i class="icon fas fa-check"></i> Success</h5>
+  {{success_message}}
+</div>
+                  
+{% endif %}   
+
+ <section class="content">
+   <div class="card card-solid">
+     <div class="card-header">
+       <h3 class="card-title">Policies List</h3>
+       <div class="card-tools">
+         <ul class="pagination pagination-sm float-right">
+           <li class="page-item"><a class="page-link" href="/policies/add">New Policy</a></li>
+         </ul>
+       </div>
+     </div>
+        <div class="card-body pb-0">
+          <div class="row">
+	    {% for policy in policies %}
+            <div class="col-12 col-sm-6 col-md-4 d-flex align-items-stretch flex-column">
+	      <div class="card bg-light d-flex flex-fill">
+                <div class="card-header text-muted border-bottom-0">
+		 <b>{{ policy.name }}</b>
+                </div>
+                <div class="card-body pt-0">
+                  <div class="row">
+                    <div class="col-7">
+			    <h2 class="small">Version: {{ policy.version }}</h2>
+			    <p class="text-muted text-sm"><b>About: </b> {{ policy.description }} </p>
+                    </div>
+                    <div class="col-5 text-center">
+                      <i class="nav-icon fas fa-certificate fa-5x"></i>
+                    </div>
+                  </div>
+                </div>
+                <div class="card-footer">
+                  <div class="text-right">
+		    <a class="btn btn-info btn-sm" href="/policies/edit/{{ policy.id }}">
+                      <i class="fas fa-pencil-alt"></i>
+                         Edit
+                    </a>
+                    <a class="btn btn-danger btn-sm" onclick="return confirm('Delete Policy?')" href="/policies/delete/{{ policy.id}}">
+                      <i class="fas fa-trash"></i>
+                         Delete
+                    </a>
+		    <a href="/policies/run/{{ policy.id }}" class="btn btn-sm btn-primary">
+                      <i class="fas fa-user"></i> Run Policy
+                    </a>
+		    <a href="#" class="btn btn-warning btn-primary">
+                      <i class="fas fa-calendar"></i> Scheduler
+                    </a>
+                  </div>
+                </div>
+	      </div>	
+	    </div>
+	     {% endfor %}
+	</div>
+      </div>
+    </div>
+  </div
+</section>
+{% endblock %}
