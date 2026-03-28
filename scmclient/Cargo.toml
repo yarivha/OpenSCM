@@ -6,6 +6,7 @@ authors = ["Yariv Hakim <yariv@openscm.io>"]
 
 [package.metadata.deb]
 name = "scmclient"
+revision = "1"
 maintainer = "Yariv Hakim <yariv@openscm.io>"
 copyright = "2026, OpenSCM"
 license-file = ["LICENSE", "0"]
