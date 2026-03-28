@@ -2,11 +2,11 @@
 name = "scmclient"
 version = "0.0.1"
 edition = "2024"
-authors = "Yariv Hakim <yariv@openscm.io>"
+authors = ["Yariv Hakim <yariv@openscm.io>"]
 
 [package.metadata.deb]
 name = "scmclient"
-maintainer = ["Yariv Hakim <yariv@openscm.io>"]
+maintainer = "Yariv Hakim <yariv@openscm.io>"
 copyright = "2026, OpenSCM"
 license-file = ["LICENSE", "0"]
 # This prevents apt from overwriting the server IP during updates
