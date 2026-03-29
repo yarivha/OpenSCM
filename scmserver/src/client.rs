@@ -34,11 +34,12 @@ pub async fn send(
     // =========================
     if id == 0 {
         let res = sqlx::query(
-            "INSERT INTO systems (key, name, os, ip, arch, created_date, last_seen, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)"
+            "INSERT INTO systems (key, name, ver, os, ip, arch, created_date, last_seen, status)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
         )
         .bind(&payload.public_key)
         .bind(&payload.hostname)
+        .bind(&payload.ver)
         .bind(&payload.os)
         .bind(&payload.ip)
         .bind(&payload.arch)
@@ -173,9 +174,10 @@ pub async fn send(
 
     // Update system
     let _ = sqlx::query(
-        "UPDATE systems SET name=?, os=?, ip=?, arch=?, last_seen=? WHERE id=?"
+        "UPDATE systems SET name=?, ver=?,  os=?, ip=?, arch=?, last_seen=? WHERE id=?"
     )
     .bind(&payload.hostname)
+    .bind(&payload.ver)
     .bind(&payload.os)
     .bind(&payload.ip)
     .bind(&payload.arch)

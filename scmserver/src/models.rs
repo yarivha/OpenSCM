@@ -22,6 +22,7 @@ pub struct User {
 pub struct System {
     pub id: Option<i32>,
     pub name: String,
+    pub ver: Option<String>,
     pub ip: Option<String>,
     pub os: Option<String>,
     pub arch: Option<String>,
@@ -121,6 +122,7 @@ pub struct Notification {
 pub struct UnsignedPayload {
     pub id: String,
     pub hostname: String,
+    pub ver: String,
     pub ip: String,
     pub os: String,
     pub arch: String,

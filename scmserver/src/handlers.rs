@@ -277,6 +277,7 @@ pub async fn systems(
                 SELECT
                     s.id AS system_id,
                     COALESCE(s.name, 'NA') AS system_name,
+                    COALESCE(s.ver, 'NA') AS system_ver,
                     COALESCE(s.ip, 'NA') AS system_ip,
                     COALESCE(s.os, 'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
@@ -310,6 +311,7 @@ pub async fn systems(
                 SELECT
                     s.id AS system_id,
                     COALESCE(s.name, 'NA') AS system_name,
+                    COALESCE(s.ver, 'NA') AS system_ver,
                     COALESCE(s.ip, 'NA') AS system_ip,
                     COALESCE(s.os, 'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
@@ -341,6 +343,7 @@ pub async fn systems(
         .map(|row| System {
             id: row.try_get("system_id").unwrap(),
             name: row.try_get("system_name").unwrap(),
+            ver: row.try_get("system_ver").unwrap(),
             ip: row.try_get("system_ip").unwrap(),
             os: row.try_get("system_os").unwrap(),
             arch: row.try_get("system_arch").unwrap(),
@@ -413,7 +416,7 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
 
     // capture system
     let row = sqlx::query("
-                SELECT id,name,ip,os,arch,status from systems where id=?")
+                SELECT id,name,ver,ip,os,arch,status from systems where id=?")
     .bind(id)
     .fetch_one(&*pool)
     .await
@@ -422,6 +425,7 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
     let system = System {
             id: row.try_get("id").unwrap(),
             name: row.try_get("name").unwrap(),
+            ver: row.try_get("ver").unwrap(),
             ip: row.try_get("ip").unwrap(),
             os: row.try_get("os").unwrap(),
             arch: row.try_get("arch").unwrap(),
@@ -584,6 +588,7 @@ pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>,
         SELECT
             s.id AS system_id,
             COALESCE(s.name, 'NA') AS system_name,
+            COALESCE(s.ver, 'NA') AS system_ver,
             COALESCE(s.ip, 'NA') AS system_ip,
             COALESCE(s.os, 'NA') AS system_os,
             COALESCE(s.arch, 'NA') AS system_arch,
@@ -609,6 +614,7 @@ pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>,
         System {
             id: row.try_get("system_id").unwrap(),
             name: row.try_get("system_name").unwrap(),
+            ver: row.try_get("system_ver").unwrap(),
             ip: row.try_get("system_ip").unwrap(),
             os: row.try_get("system_os").unwrap(),
             arch: row.try_get("system_arch").unwrap(),
@@ -689,6 +695,7 @@ pub async fn system_groups_add(auth: AuthSession, pool: Extension<SqlitePool>, t
         System {
             id: row.get("id"), // Use try_get for Option and handle potential errors
             name: row.get("name"),
+            ver: None,
             ip: None,
             os: None, 
             arch: None,
@@ -876,6 +883,7 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
         System {
             id: row.get("id"), // Use try_get for Option and handle potential errors
             name: row.get("name"),
+            ver: None,
             ip: None,
             os: None, 
             arch: None,

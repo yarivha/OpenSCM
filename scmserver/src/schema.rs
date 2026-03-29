@@ -38,6 +38,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS systems (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name TEXT,
+            ver TEXT,
             key TEXT,
             ip TEXT,
             os TEXT,

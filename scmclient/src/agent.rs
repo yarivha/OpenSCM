@@ -26,7 +26,7 @@ pub async fn send_system_info(
     let my_hostname = gethostname::gethostname().to_string_lossy().into_owned();
     let my_os = format!("{} {}", sys_info::os_type()?, sys_info::os_release()?);
     let my_arch = std::env::consts::ARCH.to_string();
-    let my_ver = env!("CARGO_PKG_VERSION");
+    let my_ver = env!("CARGO_PKG_VERSION").to_string();
 
     let client = reqwest::Client::builder()
         .timeout(std::time::Duration::from_secs(10))
@@ -58,6 +58,7 @@ pub async fn send_system_info(
         let unsigned_payload = UnsignedPayload {
             id: current_id.clone(),
             hostname: my_hostname.clone(),
+            ver: my_ver.clone(),
             ip: my_local_ip.clone(),
             os: my_os.clone(),
             arch: my_arch.clone(),

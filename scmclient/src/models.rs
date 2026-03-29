@@ -5,6 +5,7 @@ use serde::{Serialize, Deserialize};
 pub struct System {
     pub id: String,
     pub name: String,
+    pub ver: String,
     pub ip: String,
     pub os: String,
     pub arch: String,
@@ -16,6 +17,7 @@ pub struct System {
 pub struct UnsignedPayload {
     pub id: String,
     pub hostname: String,
+    pub ver: String,
     pub ip: String,
     pub os: String,
     pub arch: String,
