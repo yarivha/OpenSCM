@@ -192,7 +192,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .layer(Extension(config.clone()));
 
     // Start server
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8080));
+    let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
     info!("Listening on http://{}", addr);
     axum_server::bind(addr)
         .serve(app.into_make_service())
