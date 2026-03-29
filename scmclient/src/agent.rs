@@ -42,8 +42,8 @@ pub async fn send_system_info(
 
     // === Keys ===
     let keys_path = config.key.key_path.as_ref().expect("key_path is missing");
-    let public_path = PathBuf::from(keys_path).join("scmagent.pub");
-    let private_path = PathBuf::from(keys_path).join("scmagent.key");
+    let public_path = PathBuf::from(keys_path).join("scmclient.pub");
+    let private_path = PathBuf::from(keys_path).join("scmclient.key");
 
     let public_base64 = fs::read_to_string(&public_path)?.trim().to_string();
     let private_base64 = fs::read_to_string(&private_path)?.trim().to_string();

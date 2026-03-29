@@ -8,7 +8,7 @@ use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberI
 use tracing::{debug, info, warn, error};
 use std::path::Path;
 
-static CONFIG_FILE: &str = "scmagent.config";
+static CONFIG_FILE: &str = "scmclient.config";
 
 #[tokio::main]
 async fn main() {

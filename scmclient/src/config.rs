@@ -51,8 +51,8 @@ impl Default for Config {
             },
             key: KeyPair {
                 key_path: Some("./keys".to_string()),
-                pub_key: Some("scmagent.pub".to_string()),
-                priv_key: Some("scmagent.key".to_string()),
+                pub_key: Some("scmclient.pub".to_string()),
+                priv_key: Some("scmclient.key".to_string()),
                 server_key: Some("scmserver.pub".to_string()),
             },
         }
