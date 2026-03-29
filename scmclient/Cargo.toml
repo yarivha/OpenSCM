@@ -41,7 +41,12 @@ chmod 755 /var/log/openscm
 systemctl daemon-reload
 systemctl enable scmclient.service
 systemctl restart scmclient.service
-echo "RPM: post_install_script executed."
+
+echo "============================================================"
+echo "       SCMCLIENT INSTALLATION COMPLETE"
+echo "============================================================"
+echo " Please update: /opt/openscm/scmclient.config"
+echo "============================================================"
 """
 
 pre_uninstall_script = """
