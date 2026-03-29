@@ -7,6 +7,7 @@ license = "Apache-2.0"
 description = "Client for Open Security Compliance Manager"
 
 
+##### Debian metadata #####
 [package.metadata.deb]
 name = "scmclient"
 revision = "2"
@@ -21,66 +22,46 @@ assets = [
     ["debian/scmclient.service", "/lib/systemd/system/scmclient.service", "644"],
 ]
 
-
+##### Redhat metadata #####
 [package.metadata.generate-rpm]
+# Basic Metadata
 package = "scmclient"
-release = "2"
-# This ensures the binary is stripped of debug symbols to save space
+name = "scmclient"
+version = "0.0.2"
+release = "5"
+summary = "OpenSCM Client"
+license = "Apache-2.0"
 strip = true
-assets = [
-    { source = "target/release/scmclient", dest = "/opt/openscm/scmclient", mode = "755" },
-    { source = "redhat/scmclient.service", dest = "/lib/systemd/system/scmclient.service", mode = "644" },
-]
 
-[package.metadata.generate-rpm.cargo]
-buildflags = ["--release"]
-
-[package.metadata.generate-rpm.targets]
-# Maps the compiled binary to the install path
-scmclient = { path = "/opt/openscm/scmclient" }
-
-[package.metadata.generate-rpm.files]
-# Maps your existing service and config files
-"/lib/systemd/system/scmclient.service" = { source = "redhat/scmclient.service", mode = "644" }
-
-[package.metadata.generate-rpm.scripts]
-# RPM equivalent of postinst
-post_install = """
-# Setup log dir
+post_install_script = """
 if [ ! -d /var/log/openscm ]; then
     mkdir -p /var/log/openscm
 fi
 chmod 755 /var/log/openscm
-
-# Systemd setup
 systemctl daemon-reload
 systemctl enable scmclient.service
 systemctl restart scmclient.service
-
-echo "============================================================"
-echo "       SCMCLIENT INSTALLATION COMPLETE"
-echo "============================================================"
-echo " Please update: /opt/openscm/scmclient.config"
-echo "============================================================"
+echo "RPM: post_install_script executed."
 """
 
-# RPM equivalent of prerm
-pre_uninstall = """
+pre_uninstall_script = """
 if [ $1 -eq 0 ]; then
-    # This block only runs on actual uninstall, not upgrades
     systemctl stop scmclient.service
     systemctl disable scmclient.service
 fi
 """
 
-# RPM equivalent of postrm (cleanup)
-post_uninstall = """
+post_uninstall_script = """
 if [ $1 -eq 0 ]; then
-    # Cleanup logs on total removal
     rm -rf /var/log/openscm
 fi
 systemctl daemon-reload
 """
+
+assets = [
+    { source = "target/release/scmclient", dest = "/opt/openscm/scmclient", mode = "755" },
+    { source = "redhat/scmclient.service", dest = "/lib/systemd/system/scmclient.service", mode = "644" },
+]
 
 
 [dependencies]
