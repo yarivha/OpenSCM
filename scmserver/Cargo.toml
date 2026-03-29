@@ -10,7 +10,7 @@ description = "Server for Open Security Compliance Manager"
 ##### Debian metadata #####
 [package.metadata.deb]
 name = "scmserver"
-revision = "2"
+revision = "3"
 maintainer = "Yariv Hakim <yariv@openscm.io>"
 copyright = "2026, OpenSCM"
 license-file = ["LICENSE", "0"]
@@ -27,7 +27,7 @@ assets = [
 package = "scmserver"
 name = "scmserver"
 version = "0.0.2"
-release = "2"
+release = "3"
 summary = "OpenSCM Server"
 license = "FSL-1.1-ALv2"
 strip = true
