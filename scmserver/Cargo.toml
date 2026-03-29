@@ -2,6 +2,67 @@
 name = "scmserver"
 version = "0.0.2"
 edition = "2024" 
+authors = ["Yariv Hakim <yariv@openscm.io>"]
+license = "Apache-2.0"
+description = "Server for Open Security Compliance Manager"
+
+
+##### Debian metadata #####
+[package.metadata.deb]
+name = "scmserver"
+revision = "1"
+maintainer = "Yariv Hakim <yariv@openscm.io>"
+copyright = "2026, OpenSCM"
+license-file = ["LICENSE", "0"]
+conf-files = ["/opt/openscm/scmserver.config"]
+maintainer-scripts = "debian/"
+assets = [
+    ["target/release/scmserver", "/opt/openscm/scmserver", "755"],
+    ["debian/scmserver.service", "/lib/systemd/system/scmserver.service", "644"],
+]
+
+##### Redhat metadata #####
+[package.metadata.generate-rpm]
+# Basic Metadata
+package = "scmserver"
+name = "scmserver"
+version = "0.0.2"
+release = "1"
+summary = "OpenSCM Server"
+license = "FSL-1.1-ALv2"
+strip = true
+
+post_install_script = """
+if [ ! -d /var/log/openscm ]; then
+    mkdir -p /var/log/openscm
+fi
+chmod 755 /var/log/openscm
+systemctl daemon-reload
+systemctl enable scmserver.service
+systemctl restart scmserver.service
+echo "RPM: post_install_script executed."
+"""
+
+pre_uninstall_script = """
+if [ $1 -eq 0 ]; then
+    systemctl stop scmserver.service
+    systemctl disable scmserver.service
+fi
+"""
+
+post_uninstall_script = """
+if [ $1 -eq 0 ]; then
+    rm -rf /var/log/openscm
+fi
+systemctl daemon-reload
+"""
+
+assets = [
+    { source = "target/release/scmserver", dest = "/opt/openscm/scmserver", mode = "755" },
+    { source = "redhat/scmserver.service", dest = "/lib/systemd/system/scmserver.service", mode = "644" },
+]
+
+
 
 [dependencies]
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
