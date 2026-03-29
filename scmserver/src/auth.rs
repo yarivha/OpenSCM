@@ -56,7 +56,7 @@ where
                 warn!("AuthSession: no session cookie found, redirecting to login.");
             }
 
-            Err(Redirect::to("/login?error_message=Please%20login%20first"))
+            Err(Redirect::to("/login"))
         }
     }
 }
@@ -82,7 +82,7 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>)
     } else {
         info!("Login page rendered.");
     }
-    render_template(&tera, None, "login.html",context, auth).await
+    render_template(&tera, None, "login.html",context, None).await
 }
 
 // login_submit

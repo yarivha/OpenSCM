@@ -38,12 +38,14 @@ pub async fn render_template(
     pool: Option<&SqlitePool>,
     template_name: &str,
     mut context: Context,
-    auth: AuthSession,
+    auth: Option<AuthSession>,
 ) -> Result<Html<String>, StatusCode> {
     // Add common context values
     context.insert("version", env!("CARGO_PKG_VERSION"));
-    context.insert("username", &auth.username);
-    context.insert("role", &auth.role);
+    if let Some(auth) = auth {
+        context.insert("username", &auth.username);
+        context.insert("role", &auth.role);
+    }
 
     if let Some(pool) = pool {
         
@@ -253,7 +255,7 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
     context.insert("policies_count", &policies_count.to_string());
     context.insert("top_failed_systems", &top_failed_systems); 
     context.insert("top_failed_policies", &top_failed_policies);
-    render_template(&tera,Some(&pool), "dashboard.html", context, auth).await
+    render_template(&tera,Some(&pool), "dashboard.html", context, Some(auth)).await
 }
 
 
@@ -363,7 +365,7 @@ pub async fn systems(
         context.insert("error_message", error_message);
     }
     context.insert("systems", &systems);
-    render_template(&tera, Some(&pool), "systems.html", context, auth).await
+    render_template(&tera, Some(&pool), "systems.html", context, Some(auth)).await
 }
 
 // systems_approve
@@ -481,7 +483,7 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
     context.insert("system", &system);
     context.insert("groups", &groups);
     context.insert("systems_in_groups", &systems_in_groups);
-    render_template(&tera, Some(&pool), "systems_edit.html",context, auth).await
+    render_template(&tera, Some(&pool), "systems_edit.html",context, Some(auth)).await
 }
 
 // system_edit_save
@@ -635,7 +637,7 @@ pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>,
         context.insert("error_message", &error_message);
     }
     context.insert("systems", &systems);
-    render_template(&tera,Some(&pool), "systems.html", context, auth).await
+    render_template(&tera,Some(&pool), "systems.html", context, Some(auth)).await
 }
 
 
@@ -678,7 +680,7 @@ pub async fn system_groups(auth: AuthSession, Query(query): Query<ErrorQuery>, p
         context.insert("error_message", &error_message);
     }
     context.insert("system_groups", &system_groups);
-    render_template(&tera,Some(&pool), "system_groups.html", context, auth).await
+    render_template(&tera,Some(&pool), "system_groups.html", context, Some(auth)).await
 }
 
 
@@ -712,7 +714,7 @@ pub async fn system_groups_add(auth: AuthSession, pool: Extension<SqlitePool>, t
 
     let mut context = Context::new();
     context.insert("systems", &systems);
-    render_template(&tera,Some(&pool), "system_groups_add.html", context, auth).await
+    render_template(&tera,Some(&pool), "system_groups_add.html", context, Some(auth)).await
 }
 
 //system_groups_add_save
@@ -918,7 +920,7 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
     context.insert("group", &group);
     context.insert("systems", &systems);
     context.insert("systems_in_groups", &systems_in_groups);
-    render_template(&tera, Some(&pool), "system_groups_edit.html", context, auth).await
+    render_template(&tera, Some(&pool), "system_groups_edit.html", context, Some(auth)).await
 }
 
 
@@ -1083,7 +1085,7 @@ pub async fn tests(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Exte
     context.insert("tests", &tests);
 
     // Use the generic render function to render the template with global data
-    render_template(&tera, Some(&pool), "tests.html", context, auth).await
+    render_template(&tera, Some(&pool), "tests.html", context, Some(auth)).await
 }
 
 
@@ -1143,7 +1145,7 @@ pub async fn tests_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
     context.insert("elements", &elements);
     context.insert("selements", &selements);
     context.insert("conditions", &conditions);
-    render_template(&tera,Some(&pool), "tests_add.html", context, auth).await
+    render_template(&tera,Some(&pool), "tests_add.html", context, Some(auth)).await
 }
 
 
@@ -1445,7 +1447,7 @@ pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<S
     context.insert("elements", &elements);
     context.insert("selements", &selements);
     context.insert("conditions", &conditions);
-    render_template(&tera, Some(&pool), "tests_edit.html", context, auth).await
+    render_template(&tera, Some(&pool), "tests_edit.html", context, Some(auth)).await
 }
 
 
@@ -1632,7 +1634,7 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
         context.insert("success_message", &success_message);
     }
     context.insert("policies", &policies);
-    render_template(&tera, Some(&pool), "policies.html", context, auth).await
+    render_template(&tera, Some(&pool), "policies.html", context, Some(auth)).await
 }
 
 
@@ -1701,7 +1703,7 @@ pub async fn policies_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: 
     let mut context = Context::new();
     context.insert("tests", &tests);
     context.insert("system_groups",&system_groups);
-    render_template(&tera,Some(&pool), "policies_add.html", context, auth).await
+    render_template(&tera,Some(&pool), "policies_add.html", context, Some(auth)).await
 }
 
 
@@ -1947,7 +1949,7 @@ let row = sqlx::query("
     context.insert("system_groups",&system_groups);
     context.insert("tests_in_policy", &tests_in_policy);
     context.insert("systems_in_policy", &systems_in_policy);
-    render_template(&tera,Some(&pool), "policies_edit.html", context, auth).await
+    render_template(&tera,Some(&pool), "policies_edit.html", context, Some(auth)).await
 
 }
 
@@ -2200,7 +2202,7 @@ pub async fn policies_run(
 pub async fn reports(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
     -> Result<Html<String>, StatusCode> {
     let context = Context::new();
-    render_template(&tera,Some(&pool), "reports.html", context, auth).await
+    render_template(&tera,Some(&pool), "reports.html", context, Some(auth)).await
 }
 
 
@@ -2239,7 +2241,7 @@ pub async fn users(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Ext
     context.insert("users", &users);
 
     // Use the generic render function to render the template with global data
-    render_template(&tera,Some(&pool), "users.html", context, auth).await
+    render_template(&tera,Some(&pool), "users.html", context, Some(auth)).await
 }
 
 
@@ -2248,7 +2250,7 @@ pub async fn users(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Ext
 pub async fn users_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
     -> Result<Html<String>, StatusCode> {
     let context = Context::new();
-    render_template(&tera,Some(&pool), "users_add.html", context, auth).await
+    render_template(&tera,Some(&pool), "users_add.html", context, Some(auth)).await
 }
 
 
