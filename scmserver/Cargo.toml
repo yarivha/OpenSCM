@@ -1,6 +1,6 @@
 [package]
-name = "OpenSCMServer"
-version = "0.0.1"
+name = "scmserver"
+version = "0.0.2"
 edition = "2024" 
 
 [dependencies]
