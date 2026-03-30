@@ -11,6 +11,8 @@ description = "Server for Open Security Compliance Manager"
 [package.metadata.deb]
 name = "scmserver"
 revision = "3"
+section = "utils"
+priority = "optional"
 maintainer = "Yariv Hakim <yariv@openscm.io>"
 copyright = "2026, OpenSCM"
 license-file = ["LICENSE", "0"]
