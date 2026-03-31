@@ -32,7 +32,7 @@ where
     fn from_request_parts<'a, 'b>(
         parts: &'a mut Parts,
         _state: &'b S,
-    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send + 'a {
+    ) -> impl Future<Output = Result<Self, <Self as FromRequestParts<S>>::Rejection>> + Send {
         async move {
             let jar = CookieJar::from_headers(&parts.headers);
 
