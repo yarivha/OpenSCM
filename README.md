@@ -80,7 +80,7 @@ EOF
 
 
 
-### Windows
+## 🪟 Windows
 Download the latest installer from openscm.io.
 
 Run the .msi or .exe setup.
@@ -88,7 +88,7 @@ Run the .msi or .exe setup.
 The client can be configured to run as a Windows Service during installation.
 
 
-### FreeBSD
+### 😈 FreeBSD
 Download the latest installer from openscm.io.
 
 Install via PKG:
@@ -98,7 +98,7 @@ pkg install openscm-server
 pkg install openscm-agent
 ```
 
-### MacOS
+### 🍎 MacOS
 Download the latest installer from openscm.io.
 
 Run the .dmg setup.
@@ -120,7 +120,7 @@ log_level   = "info"            # options: error, warn, info, debug
 ```
 
 
-### Server Configuration 
+### 🌐 Server Configuration 
 Default location: `/opt/openscm/scmserver.config` (Linux/Unix) or the installation root (Windows).
 
 ```toml
@@ -150,8 +150,7 @@ The OpenSCM server handles authentication through secure session cookies. For en
 * Periodically audit the user list within the dashboard to remove inactive accounts.
 
 
-
-## Project Structure
+## 📂 Project Structure
 
 - `src/` - Server source code
   - `db.rs` - Database operations
@@ -164,14 +163,21 @@ The OpenSCM server handles authentication through secure session cookies. For en
 - `redhat/`    - RedHat OS configuration files
 - `static/` - Static assets (CSS, JS, images)
 
-## Contributing
+
+## 📑 Documentation
+Before opening an issue, please check our official documentation at [www.openscm.io/docs](https://www.openscm.io/docs) for deep dives into:
+*   Installation and configuration.
+*   Writing compliance tests.
+*   Managing server and client in production.
+
+## 🤝 Contributing
 
 1. Fork the repository
 2. Create a feature branch
 3. Commit your changes
 4. Push to the branch
 
-## Support
+## 🛡️ Support
 
 For support, please open an issue in the GitHub repository.
 
