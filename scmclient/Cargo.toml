@@ -10,7 +10,7 @@ description = "Client for Open Security Compliance Manager"
 ##### Debian metadata #####
 [package.metadata.deb]
 name = "scmclient"
-revision = "0"
+revision = "1"
 section = "utils"
 priority = "optional"
 maintainer = "Yariv Hakim <yariv@openscm.io>"
@@ -30,7 +30,7 @@ assets = [
 package = "scmclient"
 name = "scmclient"
 version = "0.0.3"
-release = "0"
+release = "1"
 summary = "OpenSCM Client"
 license = "Apache-2.0"
 strip = true
