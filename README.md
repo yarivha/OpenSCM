@@ -149,20 +149,36 @@ The OpenSCM server handles authentication through secure session cookies. For en
 * Ensure the server is hosted behind a reverse proxy (like Nginx or Caddy) with **HTTPS** enabled.
 * Periodically audit the user list within the dashboard to remove inactive accounts.
 
+---
 
-## 📂 Project Structure
+## 🛡️ Privacy & Security
 
-- `src/` - Server source code
-  - `db.rs` - Database operations
-  - `handlers.rs` - Request handlers
-  - `models.rs` - Data models
-  - `schema.rs` - Database schema initialization
-  - `main.rs` - Application entry point
-- `templates/` - HTML templates using Tera
-- `debian/`    - Debian OS configuration files
-- `redhat/`    - RedHat OS configuration files
-- `static/` - Static assets (CSS, JS, images)
+OpenSCM is built with a "Security-First" philosophy, ensuring that monitoring your infrastructure does not create new vulnerabilities.
 
+### 🔒 Data Integrity & Encryption
+*   **End-to-End Protection:** All payloads exchanged between the Agent (Client) and the Server are cryptographically **signed and encrypted**. This prevents man-in-the-middle (MITM) attacks and ensures data authenticity.
+*   **Mutual Authentication:** 
+    *   **Approved Servers only:** The Agent will only accept test requests from a verified and authorized OpenSCM Server.
+    *   **Approved Clients only:** The Server will only ingest results from registered and authenticated Agents.
+
+### 🙈 Privacy-Preserving Audits
+*   **Minimal Data Leakage:** OpenSCM is designed to respect data sovereignty. Raw sensitive data (such as configuration files or database contents) **never leaves the client machine**. 
+*   **Result-Only Reporting:** The agent only transmits the final status of a compliance test—typically expressed as a simple boolean or state: `True` (Pass), `False` (Fail), or `NA` (Not Applicable).
+
+### ⚡ Memory Safety
+*   **Rust-Powered:** Both the Client and the Server are written in **Rust**, providing compile-time guarantees for memory safety. This eliminates common security flaws such as buffer overflows, use-after-free, and segmentation faults that are often exploited in C/C++ based security tools.
+
+### 👥 Role-Based Access Control (RBAC)
+Access to the Management Dashboard is strictly governed by user roles. Visibility and actions are restricted based on the following hierarchy:
+
+| Role | Permissions |
+| :--- | :--- |
+| **Administrator** | Full system access, user management, and global configurations. |
+| **Editor** | Can create, modify, and manage compliance tests and policies. |
+| **Runner** | Authorized to trigger/execute tests on specific system groups. |
+| **Viewer** | Read-only access to dashboards, inventory, and compliance reports. |
+
+---
 
 ## 📑 Documentation
 Before opening an issue, please check our official documentation at [www.openscm.io/docs](https://www.openscm.io/docs) for deep dives into:
