@@ -46,8 +46,8 @@ OpenSCM provides native packages via our official stable repositories for easy m
 ### 🐧 Ubuntu / Debian
 **1. Setup the Repository:**
 ```bash
-curl -sS [https://repo.openscm.io/openscm.gpg](https://repo.openscm.io/openscm.gpg) | sudo gpg --dearmor -o /usr/share/keyrings/openscm.gpg
-echo "deb [signed-by=/usr/share/keyrings/openscm.gpg] [https://repo.openscm.io/stable/debian](https://repo.openscm.io/stable/debian) stable main" | sudo tee /etc/apt/sources.list.d/openscm.list
+curl -sS https://repo.openscm.io/openscm.gpg | sudo gpg --dearmor -o /usr/share/keyrings/openscm.gpg
+echo "deb [signed-by=/usr/share/keyrings/openscm.gpg] https://repo.openscm.io/stable/debian stable main" | sudo tee /etc/apt/sources.list.d/openscm.list
 sudo apt update
 ```
 
@@ -65,10 +65,10 @@ sudo apt update
 sudo tee /etc/yum.repos.d/openscm.repo <<EOF
 [openscm]
 name=OpenSCM Stable
-baseurl=[https://repo.openscm.io/stable/redhat/](https://repo.openscm.io/stable/redhat/)
+baseurl=https://repo.openscm.io/stable/redhat/
 enabled=1
 gpgcheck=1
-gpgkey=[https://repo.openscm.io/openscm.gpg](https://repo.openscm.io/openscm.gpg)
+gpgkey=https://repo.openscm.io/openscm.gpg
 EOF
 ```
 
