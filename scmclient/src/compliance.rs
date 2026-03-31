@@ -1,4 +1,4 @@
-use tracing::{info, warn, error};
+use tracing::error;
 use std::path::Path;
 use std::fs;
 use semver::Version;
