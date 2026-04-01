@@ -2,7 +2,6 @@
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
-use serde_yml;
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::error::Error;
