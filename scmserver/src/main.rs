@@ -15,7 +15,7 @@ use axum::Router;
 use axum::http::{header, StatusCode};
 use axum::body::{Bytes, Body};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
-use tracing::{debug, info, warn};
+use tracing::{debug, info, warn, error};
 use std::sync::Arc;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use std::str::FromStr;
@@ -29,13 +29,28 @@ use crate::schema::*;
 use crate::auth::*;
 use crate::client::*;
 
-// Config file name
-static CONFIG_FILE: &str = "scmserver.config";
 
 // Embedded templates
 static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 // Embedded static files
 static STATIC_FILES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/static");
+
+// get config_path
+pub fn get_config_path() -> PathBuf {
+    if let Ok(env_path) = std::env::var("SCM_SERVER_CONFIG_PATH") {
+        return PathBuf::from(env_path);
+    }
+
+    #[cfg(not(windows))]
+    return PathBuf::from("/etc/openscm/scmserver.config");
+
+    #[cfg(windows)]
+    {
+        let prog_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
+        return PathBuf::from(prog_data).join("OpenSCM").join("scmserver.config");
+    }
+}
+
 
 // Initialize Tera from embedded templates
 pub fn init_tera() -> Result<Tera, tera::Error> {
@@ -85,19 +100,31 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     info!("Starting SCM Server...");
-
+    
+    let config_path = get_config_path();
     // Ensure config file exists
-    let config_path = Path::new(CONFIG_FILE);
+
     if !config_path.exists() {
-        warn!("Config '{}' not found. Creating default.", CONFIG_FILE);
-        config::Config::default().save_to(CONFIG_FILE)
+        warn!("Config '{:?}' not found. Creating default.", config_path.display());
+
+    // creating config
+    if let Some(parent) = config_path.parent() {
+        std::fs::create_dir_all(parent).map_err(|e| {
+            error!("Failed to create config directory {:?}: {}", parent, e);
+            Box::<dyn Error>::from(e)
+        })?;
+    }
+
+    config::Config::default().save_to(&config_path)
             .map_err(|e| Box::<dyn Error>::from(e))?;
     }
 
-    // Load config
-    let config = config::load_and_validate_config(CONFIG_FILE)
+    // load config
+    let config = config::load_and_validate_config(&config_path)
         .map_err(|e| Box::<dyn Error>::from(e))?;
-    info!("Config '{}' loaded successfully", CONFIG_FILE);
+
+    info!("Config {:?} loaded successfully", config_path);
+
 
     // Apply log level from config
     let level = config.server.loglevel.as_deref().unwrap_or("info");
