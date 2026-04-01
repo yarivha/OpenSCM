@@ -48,7 +48,6 @@ impl Default for Config {
             .unwrap_or_else(|| PathBuf::from("."));
 
         let keys_path = base_dir.join("keys").to_string_lossy().into_owned();
-        let db_path = base_dir.join("scm.db").to_string_lossy().into_owned();
 
         Self {
             server: ServerConfig {
@@ -56,7 +55,7 @@ impl Default for Config {
                 loglevel: Some("info".to_string()),
             },
             database: DatabaseConfig {
-                path: db_path, // הנתיב יהיה מסונכרן למיקום הקונפיג
+                path: "scm.db".to_string(),
             },
             key: KeyPair {
                 key_path: Some(keys_path), // הנתיב יהיה מסונכרן למיקום הקונפיג
