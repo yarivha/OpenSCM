@@ -1,0 +1,32 @@
+#!/bin/sh
+
+APP_NAME="scmserver"
+LOG_DIR="/var/log/openscm"
+
+if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
+
+    # 1. Create Log Directory
+    if [ ! -d "$LOG_DIR" ]; then
+        mkdir -p "$LOG_DIR"
+    fi
+    chmod 755 "$LOG_DIR"
+
+    if [ -d /run/systemd/system ]; then
+        systemctl --system daemon-reload >/dev/null 2>&1 || true
+        systemctl enable "$APP_NAME.service" >/dev/null 2>&1 || true
+        systemctl restart "$APP_NAME.service" >/dev/null 2>&1 || true
+    fi
+
+    echo "============================================================"
+    echo "       $APP_NAME INSTALLATION COMPLETE"
+    echo "============================================================"
+    echo " Please update: /opt/openscm/scmclient.config"
+    echo ""
+    echo " Then restart the service:"
+    echo "   sudo systemctl restart $APP_NAME.service"
+    echo "============================================================"
+    echo ""
+fi
+
+exit 0
+

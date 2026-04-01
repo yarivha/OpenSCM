@@ -1,74 +1,11 @@
 [package]
 name = "scmclient"
 version = "0.0.3"
+release = "2"
 edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "Apache-2.0"
 description = "Client for Open Security Compliance Manager"
-
-
-##### Debian metadata #####
-[package.metadata.deb]
-name = "scmclient"
-revision = "1"
-section = "utils"
-priority = "optional"
-maintainer = "Yariv Hakim <yariv@openscm.io>"
-copyright = "2026, OpenSCM"
-license-file = ["LICENSE", "0"]
-# This prevents apt from overwriting the server IP during updates
-conf-files = ["/opt/openscm/scmclient.config"]
-maintainer-scripts = "debian/"
-assets = [
-    ["target/release/scmclient", "/opt/openscm/scmclient", "755"],
-    ["debian/scmclient.service", "/lib/systemd/system/scmclient.service", "644"],
-]
-
-##### Redhat metadata #####
-[package.metadata.generate-rpm]
-# Basic Metadata
-package = "scmclient"
-name = "scmclient"
-version = "0.0.3"
-release = "1"
-summary = "OpenSCM Client"
-license = "Apache-2.0"
-strip = true
-
-post_install_script = """
-if [ ! -d /var/log/openscm ]; then
-    mkdir -p /var/log/openscm
-fi
-chmod 755 /var/log/openscm
-systemctl daemon-reload
-systemctl enable scmclient.service
-systemctl restart scmclient.service
-
-echo "============================================================"
-echo "       SCMCLIENT INSTALLATION COMPLETE"
-echo "============================================================"
-echo " Please update: /opt/openscm/scmclient.config"
-echo "============================================================"
-"""
-
-pre_uninstall_script = """
-if [ $1 -eq 0 ]; then
-    systemctl stop scmclient.service
-    systemctl disable scmclient.service
-fi
-"""
-
-post_uninstall_script = """
-if [ $1 -eq 0 ]; then
-    rm -rf /var/log/openscm
-fi
-systemctl daemon-reload
-"""
-
-assets = [
-    { source = "target/release/scmclient", dest = "/opt/openscm/scmclient", mode = "755" },
-    { source = "redhat/scmclient.service", dest = "/lib/systemd/system/scmclient.service", mode = "644" },
-]
 
 
 [dependencies]

@@ -1,0 +1,16 @@
+#!/bin/sh
+
+if [ -x /usr/sbin/sysrc ]; then
+    /usr/sbin/sysrc scmclient_enable="YES"
+else
+    echo 'scmclient_enable="YES"' >> /etc/rc.conf
+fi
+
+chmod 700 /var/db/openscm
+chmod 755 /usr/local/etc/openscm/certs
+
+echo "Starting scmclient service..."
+service scmclient start || echo "Failed to start service, please check logs."
+
+exit 0
+
