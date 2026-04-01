@@ -2,12 +2,16 @@
 use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
+use serde_yml;
 use std::fs;
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::error::Error;
 use std::io::Write;
+use std::fs::File;
 use tracing::{info, warn, error};
 use toml;
+
+use crate::get_config_path;
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Config {
@@ -39,6 +43,13 @@ pub struct KeyPair {
 
 impl Default for Config {
     fn default() -> Self {
+
+        let config_dir = get_config_path()
+            .parent()
+            .map(|p| p.to_path_buf())
+            .unwrap_or_else(|| PathBuf::from("."));
+
+        let keys_path = config_dir.join("keys").to_string_lossy().into_owned();
         Self {
             server: ServerConfig {
                 host: Some("127.0.0.1".to_string()),
@@ -50,7 +61,7 @@ impl Default for Config {
                 loglevel: Some("info".to_string()),
             },
             key: KeyPair {
-                key_path: Some("./keys".to_string()),
+                key_path: Some(keys_path.to_string()),
                 pub_key: Some("scmclient.pub".to_string()),
                 priv_key: Some("scmclient.key".to_string()),
                 server_key: Some("scmserver.pub".to_string()),
@@ -59,98 +70,79 @@ impl Default for Config {
     }
 }
 
-pub fn load_and_validate_config(file_path: &str) -> Result<Config, Box<dyn Error>> {
-    let contents = fs::read_to_string(file_path)?;
-    let mut config: Config = toml::from_str(&contents)?;
 
+use std::io::Read; // חשוב לצורך קריאת הקובץ למחרוזת
+
+pub fn load_and_validate_config(file_path: &Path) -> Result<Config, Box<dyn Error>> {
     let mut valid = true;
 
+    // Open config file
+    let mut file = File::open(file_path).map_err(|e| {
+        format!("Could not open config file {:?}: {}", file_path, e)
+    })?;
+
+    // Read config file
+    let mut content = String::new();
+    file.read_to_string(&mut content).map_err(|e| {
+        format!("Failed to read config file {:?}: {}", file_path, e)
+    })?;
+
+    // Parse config file
+    let mut config: Config = toml::from_str(&content).map_err(|e| {
+        format!("Failed to parse TOML in {:?}: {}", file_path, e)
+    })?;
+
+
+
+    
     // Port
-    config.server.port = match &config.server.port {
-        Some(p) => match p.parse::<u16>() {
-            Ok(port) if (1..=65000).contains(&port) => Some(p.clone()),
-            _ => {
-                error!("Invalid port: {:?}. Must be 1–65000.", p);
-                valid = false;
-                Some("8000".to_string())
-            }
-        },
-        None => {
-            error!("Missing port. Using default.");
-            Some("8000".to_string())
+    if let Some(p) = &config.server.port {
+        if p.parse::<u16>().map_or(true, |port| !(1..=65000).contains(&port)) {
+            error!("Invalid port: {}. Must be 1–65000.", p);
+            valid = false;
         }
-    };
-
-    // Heartbeat
-    config.client.heartbeat_secs = match &config.client.heartbeat_secs {
-        Some(s) => match s.parse::<u64>() {
-            Ok(v) if v > 0 => Some(s.clone()),
-            _ => {
-                error!("Invalid heartbeat_secs: {:?}. Must be > 0.", s);
-                valid = false;
-                Some("300".to_string())
-            }
-        },
-        None => {
-            error!("Missing heartbeat_secs. Using default.");
-            Some("300".to_string())
-        }
-    };
-
-    // Loglevel
-    config.client.loglevel = match &config.client.loglevel {
-        Some(level) => {
-            let level = level.to_lowercase();
-            let valid_levels = ["debug", "info", "warn", "error"];
-            if valid_levels.contains(&level.as_str()) {
-                Some(level)
-            } else {
-                error!("Invalid loglevel: {}. Must be one of {:?}", level, valid_levels);
-                valid = false;
-                Some("info".to_string())
-            }
-        }
-        None => {
-            error!("Missing loglevel. Using default.");
-            Some("info".to_string())
-        }
-    };
-
-    // ID
-    if config.client.id.is_none() {
-        error!("Missing client ID. Using default.");
-        config.client.id = Some("0".to_string());
+    } else {
+        config.server.port = Some("8000".to_string());
     }
 
+    
     // Keys
-    let key_path = config.key.key_path.as_deref().unwrap_or("./keys");
-    let key_dir = Path::new(key_path);
+    let base_dir = file_path.parent().unwrap_or(Path::new("."));
+    let key_dir = config.key.key_path.as_ref()
+        .map(PathBuf::from)
+        .unwrap_or_else(|| base_dir.join("keys"));
 
-    // 1. Create the directory if it doesn't exist
     if !key_dir.exists() {
-        warn!("Keys dir does not exist. Creating key directory: {}", key_dir.display());
-        fs::create_dir_all(key_dir)?;
+        warn!("Keys dir does not exist. Creating: {}", key_dir.display());
+        fs::create_dir_all(&key_dir).map_err(|e| {
+            format!("Failed to create key directory {}: {}", key_dir.display(), e)
+        })?;
     }
 
-    // 2. Full paths to key files
-    let pub_path = key_dir.join(config.key.pub_key.as_ref().expect("Missing pub_key"));
-    let priv_path = key_dir.join(config.key.priv_key.as_ref().expect("Missing priv_key"));
+    let pub_name = config.key.pub_key.as_deref().unwrap_or("scmclient.pub");
+    let priv_name = config.key.priv_key.as_deref().unwrap_or("scmclient.key");
+    
+    let pub_path = key_dir.join(pub_name);
+    let priv_path = key_dir.join(priv_name);
+
     generate_keys_if_missing(
-        pub_path.to_str().unwrap(),
-        priv_path.to_str().unwrap(),
+        &pub_path.to_string_lossy(),
+        &priv_path.to_string_lossy(),
     )?;
 
     if valid {
         Ok(config)
     } else {
-        Err(format!("Invalid configuration in file: {}", file_path).into())
+        Err(format!("Invalid configuration in file: {:?}", file_path).into())
     }
 }
 
+
 impl Config {
-    pub fn save_to(&self, path: &str) -> Result<(), Box<dyn Error>> {
+    // שינוי מ-&str ל-AsRef<Path> מאפשר לקבל גם PathBuf וגם &str
+    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
         let toml_string = toml::to_string_pretty(self)?;
-        fs::write(path, toml_string)?;
+        std::fs::write(path, toml_string)?;
         Ok(())
     }
 }
