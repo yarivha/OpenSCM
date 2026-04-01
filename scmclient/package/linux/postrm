@@ -6,8 +6,8 @@ LOG_DIR="/var/log/openscm"
 
 if [ "$1" = "purge" ] || [ "$1" = "0" ]; then
     echo "Removing logs and configuration for $APP_NAME..."
-    rm -rf "$LOG_DIR/scmclient*"
-    rm -f /opt/openscm/scmclient.config
+    rm -f "$LOG_DIR/scmclient*"
+    rm -f /etc/openscm/scmclient.config
 fi
 
 if [ "$1" = "remove" ] || [ "$1" = "0" ] || [ "$1" = "1" ]; then

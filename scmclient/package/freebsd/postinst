@@ -7,7 +7,7 @@ else
 fi
 
 chmod 700 /var/db/openscm
-chmod 755 /usr/local/etc/openscm/certs
+chmod 755 /etc/openscm/keys
 
 echo "Starting scmclient service..."
 service scmclient start || echo "Failed to start service, please check logs."
