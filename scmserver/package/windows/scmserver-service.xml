@@ -1,0 +1,9 @@
+<service>
+  <id>OpenSCMServer</id>
+  <name>OpenSCM Server Service</name>
+  <description>Background service for OpenSCM</description>
+  
+  <executable>%BASE%\scmserver.exe</executable>
+  
+  <log mode="roll"></log>
+</service>
