@@ -8,7 +8,7 @@
 !endif
 
 Name "OpenSCM Client"
-InstallDir "$PROGRAMFILES64\OpenSCM"
+InstallDir "$PROGRAMFILES64\OpenSCM\Client"
 
 RequestExecutionLevel admin
 
@@ -50,69 +50,74 @@ Function GetCustom
 FunctionEnd
 
 Section "Install"
+    # IMPORTANT: Makes $APPDATA point to C:\ProgramData
+    SetShellVarContext all
     SetRegView 64
+    
     SetOutPath "$INSTDIR"
     File "/Apps/OpenSCM/build/target/x86_64-pc-windows-gnu/release/scmclient.exe"
-    File "scm-service.exe"
-    File "scm-service.xml"
     
-    ; Save to Registry
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "ServerName" "$ServerName"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "ServerPort" "$ServerPort"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "ClientID" "0"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "Heartbeat" "300"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "LogLevel" "info"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "KeyPath" "$APPDATA\OpenSCM\keys"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "PubKeyFile" "scmclient.pub"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "PrivKeyFile" "scmclient.key"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM" "ServerKeyFile" "scmserver.pub"
+    # Using unique names for the service wrapper to avoid conflicts
+    File "scmclient-service.exe"
+    File "scmclient-service.xml"
+    
+    # Create private data areas for the client
+    CreateDirectory "$APPDATA\OpenSCM\Client"
+    CreateDirectory "$APPDATA\OpenSCM\Client\keys"
 
+    # --- Save to Registry (New Model: Nested under \Client) ---
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerName" "$ServerName"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerPort" "$ServerPort"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ClientID" "0"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$APPDATA\OpenSCM\Client\keys"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "PubKeyFile" "scmclient.pub"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "PrivKeyFile" "scmclient.key"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerKeyFile" "scmserver.pub"
 
-    ; Register and Start Service
-    ExecWait '"$INSTDIR\scm-service.exe" install'
-    ExecWait '"$INSTDIR\scm-service.exe" start'
+    # Register and Start Service using the unique name
+    ExecWait '"$INSTDIR\scmclient-service.exe" install'
+    ExecWait '"$INSTDIR\scmclient-service.exe" start'
 
-
-    # 1. Create the Uninstaller executable
+    # Create the Uninstaller
     WriteUninstaller "$INSTDIR\uninstall.exe"
 
-    # 2. Register the app in Windows "Add/Remove Programs"
-    # The ID "OpenSCM" should be unique
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "DisplayName" "OpenSCM Client"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "InstallLocation" "$INSTDIR"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "DisplayVersion" "1.0.1"
-    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "Publisher" "OpenSCM"
+    # Register in Add/Remove Programs (Unique ID: OpenSCM-Client)
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "DisplayName" "OpenSCM Client"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "UninstallString" "$\"$INSTDIR\uninstall.exe$\""
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "QuietUninstallString" "$\"$INSTDIR\uninstall.exe$\" /S"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "InstallLocation" "$INSTDIR"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "DisplayVersion" "1.0.1"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "Publisher" "OpenSCM"
     
-    # Optional: Add an icon (if you have one)
-    # WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "DisplayIcon" "$INSTDIR\scmclient.exe"
-    
-    # These let Windows calculate the size
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "NoModify" 1
-    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM" "NoRepair" 1
+    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "NoModify" 1
+    WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "NoRepair" 1
 
 SectionEnd
 
 # --- The Uninstaller Logic ---
 Section "Uninstall"
+    SetShellVarContext all
     SetRegView 64
-    # 1. Stop and Remove the Windows Service
-    # We do this first so the files aren't "in use" when we try to delete them
-    DetailPrint "Stopping and removing service..."
-    ExecWait '"$INSTDIR\scm-service.exe" stop'
-    ExecWait '"$INSTDIR\scm-service.exe" uninstall'
 
-    # 2. Delete the files
+    # 1. Stop and Remove the Windows Service
+    DetailPrint "Stopping and removing service..."
+    ExecWait '"$INSTDIR\scmclient-service.exe" stop'
+    ExecWait '"$INSTDIR\scmclient-service.exe" uninstall'
+
+    # 2. Delete the specific client files
     Delete "$INSTDIR\scmclient.exe"
-    Delete "$INSTDIR\scm-service.exe"
-    Delete "$INSTDIR\scm-service.xml"
+    Delete "$INSTDIR\scmclient-service.exe"
+    Delete "$INSTDIR\scmclient-service.xml"
     Delete "$INSTDIR\uninstall.exe"
 
-    # 3. Remove the Registry keys (Add/Remove Programs & App Settings)
-    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM"
-    DeleteRegKey HKLM "Software\OpenSCM"
+    # 3. Remove the Registry keys
+    DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client"
+    DeleteRegKey HKLM "Software\OpenSCM\Client"
 
-    # 4. Remove the installation directory
+    # 4. Remove the installation directory (only the \Client subfolder)
     RMDir "$INSTDIR"
+    # Optional: Wipe client data
+    # RMDir /r "$APPDATA\OpenSCM\Client"
 SectionEnd
