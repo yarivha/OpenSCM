@@ -1,5 +1,3 @@
-// main.rs
-
 mod models;
 mod handlers;
 mod config;
@@ -8,20 +6,11 @@ mod auth;
 mod client;
 
 use tera::Tera;
-use axum::Extension;
-use axum::response::{Response, IntoResponse};
-use axum::routing::{get, post};
-use axum::Router;
-use axum::http::{header, StatusCode};
-use axum::body::{Bytes, Body};
+use axum::{Extension, Router, response::{Response, IntoResponse}, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
-use tracing::{debug, info, warn, error};
-use std::sync::Arc;
+use tracing::{info, debug, warn, error};
+use std::{sync::Arc, str::FromStr, net::SocketAddr, path::PathBuf, error::Error};
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use std::str::FromStr;
-use std::net::SocketAddr;
-use std::path::{Path, PathBuf};
-use std::error::Error;
 use include_dir::{include_dir, Dir};
 
 use crate::handlers::*;
@@ -29,45 +18,20 @@ use crate::schema::*;
 use crate::auth::*;
 use crate::client::*;
 
-
-// Embedded templates
+// Embedded templates/static files
 static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");
-// Embedded static files
 static STATIC_FILES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/static");
-
-// get config_path
-pub fn get_config_path() -> PathBuf {
-    if let Ok(env_path) = std::env::var("SCM_SERVER_CONFIG_PATH") {
-        return PathBuf::from(env_path);
-    }
-
-    #[cfg(not(windows))]
-    return PathBuf::from("/etc/openscm/scmserver.config");
-
-    #[cfg(windows)]
-    {
-        let prog_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-        return PathBuf::from(prog_data).join("OpenSCM").join("scmserver.config");
-    }
-}
-
 
 // Initialize Tera from embedded templates
 pub fn init_tera() -> Result<Tera, tera::Error> {
     let mut tera = Tera::default();
-    // use the static directory directly
-    let templates = &TEMPLATES_DIR;
-
-    for file in templates.files() {
+    for file in TEMPLATES_DIR.files() {
         let path = file.path().to_str().unwrap();
         let content = String::from_utf8_lossy(file.contents()).into_owned();
         tera.add_raw_template(path, &content)?;
     }
-
-    // build inheritance and macro graph so {% extends %} works
     tera.build_inheritance_chains()?;
     tera.check_macro_files()?;
-
     Ok(tera)
 }
 
@@ -91,7 +55,7 @@ async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    // Initialize tracing subscriber
+    // 1. Logging setup
     let env_filter = EnvFilter::new("info");
     let (reload_layer, reload_handle) = reload::Layer::new(env_filter);
     tracing_subscriber::registry()
@@ -99,129 +63,92 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .with(fmt::layer())
         .init();
 
-    info!("Starting SCM Server...");
-    
-    let config_path = get_config_path();
-    // Ensure config file exists
+    info!("Starting OpenSCM Server...");
 
-    if !config_path.exists() {
-        warn!("Config '{:?}' not found. Creating default.", config_path.display());
-
-    // creating config
-    if let Some(parent) = config_path.parent() {
-        std::fs::create_dir_all(parent).map_err(|e| {
-            error!("Failed to create config directory {:?}: {}", parent, e);
-            Box::<dyn Error>::from(e)
-        })?;
-    }
-
-    config::Config::default().save_to(&config_path)
-            .map_err(|e| Box::<dyn Error>::from(e))?;
-    }
-
-    // load config
-    let config = config::load_and_validate_config(&config_path)
-        .map_err(|e| Box::<dyn Error>::from(e))?;
-
-    info!("Config {:?} loaded successfully", config_path);
-
+    // Load Config
+    let config = config::Config::load().map_err(|e| {
+        error!("Failed to load configuration: {}", e);
+        e
+    })?;
 
     // Apply log level from config
-    let level = config.server.loglevel.as_deref().unwrap_or("info");
-    reload_handle.reload(EnvFilter::new(level))
-        .map_err(|e| Box::<dyn Error>::from(e))?;
-    debug!("Log level updated to '{}'", level);
+    let loglevel = config.server.loglevel.as_deref().unwrap_or("info");
+    let _ = reload_handle.reload(EnvFilter::new(loglevel));
+    debug!("Log level set to '{}'", loglevel);
 
-    // Initialize Tera
-    info!("Loading Templates");
-    let tera = init_tera().map_err(|e| Box::<dyn Error>::from(e))?;
-    let tera = Arc::new(tera);
-
-    // Ensure DB directory exists
-    info!("Initializing database...");
-    let db_path = &config.database.path;
-    if let Some(parent) = Path::new(db_path).parent() {
-        std::fs::create_dir_all(parent)
-            .map_err(|e| Box::<dyn Error>::from(e))?;
+    // 3. Database Initialization
+    info!("Connecting database at '{}'...", config.database.path);
+    let db_path = PathBuf::from(&config.database.path);
+    
+    // Ensure the directory for the DB exists (usually C:\ProgramData\OpenSCM\Server)
+    if let Some(parent) = db_path.parent() {
+        std::fs::create_dir_all(parent)?;
     }
 
-    let database_url = format!("sqlite://{}", db_path);
+    let database_url = format!("sqlite://{}", config.database.path);
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true);
 
-    // Create connection pool
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
         .connect_with(options)
-        .await
-        .map_err(|e| Box::<dyn Error>::from(e))?;
+        .await?;
 
-    // Enable foreign keys
-    sqlx::query("PRAGMA foreign_keys = ON")
-        .execute(&pool)
-        .await
-        .map_err(|e| Box::<dyn Error>::from(e))?;
+    // Enable foreign keys and init schema
+    sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+    initialize_database(&pool).await?;
 
-    // Initialize database schema
-    initialize_database(&pool)
-        .await
-        .map_err(|e| Box::<dyn Error>::from(e))?;
-
-    info!("Database ready at '{}'", db_path);
-
-    // Wrap config in Arc so it can be cloned into extensions
+    // 4. Template Engine
+    info!("Loading Server Templates");
+    let tera = Arc::new(init_tera()?);
     let config = Arc::new(config);
 
-    // Build routes
-    info!("Loading Routes");
+    // 5. Routes
     let app = Router::new()
         .route("/", get(dashboard))
-        .route("/login", get(login))
-        .route("/login", post(login_submit))
+        .route("/login", get(login).post(login_submit))
         .route("/logout", get(logout))
         .route("/users", get(users))
-        .route("/users/add", get(users_add))
-        .route("/users/add", post(users_add_save))
+        .route("/users/add", get(users_add).post(users_add_save))
         .route("/users/delete/{id}", get(users_delete))
         .route("/systems", get(systems))
         .route("/systems/delete/{id}", get(systems_delete))
-        .route("/systems/edit/{id}", get(systems_edit))
-        .route("/systems/edit/{id}", post(systems_edit_save))
+        .route("/systems/edit/{id}", get(systems_edit).post(systems_edit_save))
         .route("/systems/pending", get(systems_pending))
         .route("/systems/approve/{id}", get(systems_approve))
         .route("/system_groups", get(system_groups))
-        .route("/system_groups/add", get(system_groups_add))
-        .route("/system_groups/add", post(system_groups_add_save))
+        .route("/system_groups/add", get(system_groups_add).post(system_groups_add_save))
         .route("/system_groups/delete/{id}", get(system_groups_delete))
-        .route("/system_groups/edit/{id}", get(system_groups_edit))
-        .route("/system_groups/edit/{id}", post(system_groups_edit_save))
+        .route("/system_groups/edit/{id}", get(system_groups_edit).post(system_groups_edit_save))
         .route("/tests", get(tests))
-        .route("/tests/add", get(tests_add))
-        .route("/tests/add", post(tests_add_save))
+        .route("/tests/add", get(tests_add).post(tests_add_save))
         .route("/tests/delete/{id}", get(tests_delete))
-        .route("/tests/edit/{id}", get(tests_edit))
-        .route("/tests/edit/{id}", post(tests_edit_save))
+        .route("/tests/edit/{id}", get(tests_edit).post(tests_edit_save))
         .route("/policies", get(policies))
-        .route("/policies/add", get(policies_add))
-        .route("/policies/add", post(policies_add_save))
-        .route("/policies/edit/{id}", get(policies_edit))
-        .route("/policies/edit/{id}", post(policies_edit_save))
+        .route("/policies/add", get(policies_add).post(policies_add_save))
+        .route("/policies/edit/{id}", get(policies_edit).post(policies_edit_save))
         .route("/policies/delete/{id}", get(policies_delete))
         .route("/policies/run/{id}", get(policies_run))
-        .route("/reports",get(reports))
+        .route("/reports", get(reports))
         .route("/send", post(send))
         .route("/result", post(receive_result))
-        .route("/{*path}", get(|path: axum::extract::Path<String>| async move {
-            serve_embedded_static_file(PathBuf::from(path.0)).await
+        .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {
+            serve_embedded_static_file(PathBuf::from(path)).await
         }))
         .fallback(not_found)
-        .layer(Extension(pool.clone()))
-        .layer(Extension(tera.clone()))
+        .layer(Extension(pool))
+        .layer(Extension(tera))
         .layer(Extension(config.clone()));
 
-    // Start server
-    let addr = SocketAddr::from(([0, 0, 0, 0], 8000));
-    info!("Listening on http://{}", addr);
+    // Pull port from config (default 8000)
+    let port: u16 = config.server.port.as_deref()
+    .unwrap_or("8000")
+    .parse()
+    .unwrap_or(8000);
+
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    
+    info!("OpenSCM Server listening on http://{}", addr);
     axum_server::bind(addr)
         .serve(app.into_make_service())
         .await?;

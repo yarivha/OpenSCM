@@ -1,9 +1,0 @@
-<service>
-  <id>OpenSCMClient</id>
-  <name>OpenSCM Client Service</name>
-  <description>Background service for OpenSCM CLI.</description>
-  
-  <executable>%BASE%\scmclient.exe</executable>
-  
-  <log mode="roll"></log>
-</service>

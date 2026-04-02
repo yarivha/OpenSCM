@@ -1,11 +1,12 @@
 // src/schema.rs
 use sqlx::SqlitePool;
 use bcrypt::{hash, DEFAULT_COST};
-
+use tracing::{info, debug, warn, error};
 
 /// Initialize the database schema
 pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
+    info!("Init Database......");
 
     // Create notify table
     sqlx::query(
