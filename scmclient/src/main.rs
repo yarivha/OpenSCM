@@ -9,29 +9,6 @@ use tracing::{debug, info, warn, error};
 use std::path::{Path, PathBuf};
 
 
-pub fn get_config_path() -> PathBuf {
-    #[cfg(not(windows))]
-    {
-        // בלינוקס - זה הנתיב שהגדרנו ב-nfpm
-        return PathBuf::from("/etc/openscm/scmclient.config");
-    }
-
-    #[cfg(windows)]
-    {
-        // בווינדוס - נשתמש ב-ProgramData
-        let prog_data = std::env::var("ProgramData").unwrap_or_else(|_| "C:\\ProgramData".to_string());
-        let mut path = PathBuf::from(prog_data);
-        path.push("OpenSCM");
-        path.push("scmclient.config");
-        return path;
-    }
-
-    PathBuf::from("scmclient.config")
-}
-
-
-
-
 
 #[tokio::main]
 async fn main() {
@@ -45,35 +22,12 @@ async fn main() {
         .init();
 
     info!("Starting SCM Agent...");
-
-    let config_path = get_config_path();
-    let config_path_str = config_path.to_string_lossy();
-    // === Ensure config exists ===
-    if !config_path.exists() {
-        warn!("Config '{}' not found. Creating default.", config_path_str);
-
-        if let Some(parent) = config_path.parent() {
-            if let Err(e) = std::fs::create_dir_all(parent) {
-                error!("Failed to create config directory '{:?}': {}", parent, e);
-                std::process::exit(1);
-            }
-        }
-
-        if let Err(e) = config::Config::default().save_to(&config_path) {
-            error!("Failed to create default config: {}", e);
-            std::process::exit(1);
-        }
-    }
-
-
+    info!("Loading config file");
     // === Load config ===
-    let mut config = match config::load_and_validate_config(&config_path) {
-        Ok(cfg) => {
-            info!("Config '{:?}' loaded successfully", config_path);
-            cfg
-        }
+    let mut config = match config::get_config() {
+        Ok(cfg) => cfg,
         Err(e) => {
-            error!("Invalid configuration: {}", e);
+            error!("Configuration error: {}", e);
             std::process::exit(1);
         }
     };
@@ -112,7 +66,7 @@ async fn main() {
     loop {
         debug!("Starting heartbeat cycle");
 
-        match agent::send_system_info(&mut config, &config_path).await {
+        match agent::send_system_info(&mut config).await {
             Ok(_) => debug!("Heartbeat completed successfully"),
             Err(e) => warn!("Heartbeat failed: {}", e),
         }

@@ -19,7 +19,6 @@ fn get_timestamp() -> u64 {
 
 pub async fn send_system_info(
     config: &mut Config,
-    config_path: &Path,
 ) -> Result<(), Box<dyn std::error::Error>> {
     // === System Info ===
     let my_local_ip = local_ip_address::local_ip()?.to_string();
@@ -82,7 +81,7 @@ pub async fn send_system_info(
             warn!("Agent ID {} not found on server, re-registering...", current_id);
             current_id = "0".to_string(); // reset local ID to force registration
             config.client.id = Some(current_id.clone());
-            config.save_to(config_path.to_str().unwrap())?;
+            config.save()?;
             continue; // re-send with new ID
         }
 
@@ -104,7 +103,7 @@ pub async fn send_system_info(
                         info!("Saving new client ID: {}", server_id_str);
                         config.client.id = Some(server_id_str.clone());
                         current_id = server_id_str;
-                        config.save_to(config_path.to_str().unwrap())?;
+                        config.save()?;
                     }
                 }
             }
