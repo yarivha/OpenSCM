@@ -59,8 +59,14 @@ Section "Install"
     ; Save to Registry
     WriteRegStr HKLM "SOFTWARE\OpenSCM" "ServerName" "$ServerName"
     WriteRegStr HKLM "SOFTWARE\OpenSCM" "ServerPort" "$ServerPort"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM" "ClientID" "0"
     WriteRegStr HKLM "SOFTWARE\OpenSCM" "Heartbeat" "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM" "LogLevel" "info"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM" "KeyPath" "$APPDATA\OpenSCM\keys"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM" "PubKeyFile" "scmclient.pub"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM" "PrivKeyFile" "scmclient.key"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM" "ServerKeyFile" "scmserver.pub"
+
 
     ; Register and Start Service
     ExecWait '"$INSTDIR\scm-service.exe" install'

@@ -91,7 +91,13 @@ impl Config {
             if let Some(i) = &self.client.id { key.set_value("ClientID", i)?; }
             if let Some(hb) = &self.client.heartbeat { key.set_value("Heartbeat", hb)?; }
             if let Some(ll) = &self.client.loglevel { key.set_value("LogLevel", ll)?; }
-            
+    
+            // Key Locations
+            if let Some(kp) = &self.key.key_path { key.set_value("KeyPath", kp)?; }
+            if let Some(pk) = &self.key.pub_key { key.set_value("PubKeyFile", pk)?; }
+            if let Some(sk) = &self.key.priv_key { key.set_value("PrivKeyFile", sk)?; }
+            if let Some(svk) = &self.key.server_key { key.set_value("ServerKeyFile", svk)?; }
+
             info!("Configuration successfully saved to Windows Registry.");
             Ok(())
         }
@@ -138,25 +144,54 @@ fn get_config_path() -> PathBuf {
 #[cfg(target_os = "windows")]
 fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    let key = hklm.open_subkey("SOFTWARE\\OpenSCM")
-        .map_err(|_| "OpenSCM Registry key not found.")?;
+    
+    // create_subkey ensures the "OpenSCM" folder exists in the Registry
+    let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM")?;
 
-    let name: String = key.get_value("ServerName").unwrap_or_else(|_| "localhost".to_string());
-    let port: String = key.get_value("ServerPort").unwrap_or_else(|_| "8000".to_string());
-    // NEW: Read ClientID from registry
-    let id: String = key.get_value("ClientID").unwrap_or_else(|_| "0".to_string());
-    let heartbeat: String = key.get_value("Heartbeat").unwrap_or_else(|_| "300".to_string());
-    let log_level: String = key.get_value("LogLevel").unwrap_or_else(|_| "info".to_string());
+    let mut needs_repair = false;
+
+    // A helper to pull a string or mark that the Registry needs a "save" to fill the gap
+    let mut get_val = |name: &str, default: &str| {
+        key.get_value(name).unwrap_or_else(|_| {
+            needs_repair = true; 
+            default.to_string()
+        })
+    };
 
     let mut config = Config {
-        server: ServerConfig { host: Some(name), port: Some(port) },
-        client: ClientConfig { id: Some(id), heartbeat: Some(heartbeat), loglevel: Some(log_level) },
+        server: ServerConfig {
+            host: Some(get_val("ServerName", "localhost")),
+            port: Some(get_val("ServerPort", "8000")),
+        },
+        client: ClientConfig {
+            id: Some(get_val("ClientID", "0")),
+            heartbeat: Some(get_val("Heartbeat", "300")),
+            loglevel: Some(get_val("LogLevel", "info")),
+            ..ClientConfig::default()
+        },
+        key: KeyPair {
+            // Path and dynamic filenames
+            key_path: Some(get_val("KeyPath", r"C:\ProgramData\OpenSCM\keys")),
+            pub_key: Some(get_val("PubKeyFile", "scmclient.pub")),
+            priv_key: Some(get_val("PrivKeyFile", "scmclient.key")),
+            server_key: Some(get_val("ServerKeyFile", "scmserver.pub")),
+        },
         ..Config::default()
     };
 
+    // If any of the above fallback defaults were used, we save the config 
+    // immediately to ensure the Registry is fully populated.
+    if needs_repair {
+        warn!("Registry configuration was incomplete or corrupted. Performing self-repair...");
+        config.save()?; 
+    }
+
+    // Now proceed to ensure the physical key files exist on the disk
     validate_and_setup_keys(&mut config)?;
+    
     Ok(config)
 }
+
 
 
 #[cfg(not(target_os = "windows"))]
