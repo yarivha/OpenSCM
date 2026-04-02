@@ -83,7 +83,7 @@ impl Config {
         {
             let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
             // create_subkey opens the key for writing (creates it if missing)
-            let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM")?;
+            let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
             
             // Save each field if it exists
             if let Some(h) = &self.server.host { key.set_value("ServerName", h)?; }
@@ -134,9 +134,7 @@ pub fn get_config() -> Result<Config, Box<dyn Error>> {
 
 /// Determines the standard config path for the OS.
 fn get_config_path() -> PathBuf {
-    {
         PathBuf::from("/etc/openscm/scmclient.config")
-    }
 }
 
 
@@ -146,7 +144,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     
     // create_subkey ensures the "OpenSCM" folder exists in the Registry
-    let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM")?;
+    let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
     let mut needs_repair = false;
 
@@ -171,7 +169,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         },
         key: KeyPair {
             // Path and dynamic filenames
-            key_path: Some(get_val("KeyPath", r"C:\ProgramData\OpenSCM\keys")),
+            key_path: Some(get_val("KeyPath", r"C:\ProgramData\OpenSCM\Client\keys")),
             pub_key: Some(get_val("PubKeyFile", "scmclient.pub")),
             priv_key: Some(get_val("PrivKeyFile", "scmclient.key")),
             server_key: Some(get_val("ServerKeyFile", "scmserver.pub")),
@@ -234,11 +232,11 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
 
     // 2. Determine base directory for keys
     let base_dir = if cfg!(target_os = "windows") {
-        // On Windows, store keys relative to the installation folder
-        std::env::current_exe()?.parent().unwrap_or(Path::new(".")).to_path_buf()
+        // Match the installer: C:\ProgramData\OpenSCM\Client
+        PathBuf::from(r"C:\ProgramData\OpenSCM\Client")
     } else {
-        // On Linux, store keys relative to the config file (/etc/openscm/keys)
-        get_config_path().parent().unwrap_or(Path::new(".")).to_path_buf()
+        // On Linux: /etc/openscm
+        get_config_path().parent().unwrap_or(Path::new("/etc/openscm")).to_path_buf()
     };
 
     let key_dir = config.key.key_path.as_ref()
