@@ -111,6 +111,18 @@ pub async fn send_system_info(
                     config.client.id = Some(id_str);
                     config.save()?;
                 }
+
+                if let Some(server_pub_encoded) = json["server_public_key"].as_str() {
+                    // Construct the path from config: KeyPath + ServerKeyFile
+                    let server_key_filename = config.key.server_key.as_deref().unwrap_or("scmserver.pub");
+                    let server_key_path = key_dir.join(server_key_filename);
+
+                    match fs::write(&server_key_path, server_pub_encoded.trim()) {
+                    Ok(_) => info!("Server identity saved successfully to {:?}", server_key_path),
+                    Err(e) => error!("CRITICAL: Failed to save server public key: {}", e),
+                    }
+                }
+                config.save()?;
             },
             Some("TEST") => {
                 if let Some(tests_value) = json.get("data") {
