@@ -81,7 +81,7 @@ impl Config {
                 warn!("Config file not found. Bootstrapping defaults at {:?}", path);
                 let mut default_cfg = Self::default();
                 validate_and_setup_keys(&mut default_cfg)?;
-                default_cfg.save_to(&path)?;
+                default_cfg.save()?;
                 return Ok(default_cfg);
             }
             Self::load_from_toml(&path)
