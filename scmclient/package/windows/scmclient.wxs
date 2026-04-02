@@ -2,14 +2,18 @@
 <Wix xmlns="http://schemas.microsoft.com/wix/2006/wi">
     <Product Name="OpenSCM Client" Id="*" UpgradeCode="53413526-7815-4D6F-A7C6-6D012B2638F1"
              Manufacturer="OpenSCM" Version="1.0.1" Language="1033">
+        
         <Package InstallerVersion="200" Compressed="yes" InstallScope="perMachine" />
         <MediaTemplate EmbedCab="yes" />
+
+        <Property Id="SERVER_NAME" Value="localhost" />
+        <Property Id="SERVER_PORT" Value="8000" />
 
         <Directory Id="TARGETDIR" Name="SourceDir">
             <Directory Id="ProgramFiles64Folder">
                 <Directory Id="INSTALLFOLDER" Name="OpenSCM">
                     <Component Id="ServiceFiles" Guid="*">
-                        <File Id="SCMEXE" Source="build/target/x86_64-pc-windows-gnu/release/scmclient.exe" KeyPath="no" />
+			    <File Id="SCMEXE" Source="build/target/x86_64-pc-windows-gnu/release/scmclient.exe/scmclient.exe" KeyPath="no" />
                         <File Id="WRAPPER" Source="scm-service.exe" KeyPath="yes" />
                         <File Id="WRAPPERXML" Source="scm-service.xml" />
 
@@ -24,12 +28,45 @@
                         
                         <ServiceControl Id="StartService" Start="install" Stop="both" Remove="uninstall" Name="OpenSCMClient" Wait="yes" />
                     </Component>
+
+                    <Component Id="RegistrySettings" Guid="*">
+                        <RegistryKey Root="HKLM" Key="SOFTWARE\OpenSCM">
+                            <RegistryValue Name="ServerName" Value="[SERVER_NAME]" Type="string" KeyPath="yes" />
+                            <RegistryValue Name="ServerPort" Value="[SERVER_PORT]" Type="string" />
+                        </RegistryKey>
+                    </Component>
                 </Directory>
             </Directory>
         </Directory>
 
+        <UI>
+            <Dialog Id="SettingsDlg" Width="370" Height="270" Title="OpenSCM Configuration">
+                <Control Id="Title" Type="Text" X="15" Y="15" Width="200" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Connection Settings" />
+                
+                <Control Id="ServerLabel" Type="Text" X="20" Y="60" Width="290" Height="13" Text="Server Name or IP:" />
+                <Control Id="ServerEdit" Type="Edit" X="20" Y="75" Width="320" Height="18" Property="SERVER_NAME" />
+
+                <Control Id="PortLabel" Type="Text" X="20" Y="110" Width="290" Height="13" Text="Port Number:" />
+                <Control Id="PortEdit" Type="Edit" X="20" Y="125" Width="50" Height="18" Property="SERVER_PORT" Integer="yes" />
+
+                <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="Back" />
+                <Control Id="Next" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="Install">
+                    <Publish Event="EndDialog" Value="Return">1</Publish>
+                </Control>
+                <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="Cancel">
+                    <Publish Event="EndDialog" Value="Exit">1</Publish>
+                </Control>
+            </Dialog>
+
+            <InstallUISequence>
+                <Show Dialog="SettingsDlg" After="CostFinalize" />
+            </InstallUISequence>
+        </UI>
+
         <Feature Id="MainFeature" Title="OpenSCM Client" Level="1">
             <ComponentRef Id="ServiceFiles" />
+            <ComponentRef Id="RegistrySettings" />
         </Feature>
     </Product>
 </Wix>
+
