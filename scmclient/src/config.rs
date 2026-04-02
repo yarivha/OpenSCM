@@ -35,7 +35,7 @@ pub struct ServerConfig {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ClientConfig {
     pub id: Option<String>,
-    pub heartbeat_secs: Option<String>,
+    pub heartbeat: Option<String>,
     pub loglevel: Option<String>,
 }
 
@@ -63,7 +63,7 @@ impl Default for Config {
             },
             client: ClientConfig {
                 id: Some("0".to_string()),
-                heartbeat_secs: Some("300".to_string()),
+                heartbeat: Some("300".to_string()),
                 loglevel: Some("info".to_string()),
             },
             key: KeyPair {
@@ -98,7 +98,8 @@ pub fn load_and_validate_config(file_path: &Path) -> Result<Config, Box<dyn Erro
         // Initialize your Config struct with Registry values
         // Note: You must ensure other fields have defaults
         Config {
-            server: ServerConfig { host: Some(name), port: Some(port), heartbeat: Some(heartbeat), loglevel: Some(log_level), }
+            server: ServerConfig { host: Some(name), port: Some(port) },
+            client: ClientConfig { heartbeat: Some(heartbeat), loglevel: Some(log_level) },
             key: KeyConfig::default(), // Assuming KeyConfig has a Default implementation
             ..Config::default() 
         }
@@ -129,7 +130,7 @@ pub fn load_and_validate_config(file_path: &Path) -> Result<Config, Box<dyn Erro
     }
 
     // 2. Heartbeat Validation
-    if let Some(h) = &config.server.heartbeat {
+    if let Some(h) = &config.client.heartbeat {
         if h.parse::<u32>().is_err() {
             error!("Invalid heartbeat: {}", h);
             valid = false;
@@ -137,11 +138,11 @@ pub fn load_and_validate_config(file_path: &Path) -> Result<Config, Box<dyn Erro
     }
 
     // 3. LogLevel Validation
-    if let Some(l) = &config.server.loglevel {
+    if let Some(l) = &config.client.loglevel {
         let levels = ["trace", "debug", "info", "warn", "error"];
         if !levels.contains(&l.to_lowercase().as_str()) {
             warn!("Unknown log level '{}'. Defaulting to 'info'.", l);
-            config.server.loglevel = Some("info".to_string());
+            config.client.loglevel = Some("info".to_string());
         }
     }
 

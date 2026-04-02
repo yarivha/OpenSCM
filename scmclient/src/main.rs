@@ -83,7 +83,7 @@ async fn main() {
     let server_host = config.server.host.as_deref().unwrap_or("localhost");
     let server_port = config.server.port.as_deref().unwrap_or("8000");
     let client_id = config.client.id.as_deref().unwrap_or("0");
-    let heartbeat_secs = config.client.heartbeat_secs
+    let heartbeat = config.client.heartbeat
         .as_deref()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(300);
@@ -93,7 +93,7 @@ async fn main() {
     info!("Server URL     : http://{}:{}", server_host, server_port);
     info!("Client Version : {}", env!("CARGO_PKG_VERSION"));
     info!("Client ID      : {}", client_id);
-    info!("Heartbeat      : {} seconds", heartbeat_secs);
+    info!("Heartbeat      : {} seconds", heartbeat);
     info!("Log Level      : {}", log_level);
     info!("=========================================================");
 
@@ -119,7 +119,7 @@ async fn main() {
 
         // Optional jitter (avoid all agents hitting server together)
         let jitter = rand::random::<u64>() % 10;
-        let sleep_time = heartbeat_secs + jitter;
+        let sleep_time = heartbeat + jitter;
 
         debug!("Sleeping for {} seconds (including jitter)", sleep_time);
         sleep(Duration::from_secs(sleep_time)).await;
