@@ -12,6 +12,7 @@ InstallDir "$PROGRAMFILES64\OpenSCM\Server"
 
 RequestExecutionLevel admin
 
+!insertmacro MUI_PAGE_DIRECTORY
 !insertmacro MUI_PAGE_INSTFILES
 !insertmacro MUI_LANGUAGE "English"
 
