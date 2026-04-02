@@ -4,11 +4,16 @@ use tracing::{info, error};
 use base64::engine::general_purpose;
 use base64::Engine;
 use ed25519_dalek::{Verifier, VerifyingKey, Signature};
+use std::path::PathBuf;
+use std::fs;
+use std::sync::Arc;
 
 use crate::models::{SignedRequest, SignedResult, UnsignedPayload, Test};
+use crate::config::Config;
 
 pub async fn send(
     Extension(pool): Extension<SqlitePool>,
+    Extension(config): Extension<Arc<Config>>,
     Json(signed_req): Json<SignedRequest<UnsignedPayload>>,
 ) -> impl IntoResponse {
 
@@ -33,6 +38,22 @@ pub async fn send(
     // NEW AGENT
     // =========================
     if id == 0 {
+        // 1. Read the Server's Public Key from the path defined in Registry/Config
+        let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or(""));
+        let pub_file = config.key.public_key.as_deref().unwrap_or("scmserver.pub");
+        let pub_key_path = key_dir.join(pub_file);
+
+        let server_pub_key = match fs::read_to_string(&pub_key_path) {
+            Ok(k) => k.trim().to_string(),
+            Err(e) => {
+                error!("Critical: Could not read server public key at {:?}: {}", pub_key_path, e);
+                return (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({"status":"error","message":"Server identity missing"}))
+                );
+            }
+        };
+
         let res = sqlx::query(
             "INSERT INTO systems (key, name, ver, os, ip, arch, created_date, last_seen, status)
              VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
@@ -49,23 +70,30 @@ pub async fn send(
         .execute(&pool)
         .await;
        
-        info!("New Agent was created with id={}",id);
         return match res {
-            Ok(r) => (
-                StatusCode::CREATED,
-                Json(serde_json::json!({
-                    "status":"created",
-                    "id": r.last_insert_rowid(),
-                    "command":"REGISTER"
-                })),
-            ),
-            Err(e) => (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
+            Ok(r) => {
+                let new_id = r.last_insert_rowid();
+                info!("New Agent was created with id={}",id);
+                (
+                    StatusCode::CREATED,
+                    Json(serde_json::json!({
+                        "status":"created",
+                        "id": r.last_insert_rowid(),
+                        "command":"REGISTER",
+                        "server_public_key": server_pub_key
+                    })),
+                )
+            },
+            Err(e) => { 
+                error!("Failed to register agent: {}", e);
+                (
+                    StatusCode::INTERNAL_SERVER_ERROR,
+                    Json(serde_json::json!({
                     "status":"error",
                     "message": format!("{}", e)
-                })),
-            ),
+                    })),
+                )
+            },
         };
     }
 
