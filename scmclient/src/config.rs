@@ -5,10 +5,17 @@ use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
 use std::error::Error;
-use std::io::Write;
+use std::io::{Write, Read};
 use std::fs::File;
 use tracing::{info, warn, error};
 use toml;
+
+// Windows-specific imports
+#[cfg(target_os = "windows")]
+use winreg::enums::*;
+#[cfg(target_os = "windows")]
+use winreg::RegKey;
+
 
 use crate::get_config_path;
 
@@ -70,59 +77,94 @@ impl Default for Config {
 }
 
 
-use std::io::Read; // חשוב לצורך קריאת הקובץ למחרוזת
-
 pub fn load_and_validate_config(file_path: &Path) -> Result<Config, Box<dyn Error>> {
     let mut valid = true;
 
-    // Open config file
-    let mut file = File::open(file_path).map_err(|e| {
-        format!("Could not open config file {:?}: {}", file_path, e)
-    })?;
+    // --- SCENARIO 1: WINDOWS (Registry Only) ---
+    #[cfg(target_os = "windows")]
+    let mut config = {
+        let _ = file_path; // Mark as unused on Windows to avoid warnings
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        
+        // Open the key created by your NSIS installer
+        let key = hklm.open_subkey("SOFTWARE\\OpenSCM")
+            .map_err(|_| "OpenSCM Registry key not found. Please run the installer.")?;
 
-    // Read config file
-    let mut content = String::new();
-    file.read_to_string(&mut content).map_err(|e| {
-        format!("Failed to read config file {:?}: {}", file_path, e)
-    })?;
+        let name: String = key.get_value("ServerName").unwrap_or_else(|_| "localhost".to_string());
+        let port: String = key.get_value("ServerPort").unwrap_or_else(|_| "8000".to_string());
+        let heartbeat: String = key.get_value("Heartbeat").unwrap_or_else(|_| "300".to_string());
+        let log_level: String = key.get_value("LogLevel").unwrap_or_else(|_| "info".to_string());
 
-    // Parse config file
-    let mut config: Config = toml::from_str(&content).map_err(|e| {
-        format!("Failed to parse TOML in {:?}: {}", file_path, e)
-    })?;
+        // Initialize your Config struct with Registry values
+        // Note: You must ensure other fields have defaults
+        Config {
+            server: ServerConfig { host: Some(name), port: Some(port), heartbeat: Some(heartbeat), loglevel: Some(log_level), }
+            key: KeyConfig::default(), // Assuming KeyConfig has a Default implementation
+            ..Config::default() 
+        }
+    };
 
+    // --- SCENARIO 2: UNIX (TOML File Only) ---
+    #[cfg(unix)]
+    let mut config = {
+        let mut file = File::open(file_path).map_err(|e| {
+            format!("Could not open config file {:?}: {}", file_path, e)
+        })?;
 
+        let mut content = String::new();
+        file.read_to_string(&mut content)?;
+        
+        let cfg: Config = toml::from_str(&content).map_err(|e| {
+            format!("Failed to parse TOML in {:?}: {}", file_path, e)
+        })?;
+        cfg
+    };
 
-    
-    // Port
+    // 1. Port Validation
     if let Some(p) = &config.server.port {
-        if p.parse::<u16>().map_or(true, |port| !(1..=65000).contains(&port)) {
-            error!("Invalid port: {}. Must be 1–65000.", p);
+        if p.parse::<u16>().is_err() {
+            error!("Invalid port: {}", p);
             valid = false;
         }
-    } else {
-        config.server.port = Some("8000".to_string());
     }
 
-    
-    // Keys
-    let base_dir = file_path.parent().unwrap_or(Path::new("."));
+    // 2. Heartbeat Validation
+    if let Some(h) = &config.server.heartbeat {
+        if h.parse::<u32>().is_err() {
+            error!("Invalid heartbeat: {}", h);
+            valid = false;
+        }
+    }
+
+    // 3. LogLevel Validation
+    if let Some(l) = &config.server.loglevel {
+        let levels = ["trace", "debug", "info", "warn", "error"];
+        if !levels.contains(&l.to_lowercase().as_str()) {
+            warn!("Unknown log level '{}'. Defaulting to 'info'.", l);
+            config.server.loglevel = Some("info".to_string());
+        }
+    }
+
+
+    // --- COMMON LOGIC: Keys Management ---
+    // On Windows, we'll use the executable folder as the base for keys
+    let base_dir = if cfg!(windows) {
+        std::env::current_exe()?.parent().unwrap_or(Path::new(".")).to_path_buf()
+    } else {
+        file_path.parent().unwrap_or(Path::new(".")).to_path_buf()
+    };
+
     let key_dir = config.key.key_path.as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| base_dir.join("keys"));
 
     if !key_dir.exists() {
         warn!("Keys dir does not exist. Creating: {}", key_dir.display());
-        fs::create_dir_all(&key_dir).map_err(|e| {
-            format!("Failed to create key directory {}: {}", key_dir.display(), e)
-        })?;
+        fs::create_dir_all(&key_dir)?;
     }
 
-    let pub_name = config.key.pub_key.as_deref().unwrap_or("scmclient.pub");
-    let priv_name = config.key.priv_key.as_deref().unwrap_or("scmclient.key");
-    
-    let pub_path = key_dir.join(pub_name);
-    let priv_path = key_dir.join(priv_name);
+    let pub_path = key_dir.join(config.key.pub_key.as_deref().unwrap_or("scmclient.pub"));
+    let priv_path = key_dir.join(config.key.priv_key.as_deref().unwrap_or("scmclient.key"));
 
     generate_keys_if_missing(
         &pub_path.to_string_lossy(),
@@ -132,13 +174,13 @@ pub fn load_and_validate_config(file_path: &Path) -> Result<Config, Box<dyn Erro
     if valid {
         Ok(config)
     } else {
-        Err(format!("Invalid configuration in file: {:?}", file_path).into())
+        Err(format!("Invalid configuration detected.").into())
     }
 }
 
 
+
 impl Config {
-    // שינוי מ-&str ל-AsRef<Path> מאפשר לקבל גם PathBuf וגם &str
     pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
         let toml_string = toml::to_string_pretty(self)?;
         std::fs::write(path, toml_string)?;
