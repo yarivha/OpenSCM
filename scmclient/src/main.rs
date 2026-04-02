@@ -21,7 +21,7 @@ async fn main() {
         .with(fmt::layer())
         .init();
 
-    info!("Starting SCM Agent...");
+    info!("Starting SCM Agent v{}...", env!("CARGO_PKG_VERSION"));
     info!("Loading config file");
     // === Load config ===
     let mut config = match config::get_config() {
@@ -70,12 +70,23 @@ async fn main() {
             Ok(_) => debug!("Heartbeat completed successfully"),
             Err(e) => warn!("Heartbeat failed: {}", e),
         }
+        
+        // 1. FRESH HEARTBEAT: Always pull from config in case it changed
+        let heartbeat_secs = config.client.heartbeat
+            .as_deref()
+            .and_then(|s| s.parse::<u64>().ok())
+            .unwrap_or(300);
 
-        // Optional jitter (avoid all agents hitting server together)
+        // 2. DYNAMIC LOGGING: Optional - re-apply log level if you want remote changes to take effect
+        if let Some(level) = &config.client.loglevel {
+            let _ = reload_handle.reload(EnvFilter::new(level));
+        }
+
+        // 3. Jitter
         let jitter = rand::random::<u64>() % 10;
-        let sleep_time = heartbeat + jitter;
+        let sleep_time = heartbeat_secs + jitter;
 
-        debug!("Sleeping for {} seconds (including jitter)", sleep_time);
+        debug!("Next heartbeat in {} seconds", sleep_time);
         sleep(Duration::from_secs(sleep_time)).await;
     }
 }
