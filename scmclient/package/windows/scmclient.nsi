@@ -10,6 +10,8 @@
 Name "OpenSCM Client"
 InstallDir "$PROGRAMFILES64\OpenSCM"
 
+RequestExecutionLevel admin
+
 ; --- Pages ---
 !insertmacro MUI_PAGE_DIRECTORY
 
@@ -48,6 +50,7 @@ Function GetCustom
 FunctionEnd
 
 Section "Install"
+    SetRegView 64
     SetOutPath "$INSTDIR"
     File "/Apps/OpenSCM/build/target/x86_64-pc-windows-gnu/release/scmclient.exe"
     File "scm-service.exe"
@@ -87,6 +90,7 @@ SectionEnd
 
 # --- The Uninstaller Logic ---
 Section "Uninstall"
+    SetRegView 64
     # 1. Stop and Remove the Windows Service
     # We do this first so the files aren't "in use" when we try to delete them
     DetailPrint "Stopping and removing service..."
