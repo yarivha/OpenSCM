@@ -423,7 +423,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Elements
     // --------------------
     let elements = vec![
-        ("Agent"),("OS"),("Hostname"),("IP"),("Architecture"),("File"),("Directory"),("Process"),("Package"),("Registry"),("Port"),
+        ("Agent"),("OS"),("Hostname"),("IP"),("Domain"),("Architecture"),("User"),("Group"),("File"),("Directory"),("Process"),("Package"),("Registry"),("Port"),
     ];
 
     for name in elements {
