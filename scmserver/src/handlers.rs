@@ -160,7 +160,7 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
     let systems_count: i64 = systems_count_row.get("count");
     
 
-    // Get count of policies
+    // Get policies count
     let policies_count_row = sqlx::query("SELECT COUNT(*) as count FROM policies")
         .fetch_one(&*pool)
         .await
@@ -168,42 +168,52 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
 
     let policies_count: i64 = policies_count_row.get("count");
 
-
-    let top_failed_systems = sqlx::query_as::<_, SystemCompliance>(
-        r#"
+    // Get Top failed systems
+    let rows = sqlx::query(r#"
         SELECT
             s.name AS system_name,
             s.os,
 
             CASE 
-                WHEN COUNT(r.test_id) = 0 THEN 0
+                WHEN COUNT(r.test_id) = 0 THEN 0.0 -- Using 0.0 to keep sqlx happy (f64)
                 ELSE ROUND(
                     (SUM(CASE WHEN r.result = 'true' THEN 1 ELSE 0 END) * 100.0) 
                     / COUNT(r.test_id),
-                2)
+                    2)
             END AS compliance,
 
             COALESCE(SUM(CASE WHEN r.result = 'true' THEN 1 ELSE 0 END), 0) AS passed_tests,
             COALESCE(SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END), 0) AS failed_tests
 
         FROM systems s
-        JOIN results r 
-            ON s.id = r.system_id
+        JOIN results r ON s.id = r.system_id
 
         GROUP BY s.id, s.name, s.os
 
         ORDER BY compliance ASC
         LIMIT 5
-        "#
-    )
+    "#)
     .fetch_all(&*pool)
     .await
     .map_err(|e| {
-        error!("DB error: {}", e);
+        error!("Systems stats DB error: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
+    let top_failed_systems: Vec<SystemCompliance> = rows.into_iter().map(|row| {
+        SystemCompliance {
+            system_name: row.get::<String, _>("system_name"),
+            os: row.get::<String, _>("os"),
+            compliance: row.get::<f64, _>("compliance"),
+            passed_tests: row.get::<i64, _>("passed_tests"),
+            failed_tests: row.get::<i64, _>("failed_tests"),
+        }
+    }).collect();
 
+
+  
+
+    // Get Top failed policies
     let rows = sqlx::query(r#"
         SELECT
             p.id AS policy_id,
