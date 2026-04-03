@@ -15,6 +15,26 @@ fn parse_to_semver(v: &str) -> Option<Version> {
     Version::parse(&normalized).ok()
 }
 
+
+#[cfg(unix)]
+fn get_user_name_from_uid(uid: u32) -> Option<String> {
+    use std::process::Command;
+    
+    // Executes 'id -un <uid>' to get the username string from the system
+    let output = Command::new("id")
+        .args(["-un", &uid.to_string()])
+        .output()
+        .ok()?;
+
+    if output.status.success() {
+        // Trim whitespace/newlines and convert to String
+        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
+    } else {
+        None
+    }
+}
+
+
 pub fn evaluate(
     element: &str,
     input: &str,
@@ -106,6 +126,48 @@ pub fn evaluate(
                         error!("Could not get metadata for permissions check on {}: {}", input, e);
                         false
                     }
+                }
+            },
+            "owner" => {
+                match fs::metadata(input) {
+                    Ok(metadata) => {
+                        #[cfg(unix)]
+                        {
+                            use std::os::unix::fs::MetadataExt;
+                            let uid = metadata.uid();
+                            let username = get_user_name_from_uid(uid).unwrap_or_default();
+                            let uid_str = uid.to_string();
+
+                            match condition_l.as_str() {
+                                "equals" => {
+                                    // Check against both username and UID string
+                                    username == sinput || uid_str == sinput
+                                },
+                                "not equals" => {
+                                    username != sinput && uid_str != sinput
+                                },
+                                "contains" => {
+                                    // Check if the input string exists within the username
+                                    username.contains(sinput)
+                                },
+                                "not contains" => {
+                                    !username.contains(sinput)
+                                },
+                                _ => {
+                                    error!("Unsupported owner condition: {}", condition);
+                                    false
+                                }
+                            }
+                        }
+
+                        #[cfg(windows)]
+                        {
+                            // Windows logic would go here, likely using SID strings
+                            error!("Windows owner string checks not yet implemented");
+                            false
+                        }
+                    }
+                    Err(_) => false,
                 }
             }
 
