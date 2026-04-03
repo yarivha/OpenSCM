@@ -1,6 +1,6 @@
 [package]
 name = "scmserver"
-version = "0.0.3"
+version = "0.0.4"
 edition = "2024" 
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "FSL-1.1-ALv2"
@@ -8,7 +8,7 @@ description = "Server for Open Security Compliance Manager"
 
 
 [package.metadata]
-release = "5"
+release = "1"
 
 [dependencies]
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
