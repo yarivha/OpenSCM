@@ -116,6 +116,46 @@ fn check_group_exists(group: &str) -> bool {
 }
 
 
+fn calculate_sha1(path: &str) -> Result<String, std::io::Error> {
+    use sha1::{Sha1, Digest};
+    use std::fs::File;
+    use std::io::{Read};
+
+    let mut file = File::open(path)?;
+    let mut hasher = Sha1::new();
+    let mut buffer = [0; 4096]; // 4KB buffer for efficiency
+
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+    }
+
+    // Convert the hash result to a hex string
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+
+
+fn calculate_sha2(path: &str) -> Result<String, std::io::Error> {
+    use sha2::{Sha256, Digest};
+    use std::fs::File;
+    use std::io::Read;
+
+    let mut file = File::open(path)?;
+    let mut hasher = Sha256::new();
+    let mut buffer = [0; 4096];
+
+    loop {
+        let count = file.read(&mut buffer)?;
+        if count == 0 { break; }
+        hasher.update(&buffer[..count]);
+    }
+
+    Ok(format!("{:x}", hasher.finalize()))
+}
+
+
 pub fn evaluate(
     element: &str,
     input: &str,
@@ -258,6 +298,49 @@ pub fn evaluate(
                     element, input, selement, condition, sinput
                 );
                 false
+            },
+            "sha1" => {
+                match calculate_sha1(input) {
+                    Ok(actual_hash) => {
+                        // We use to_lowercase() to ensure "A1B2..." matches "a1b2..."
+                        let actual = actual_hash.to_lowercase();
+                        let expected = sinput.to_lowercase();
+
+                        match condition_l.as_str() {
+                            "equals" => actual == expected,
+                            "not equal" | "not equals" => actual != expected,
+                            _ => {
+                                error!("Unsupported SHA1 condition: {}", condition);
+                                false
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to hash file {}: {}", input, e);
+                        false
+                    }
+                }
+            },
+            "sha2" => {
+                match calculate_sha2(input) {
+                    Ok(actual_hash) => {
+                        let actual = actual_hash.to_lowercase();
+                        let expected = sinput.to_lowercase();
+
+                        match condition_l.as_str() {
+                            "equals" => actual == expected,
+                            "not equal" | "not equals" => actual != expected,
+                            _ => {
+                                error!("Unsupported SHA2 condition: {}", condition);
+                                false
+                            }
+                        }
+                    },
+                    Err(e) => {
+                        error!("Failed to SHA2 hash file {}: {}", input, e);
+                        false
+                    }
+                }
             }
 
         },
