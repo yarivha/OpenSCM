@@ -20,7 +20,7 @@ if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
     echo "============================================================"
     echo "       $APP_NAME INSTALLATION COMPLETE"
     echo "============================================================"
-    echo " Please update: /opt/openscm/scmclient.config"
+    echo " Please update: /etc/openscm/$APP_NAME.config"
     echo ""
     echo " Then restart the service:"
     echo "   sudo systemctl restart $APP_NAME.service"
