@@ -393,6 +393,21 @@ pub fn evaluate(
                 false
             }
         },
+
+        "architecture" => {
+                // std::env::consts::ARCH provides strings like "x86_64", "aarch64", "x86", etc.
+                let actual_arch = std::env::consts::ARCH;
+
+                match condition_l.as_str() {
+                    "equals" => actual_arch == sinput,
+                    "not equals" | "not equal" => actual_arch != sinput,
+                    _ => {
+                        error!("Unsupported architecture condition: {}", condition);
+                        false
+                    }
+                }
+        },
+
         "user" => match selement_l.as_str() {
                 "exists" => check_user_exists(input),
                 "not exists" => !check_user_exists(input),
