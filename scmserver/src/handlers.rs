@@ -204,52 +204,57 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
     })?;
 
 
-    let top_failed_policies: Vec<PolicyCompliance> = sqlx::query_as::<_, PolicyCompliance>(r#"
+    let rows = sqlx::query(r#"
         SELECT
+            p.id AS policy_id,
             p.name AS policy_name,
             p.version AS policy_version,
-
             ROUND(
                 SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) * 100.0
                 / COUNT(*),
                 2
             ) AS compliance,
-
             SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) AS passed_systems,
             SUM(CASE WHEN system_status = 'failed' THEN 1 ELSE 0 END) AS failed_systems
-
         FROM (
             SELECT
                 tip.policy_id,
                 r.system_id,
-
                 CASE
                     WHEN SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END) > 0
                         THEN 'failed'
                     ELSE 'passed'
                 END AS system_status
-
             FROM tests_in_policy tip
             JOIN results r ON r.test_id = tip.test_id
-
             GROUP BY tip.policy_id, r.system_id
-
         ) AS system_results
-
         JOIN policies p ON p.id = system_results.policy_id
-
         GROUP BY p.id, p.name, p.version
-
         ORDER BY compliance ASC
         LIMIT 5
-
     "#)
     .fetch_all(&*pool)
     .await
     .map_err(|e| {
-        error!("DB error: {}", e);
+        error!("Dashboard stats DB error: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+    
+    let top_failed_policies: Vec<PolicyCompliance> = rows.into_iter().map(|row| {
+        PolicyCompliance {
+            policy_id: row.get::<i64, _>("policy_id"),
+            policy_name: row.get::<String, _>("policy_name"),
+            policy_version: row.get::<String, _>("policy_version"),
+            policy_description: None,
+            compliance: row.get::<f64, _>("compliance"),
+            passed_systems: Some(row.get::<i64, _>("passed_systems")),
+            failed_systems: Some(row.get::<i64, _>("failed_systems")),
+        }
+    }).collect();
+
+
 
     context.insert("systems_count", &systems_count.to_string());
     context.insert("policies_count", &policies_count.to_string());
@@ -1608,22 +1613,67 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
 // policies
 pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
 -> Result<Html<String>, StatusCode> {
-    let rows = sqlx::query("
-         SELECT
-                id , name, version, description
-         FROM policies")
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
-            
-    let policies: Vec<Policy> = rows.into_iter().map(|row| {
-        Policy {
-            id: row.get("id"),
-            name: row.get("name"),
-            version: row.get("version"),
-            description: row.get("description"),
+
+    let rows = sqlx::query(r#"
+        SELECT 
+            p.id AS policy_id,
+            p.name AS policy_name,
+            p.version AS policy_version,
+            p.description AS policy_description,
+            -- If there are no systems, ROUND returns NULL; COALESCE turns that NULL into -1
+            CAST(
+                COALESCE(
+                    ROUND(
+                        SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) * 100.0 
+                        / NULLIF(COUNT(system_results.system_id), 0), 
+                        2
+                    ), 
+                    -1.0
+                ) AS REAL
+            ) AS compliance
+        FROM policies p
+        LEFT JOIN (
+            -- Subquery: Determines status for systems that actually HAVE results
+            SELECT 
+                tip.policy_id, 
+                r.system_id,
+                CASE 
+                    WHEN SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END) > 0 
+                        THEN 'failed' 
+                    ELSE 'passed' 
+                END AS system_status
+            FROM tests_in_policy tip
+            JOIN results r ON r.test_id = tip.test_id
+            GROUP BY tip.policy_id, r.system_id
+        ) AS system_results ON p.id = system_results.policy_id
+        GROUP BY p.id, p.name, p.version, p.description
+        ORDER BY p.id ASC
+
+    "#)
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| {
+        error!("Database query failed: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let policies: Vec<PolicyCompliance> = rows.into_iter().map(|row| {
+        PolicyCompliance {
+            // The Turbofish (::<Type, _>) fixes the E0282 error
+            policy_id: row.get::<i64, _>("policy_id"),
+            policy_name: row.get::<String, _>("policy_name"),
+            policy_version: row.get::<String, _>("policy_version"),
+
+            policy_description: Some(row.get::<Option<String>, _>("policy_description")
+            .unwrap_or_default()),
+
+            compliance: row.get::<f64, _>("compliance"),
+            passed_systems: None,
+            failed_systems: None,
         }
     }).collect();
+
+
 
     // Prepare handler-specific context
     let mut context = Context::new();
@@ -2211,7 +2261,7 @@ pub async fn reports(auth: AuthSession, pool: Extension<SqlitePool>, tera: Exten
 
 
 //////////////////// Settings /////////////////////////
-
+ 
 
 // users
 pub async fn users(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 

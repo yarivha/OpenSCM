@@ -168,11 +168,13 @@ pub struct SystemCompliance {
 
 #[derive(FromRow, Serialize, Deserialize)]
 pub struct PolicyCompliance {
-    policy_name: String,
-    policy_version: String,
-    compliance: f64,
-    passed_systems: i64,
-    failed_systems: i64,
+    pub policy_id: i64,
+    pub policy_name: String,
+    pub policy_version: String,
+    pub policy_description: Option<String>,
+    pub compliance: f64,
+    pub passed_systems: Option<i64>,
+    pub failed_systems: Option<i64>,
 }
 
 #[derive(Serialize, Deserialize)]
