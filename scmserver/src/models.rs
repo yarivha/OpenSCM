@@ -127,7 +127,7 @@ pub struct UnsignedPayload {
     pub os: String,
     pub arch: String,
     pub timestamp: String,
-    pub public_key: String,
+    pub public_key: Option<String>,
 }
 
 
@@ -141,6 +141,12 @@ pub struct SignedRequest<T> {
 #[derive(Deserialize)]
 pub struct SignedResult {
     pub payload: ComplianceResult,
+    pub signature: String,
+}
+
+#[derive(Serialize, Deserialize)]
+pub struct SignedResponse {
+    pub payload: serde_json::Value,
     pub signature: String,
 }
 

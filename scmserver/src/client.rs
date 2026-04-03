@@ -1,62 +1,84 @@
-use axum::{extract::Extension, http::StatusCode, response::IntoResponse, Json};
-use sqlx::SqlitePool;
-use tracing::{info, error};
-use base64::engine::general_purpose;
-use base64::Engine;
-use ed25519_dalek::{Verifier, VerifyingKey, Signature};
+use axum::{
+    extract::Extension,
+    http::StatusCode,
+    response::{IntoResponse, Response},
+    Json,
+};
+use sqlx::{SqlitePool, sqlite::SqliteQueryResult};
+use tracing::{info, error, debug, warn};
+use base64::{engine::general_purpose, Engine as _};
+use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
 use std::path::PathBuf;
 use std::fs;
 use std::sync::Arc;
 
-use crate::models::{SignedRequest, SignedResult, UnsignedPayload, Test};
+use crate::models::{SignedRequest, SignedResult, UnsignedPayload, Test, SignedResponse};
 use crate::config::Config;
 
+// =========================================================
+// HELPER: Sign Outgoing Server Response
+// =========================================================
+fn sign_response(
+    payload: serde_json::Value,
+    config: &Arc<Config>,
+) -> Result<SignedResponse, Box<dyn std::error::Error>> {
+    let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or(""));
+    let priv_file = config.key.private_key.as_deref().unwrap_or("scmserver.key");
+    let priv_path = key_dir.join(priv_file);
+
+    let priv_base64 = fs::read_to_string(&priv_path)?;
+    let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim())?;
+    
+    let key_array: [u8; 32] = priv_bytes.try_into().map_err(|_| "Invalid private key length")?;
+    let signing_key = SigningKey::from_bytes(&key_array);
+
+    let payload_bytes = bincode::serialize(&payload)?;
+
+    let signature = signing_key.sign(&payload_bytes);
+    let signature_base64 = general_purpose::STANDARD.encode(signature.to_bytes());
+
+    debug!("Server successfully signed outgoing response envelope.");
+
+    Ok(SignedResponse {
+        payload,
+        signature: signature_base64,
+    })
+}
+
+// =========================================================
+// HANDLER: Heartbeat and Registration (POST /send)
+// =========================================================
 pub async fn send(
     Extension(pool): Extension<SqlitePool>,
     Extension(config): Extension<Arc<Config>>,
     Json(signed_req): Json<SignedRequest<UnsignedPayload>>,
 ) -> impl IntoResponse {
-
     let payload = &signed_req.payload;
-
-    // =========================
-    // Parse ID
-    // =========================
-    let id = match payload.id.parse::<i64>() {
-        Ok(id) => id,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Invalid ID"})),
-            );
-        }
-    };
-
+    let mut response_data = serde_json::json!({});
     let now = chrono::Utc::now().to_string();
 
-    // =========================
-    // NEW AGENT
-    // =========================
+    // 1. Log Incoming Connection
+    info!("Connection received from agent: {} (IP: {})", payload.hostname, payload.ip);
+
+    let id = match payload.id.parse::<i64>() {
+        Ok(val) => val,
+        Err(_) => {
+            warn!("Rejected request from {} due to malformed ID: {}", payload.hostname, payload.id);
+            return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid ID format"}))).into_response()
+        },
+    };
+
+    // 2. REGISTRATION (ID 0)
     if id == 0 {
-        // 1. Read the Server's Public Key from the path defined in Registry/Config
+        info!("Processing NEW agent registration for: {}", payload.hostname);
+        
         let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or(""));
         let pub_file = config.key.public_key.as_deref().unwrap_or("scmserver.pub");
-        let pub_key_path = key_dir.join(pub_file);
-
-        let server_pub_key = match fs::read_to_string(&pub_key_path) {
-            Ok(k) => k.trim().to_string(),
-            Err(e) => {
-                error!("Critical: Could not read server public key at {:?}: {}", pub_key_path, e);
-                return (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({"status":"error","message":"Server identity missing"}))
-                );
-            }
-        };
+        let server_pub_key = fs::read_to_string(key_dir.join(pub_file)).unwrap_or_default();
 
         let res = sqlx::query(
-            "INSERT INTO systems (key, name, ver, os, ip, arch, created_date, last_seen, status)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+            r#"INSERT INTO systems (key, name, ver, os, ip, arch, created_date, last_seen, status) 
+               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')"#
         )
         .bind(&payload.public_key)
         .bind(&payload.hostname)
@@ -66,388 +88,184 @@ pub async fn send(
         .bind(&payload.arch)
         .bind(&now)
         .bind(&now)
-        .bind("pending")
         .execute(&pool)
         .await;
-       
-        return match res {
+
+        match res {
             Ok(r) => {
                 let new_id = r.last_insert_rowid();
-                info!("New Agent was created with id={}",id);
-                (
-                    StatusCode::CREATED,
-                    Json(serde_json::json!({
-                        "status":"created",
-                        "id": r.last_insert_rowid(),
-                        "command":"REGISTER",
-                        "server_public_key": server_pub_key
-                    })),
-                )
+                info!("Registration SUCCESS: Assigned ID {} to agent {}", new_id, payload.hostname);
+                response_data = serde_json::json!({
+                    "status": "created",
+                    "id": new_id,
+                    "command": "REGISTER",
+                    "server_public_key": server_pub_key.trim()
+                });
             },
-            Err(e) => { 
-                error!("Failed to register agent: {}", e);
-                (
-                    StatusCode::INTERNAL_SERVER_ERROR,
-                    Json(serde_json::json!({
-                    "status":"error",
-                    "message": format!("{}", e)
-                    })),
-                )
+            Err(e) => {
+                error!("Registration FAILED for {}: {}", payload.hostname, e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response()
             },
+        }
+    } else {
+        // 3. HEARTBEAT: Verify Agent Identity
+        debug!("Authenticating heartbeat for Agent ID: {} ({})", id, payload.hostname);
+
+        let db_pubkey = match sqlx::query_scalar::<_, String>("SELECT key FROM systems WHERE id = ?")
+            .bind(id).fetch_optional(&pool).await 
+        {
+            Ok(Some(k)) => k,
+            Ok(None) => {
+                warn!("Identity Check: Agent ID {} not found in database.", id);
+                return (StatusCode::NOT_FOUND, Json(serde_json::json!({"error": "Agent not found"}))).into_response()
+            },
+            Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": e.to_string()}))).into_response(),
         };
-    }
 
-    // =========================
-    // LOAD PUBLIC KEY
-    // =========================
-    let db_pubkey = match sqlx::query_scalar::<_, String>(
-        "SELECT key FROM systems WHERE id = ?"
-    )
-    .bind(id)
-    .fetch_optional(&pool)
-    .await
-    {
-        Ok(Some(k)) => k, // row found
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({"status":"error","message":"Agent not found"})),
-            );
+        
+        // Decode the Public Key from the DB
+        let pub_key_bytes: [u8; 32] = match general_purpose::STANDARD.decode(&db_pubkey) {
+            Ok(bytes) => match bytes.try_into() {
+                Ok(arr) => arr,
+                Err(_) => {
+                    error!("Database Error: Public key for Agent {} is the wrong length.", id);
+                    return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Stored key corruption"}))).into_response();
+                }
+            },
+            Err(e) => {
+                error!("Database Error: Public key for Agent {} is not valid Base64: {}", id, e);
+                return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Stored key encoding error"}))).into_response();
+            }
+        };
+
+        // Decode the Signature from the Request
+        let sig_bytes: [u8; 64] = match general_purpose::STANDARD.decode(&signed_req.signature) {
+            Ok(bytes) => match bytes.try_into() {
+                Ok(arr) => arr,
+                Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid signature length"}))).into_response(),
+            },
+            Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid signature encoding"}))).into_response(),
+        };
+
+
+        
+        let verifier = VerifyingKey::from_bytes(&pub_key_bytes).unwrap();
+        let sig = Signature::from_bytes(&sig_bytes);
+        let payload_bytes = bincode::serialize(payload).unwrap();
+
+        if verifier.verify(&payload_bytes, &sig).is_err() {
+            error!("SECURITY ALERT: Invalid signature from Agent ID {} ({})!", id, payload.hostname);
+            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Invalid Signature"}))).into_response();
         }
-        Err(e) => {
-            error!("DB query failed for system {}: {}", id, e);
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"status":"error","message": format!("DB error: {}", e)})),
-            );
+        
+        info!("Identity Verified: Agent ID {} ({}) authenticated successfully.", id, payload.hostname);
+
+        // 4. UPDATE METADATA & FETCH COMMANDS
+        let mut tx = pool.begin().await.unwrap();
+        
+        debug!("Updating system metadata and checking for pending commands for ID: {}", id);
+        let _ = sqlx::query("UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, last_seen=?, status='active' WHERE id=?")
+            .bind(&payload.hostname).bind(&payload.ver).bind(&payload.os).bind(&payload.ip).bind(&payload.arch).bind(&now).bind(id)
+            .execute(&mut *tx).await;
+
+        let tests: Vec<Test> = sqlx::query_as::<_, Test>(
+            "SELECT t.* FROM commands c JOIN tests t ON c.test_id = t.id WHERE c.system_id = ? LIMIT 20"
+        ).bind(id).fetch_all(&mut *tx).await.unwrap_or_default();
+
+        if !tests.is_empty() {
+            info!("Command Dispatch: Sending {} tests to Agent ID {}.", tests.len(), id);
         }
-    };
 
-
-    // =========================
-    // DECODE PUBLIC KEY
-    // =========================
-    let public_key_bytes: [u8; 32] = match general_purpose::STANDARD.decode(&db_pubkey)
-        .and_then(|b| b.try_into().map_err(|_| base64::DecodeError::InvalidLength))
-    {
-        Ok(arr) => arr,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Invalid public key"})),
-            );
-        }
-    };
-
-    let verifying_key = match VerifyingKey::from_bytes(&public_key_bytes) {
-        Ok(pk) => pk,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Invalid public key format"})),
-            );
-        }
-    };
-
-    // =========================
-    // DECODE SIGNATURE
-    // =========================
-    let signature_bytes: [u8; 64] = match general_purpose::STANDARD.decode(&signed_req.signature)
-        .and_then(|b| b.try_into().map_err(|_| base64::DecodeError::InvalidLength))
-    {
-        Ok(arr) => arr,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Invalid signature"})),
-            );
-        }
-    };
-
-    let signature = Signature::from_bytes(&signature_bytes);
-
-    // =========================
-    // VERIFY SIGNATURE
-    // =========================
-    let payload_bytes = match bincode::serialize(payload) {
-        Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Serialization failed"})),
-            );
-        }
-    };
-
-    if verifying_key.verify(&payload_bytes, &signature).is_err() {
-        error!("Agent {} failed auth", id);
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"status":"error","message":"Signature verification failed"})),
-        );
-    }
-
-    // =========================
-    // TRANSACTION
-    // =========================
-    let mut tx = match pool.begin().await {
-        Ok(tx) => tx,
-        Err(_) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({"status":"error","message":"DB error"})),
-            );
-        }
-    };
-
-    // Update system
-    let _ = sqlx::query(
-        "UPDATE systems SET name=?, ver=?,  os=?, ip=?, arch=?, last_seen=? WHERE id=?"
-    )
-    .bind(&payload.hostname)
-    .bind(&payload.ver)
-    .bind(&payload.os)
-    .bind(&payload.ip)
-    .bind(&payload.arch)
-    .bind(&now)
-    .bind(id)
-    .execute(&mut *tx)
-    .await;
-
-    // Fetch tests for this system
-    let tests: Vec<Test> = match sqlx::query_as::<_, Test>(
-        r#"
-        SELECT t.*
-        FROM commands c
-        JOIN tests t ON c.test_id = t.id
-        WHERE c.system_id = ?
-        LIMIT 20
-        "#
-    )
-    .bind(id)
-    .fetch_all(&mut *tx)
-    .await
-    {
-        Ok(tests) => tests,
-        Err(e) => {
-            error!("Failed to fetch tests for system {}: {}", id, e);
-            vec![]
-        }
-    };
-
-    // If no tests, send NONE
-    if tests.is_empty() {
+        let _ = sqlx::query("DELETE FROM commands WHERE system_id = ?").bind(id).execute(&mut *tx).await;
         let _ = tx.commit().await;
-        return (
-            StatusCode::OK,
-            Json(serde_json::json!({
-                "status": "ok",
-                "id": id,
-                "command": "NONE"
-            })),
-        );
-    }
 
-    
-    // Delete commands after fetching
-    if let Err(e) = sqlx::query("DELETE FROM commands WHERE system_id = ?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await
-    {
-        error!("Failed to delete commands for system {}: {}", id, e);
-    }
-
-
-
-    let _ = tx.commit().await;
-
-    (
-        StatusCode::OK,
-        Json(serde_json::json!({
-            "status":"ok",
+        response_data = serde_json::json!({
+            "status": "ok",
             "id": id,
-            "command":"TEST",
+            "command": if tests.is_empty() { "NONE" } else { "TEST" },
             "data": tests
-        })),
-    )
+        });
+
+        // Handshake recovery
+        if payload.public_key.is_some() {
+            debug!("Client ID {} requested Server Identity. Attaching Server Public Key.", id);
+            let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or(""));
+            let pub_file = config.key.public_key.as_deref().unwrap_or("scmserver.pub");
+            if let Ok(key) = fs::read_to_string(key_dir.join(pub_file)) {
+                response_data["server_public_key"] = serde_json::json!(key.trim());
+            }
+        }
+    }
+
+    // 5. SIGN AND RETURN
+    match sign_response(response_data, &config) {
+        Ok(signed) => {
+            debug!("Returning signed heartbeat response to Agent ID {}.", id);
+            (StatusCode::OK, Json(signed)).into_response()
+        },
+        Err(e) => {
+            error!("CRITICAL: Server failed to sign response for Agent {}: {}", id, e);
+            (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Internal Signing Error"}))).into_response()
+        }
+    }
 }
 
-
-
-
-// receive_result
+// =========================================================
+// HANDLER: Receive Compliance Results (POST /result)
+// =========================================================
 pub async fn receive_result(
     Extension(pool): Extension<SqlitePool>,
+    Extension(config): Extension<Arc<Config>>,
     Json(signed_req): Json<SignedResult>,
 ) -> impl IntoResponse {
     let payload = &signed_req.payload;
 
-    // Fetch client public key from DB
-    let db_pubkey = match sqlx::query_scalar::<_, String>(
-        "SELECT key FROM systems WHERE id = ?"
-    )
-    .bind(payload.client_id)
-    .fetch_optional(&pool)
-    .await
+    info!("Result received from Agent ID: {} (Test ID: {})", payload.client_id, payload.test_id);
+
+    // 1. Auth Check
+    let db_pubkey = match sqlx::query_scalar::<_, String>("SELECT key FROM systems WHERE id = ?")
+        .bind(payload.client_id).fetch_optional(&pool).await 
     {
         Ok(Some(k)) => k,
-        Ok(None) => {
-            return (
-                StatusCode::NOT_FOUND,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": "Agent not found"
-                })),
-            );
-        }
-        Err(e) => {
-            return (
-                StatusCode::INTERNAL_SERVER_ERROR,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": format!("DB error: {}", e)
-                })),
-            );
-        }
+        _ => {
+            warn!("Result Rejected: Unknown Agent ID {} attempted to upload results.", payload.client_id);
+            return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Unknown Agent"}))).into_response()
+        },
     };
 
-    
-    let public_key_bytes_vec = match general_purpose::STANDARD.decode(&db_pubkey) {
-        Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": "Invalid public key encoding"
-                })),
-            );
-        }
-    };
+    // 2. Verify Result Signature
+    let pub_key_bytes: [u8; 32] = general_purpose::STANDARD.decode(&db_pubkey).unwrap().try_into().unwrap();
+    let sig_bytes: [u8; 64] = general_purpose::STANDARD.decode(&signed_req.signature).unwrap().try_into().unwrap();
+    let verifier = VerifyingKey::from_bytes(&pub_key_bytes).unwrap();
+    let payload_bytes = bincode::serialize(payload).unwrap();
 
-    // Convert Vec<u8> -> [u8; 32]
-    let public_key_bytes: [u8; 32] = match public_key_bytes_vec.as_slice().try_into() {
-        Ok(arr) => arr,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": "Invalid public key length"
-                })),
-            );
-        }
-    };
-
-    // Build verifying key
-    let verifying_key = match VerifyingKey::from_bytes(&public_key_bytes) {
-        Ok(pk) => pk,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({
-                    "status": "error",
-                    "message": "Invalid public key format"
-                })),
-            );
-        }
-    };
-
-
-
-    // Decode signature from base64
-    let signature_bytes = match general_purpose::STANDARD.decode(&signed_req.signature) {
-        Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Invalid signature"})),
-            );
-        }
-    };
-
-    // Convert Vec<u8> to [u8; 64]
-    let signature_bytes: [u8; 64] = match signature_bytes.as_slice().try_into() {
-        Ok(arr) => arr,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Invalid signature length"})),
-            );
-        }
-    };
-
-    // Create signature (ed25519-dalek 2.x)
-    let signature = Signature::from_bytes(&signature_bytes);
-
-
-
-    // Verify signature
-    let payload_bytes = match bincode::serialize(payload) {
-        Ok(b) => b,
-        Err(_) => {
-            return (
-                StatusCode::BAD_REQUEST,
-                Json(serde_json::json!({"status":"error","message":"Serialization failed"})),
-            );
-        }
-    };
-
-    if verifying_key.verify(&payload_bytes, &signature).is_err() {
-        return (
-            StatusCode::UNAUTHORIZED,
-            Json(serde_json::json!({"status":"error","message":"Signature verification failed"})),
-        );
+    if verifier.verify(&payload_bytes, &Signature::from_bytes(&sig_bytes)).is_err() {
+        error!("SECURITY ALERT: Invalid signature on compliance results from Agent ID {}!", payload.client_id);
+        return (StatusCode::UNAUTHORIZED, Json(serde_json::json!({"error": "Result Auth Failed"}))).into_response();
     }
-
-    // Log result
-    info!(
-        "Received result → client_id: {}, test_id: {}, result: {}",
-        payload.client_id,
-        payload.test_id,
-        payload.result
-    );
     
-    // === SAVE RESULT INTO DATABASE ===
-    let now = chrono::Utc::now().to_string();
+    debug!("Result Authenticity: Verified signature for Agent ID {}.", payload.client_id);
 
+    // 3. Store Result
+    let now = chrono::Utc::now().to_string();
     let db_res = sqlx::query(
-        r#"
-        INSERT INTO results (system_id, test_id, result, last_updated)
-        VALUES (?, ?, ?, ?)
-        ON CONFLICT(system_id, test_id)
-        DO UPDATE SET
-            result = excluded.result,
-            last_updated = excluded.last_updated
-        "#
+        r#"INSERT INTO results (system_id, test_id, result, last_updated) 
+           VALUES (?, ?, ?, ?) 
+           ON CONFLICT(system_id, test_id) DO UPDATE SET result=excluded.result, last_updated=excluded.last_updated"#
     )
-    .bind(payload.client_id)            // system/client id
-    .bind(payload.test_id)              // test id
-    .bind(&payload.result)              // result string
-    .bind(&now)                         // timestamp
-    .execute(&pool)
-    .await;
+    .bind(payload.client_id).bind(payload.test_id).bind(&payload.result).bind(&now)
+    .execute(&pool).await;
 
     if let Err(e) = db_res {
-        error!(
-            "Failed to store result in DB: client={}, test={}, error={}",
-            payload.client_id,
-            payload.test_id,
-            e
-        );
-
-        return (
-            StatusCode::INTERNAL_SERVER_ERROR,
-            Json(serde_json::json!({
-                "status": "error",
-                "message": "Failed to store result in database"
-            })),
-        );
+        error!("DB Error: Failed to store compliance result: {}", e);
+        return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Storage Error"}))).into_response();
     }
 
+    info!("COMPLIANCE LOG: System {} passed Test {} with status: {}", payload.client_id, payload.test_id, payload.result);
 
-    (StatusCode::OK, Json(serde_json::json!({"status":"ok"})))
+    let response_data = serde_json::json!({"status": "ok"});
+    match sign_response(response_data, &config) {
+        Ok(signed) => (StatusCode::OK, Json(signed)).into_response(),
+        Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Signing Error"}))).into_response(),
+    }
 }
-
-
