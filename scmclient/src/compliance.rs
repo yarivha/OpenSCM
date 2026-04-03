@@ -35,6 +35,87 @@ fn get_user_name_from_uid(uid: u32) -> Option<String> {
 }
 
 
+
+#[cfg(unix)]
+fn check_user_exists(user: &str) -> bool {
+    use std::process::Command;
+
+    // 'id <user>' returns exit code 0 if the user exists (by name or UID)
+    // and a non-zero code if they do not.
+    let status = Command::new("id")
+        .arg(user)
+        .stdout(std::process::Stdio::null()) // Suppress output
+        .stderr(std::process::Stdio::null()) // Suppress error messages
+        .status();
+
+    match status {
+        Ok(s) => s.success(),
+        Err(_) => false,
+    }
+}
+
+#[cfg(windows)]
+fn check_user_exists(user: &str) -> bool {
+    use std::process::Command;
+    
+    // On Windows, 'net user <username>' is the quickest built-in check
+    let status = Command::new("net")
+        .args(["user", user])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) => s.success(),
+        Err(_) => false,
+    }
+}
+
+
+#[cfg(unix)]
+fn check_group_exists(group: &str) -> bool {
+    use std::process::Command;
+
+    // 'getent group <name>' checks /etc/group + LDAP/AD/SSSD
+    let status = Command::new("getent")
+        .args(["group", group])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) => s.success(),
+        Err(_) => {
+            // Fallback: If 'getent' isn't installed, try 'id -g'
+            Command::new("id")
+                .args(["-g", group])
+                .stdout(std::process::Stdio::null())
+                .stderr(std::process::Stdio::null())
+                .status()
+                .map(|s| s.success())
+                .unwrap_or(false)
+        }
+    }
+}
+
+#[cfg(windows)]
+fn check_group_exists(group: &str) -> bool {
+    use std::process::Command;
+
+    // 'net localgroup' checks for the existence of a local security group
+    let status = Command::new("net")
+        .args(["localgroup", group])
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .status();
+
+    match status {
+        Ok(s) => s.success(),
+        Err(_) => false,
+    }
+}
+
+
 pub fn evaluate(
     element: &str,
     input: &str,
@@ -228,6 +309,25 @@ pub fn evaluate(
                 );
                 false
             }
+        },
+        "user" => match selement_l.as_str() {
+                "exists" => check_user_exists(input),
+                "not exists" => !check_user_exists(input),
+                _ => {
+                    error!(
+                        "Unsupported user check: element={}, input={}, selement={}, condition={}, sinput={}",
+                        element, input, selement, condition, sinput
+                    );
+                    false
+                }
+        },
+        "group" => match selement_l.as_str() {
+                "exists" => check_group_exists(input),
+                "not exists" => !check_group_exists(input),
+                _ => {
+                    error!("Unsupported group check: selement={}", selement);
+                    false
+                }
         },
 
         _ => {
