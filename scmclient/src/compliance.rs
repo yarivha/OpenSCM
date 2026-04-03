@@ -395,17 +395,22 @@ pub fn evaluate(
         },
 
         "architecture" => {
-                // std::env::consts::ARCH provides strings like "x86_64", "aarch64", "x86", etc.
-                let actual_arch = std::env::consts::ARCH;
+             // std::env::consts::ARCH returns strings like "x86_64", "aarch64", etc.
+            let actual_arch = std::env::consts::ARCH;
 
-                match condition_l.as_str() {
-                    "equals" => actual_arch == sinput,
-                    "not equals" | "not equal" => actual_arch != sinput,
-                    _ => {
-                        error!("Unsupported architecture condition: {}", condition);
-                        false
-                    }
+            match condition_l.as_str() {
+                "equals" => actual_arch == sinput,
+                "not equals" | "not equal" => actual_arch != sinput,
+                "contains" => actual_arch.contains(sinput),
+                "not contains" => !actual_arch.contains(sinput),
+                _ => {
+                    error!(
+                        "Unsupported architecture condition: element={}, condition={}, sinput={}",
+                        element, condition, sinput
+                    );
+                    false
                 }
+            }
         },
 
         "user" => match selement_l.as_str() {
