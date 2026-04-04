@@ -104,18 +104,16 @@
                 <div class="card-footer">
                   <div class="text-right">
 		    <a class="btn btn-info btn-sm" href="/policies/edit/{{ policy.policy_id }}">
-                      <i class="fas fa-pencil-alt"></i>
-                         Edit
+                      <i class="fas fa-pencil-alt"></i> Edit
                     </a>
                     <a class="btn btn-danger btn-sm" onclick="return confirm('Delete Policy?')" href="/policies/delete/{{ policy.policy_id}}">
-                      <i class="fas fa-trash"></i>
-                         Delete
+                      <i class="fas fa-trash"></i> Delete
                     </a>
 		    <a href="/policies/run/{{ policy.policy_id }}" class="btn btn-sm btn-primary">
-                      <i class="fas fa-user"></i> Run Policy
+                      <i class="fas fa-rocket"></i> Run Policy
                     </a>
-		    <a href="#" class="btn btn-warning btn-primary">
-                      <i class="fas fa-calendar"></i> Scheduler
+		    <a href="/policies/report/{{ policy.policy_id }}" class="btn btn-sm btn-warning">
+                      <i class="fas fa-file-text"></i> View Report
                     </a>
                   </div>
                 </div>

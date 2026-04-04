@@ -202,7 +202,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             policy_name TEXT NOT NULL,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             created_by TEXT NOT NULL,
-            status_summary TEXT -- e.g., "Passed" or "Failed"
+            status_summary TEXT 
         )",
     )
     .execute(pool)

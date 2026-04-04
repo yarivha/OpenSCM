@@ -199,3 +199,43 @@ pub struct Condition {
     pub description: Option<String>,
 }
 
+
+#[derive(Serialize)]
+pub struct ReportData {
+    // Page 1: Policy Header Info
+    pub policy_name: String,
+    pub version: String,
+    pub description: String,
+    pub submission_date: String,
+    pub submitter_name: String,
+
+    // Page 2: Global Test Definitions (Rationale/Remediation)
+    pub tests_metadata: Vec<TestMeta>,
+
+    // Page 3+: System-specific Results
+    pub system_reports: Vec<SystemReport>,
+}
+
+/// Details for the "Policy Specification" page
+#[derive(Serialize)]
+pub struct TestMeta {
+    pub name: String,
+    pub description: String,
+    pub rational: String,
+    pub remediation: String,
+}
+
+/// A single page in the PDF for a specific server/system
+#[derive(Serialize)]
+pub struct SystemReport {
+    pub system_name: String,
+    pub results: Vec<IndividualResult>,
+}
+
+/// The pass/fail status for a specific test on a specific system
+#[derive(Serialize)]
+pub struct IndividualResult {
+    pub test_name: String,
+    pub status: bool, // true = Pass, false = Fail
+}
+

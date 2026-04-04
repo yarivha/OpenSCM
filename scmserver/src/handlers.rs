@@ -7,11 +7,12 @@ use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
 use urlencoding;
-use std::collections::HashMap;
+use std::collections::{HashMap, BTreeMap};
 use urlencoding::decode;
 use tracing::error;
 use bytes::Bytes;
 use bcrypt::{hash, DEFAULT_COST};
+use chrono::Local;
 
 use crate::models::ErrorQuery;
 use crate::models::Notification;
@@ -28,6 +29,10 @@ use crate::models::PolicyCompliance;
 use crate::models::Element;
 use crate::models::SElement;
 use crate::models::Condition;
+use crate::models::ReportData;
+use crate::models::TestMeta;
+use crate::models::SystemReport;
+use crate::models::IndividualResult;
 use crate::auth::AuthSession;
 
 
@@ -2257,6 +2262,113 @@ pub async fn policies_run(
 }
 
 
+// policies_report
+pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
+    -> Result<Html<String>, StatusCode> {
+
+
+    // Safely get the username
+    let submitter_name = auth.username.clone();
+
+    // 1. Fetch Policy
+    let policy_row = sqlx::query("SELECT name, version, description FROM policies WHERE id = ?")
+        .bind(id)
+        .fetch_one(&*pool)
+        .await
+        .map_err(|e| {
+            eprintln!("Database Error (Policy): {}", e);
+            StatusCode::NOT_FOUND 
+        })?;
+
+    // 2. Fetch Tests
+    let test_rows = sqlx::query(r#"
+        SELECT t.name, t.description, t.rational, t.remediation 
+        FROM tests t
+        JOIN tests_in_policy tip ON t.id = tip.test_id
+        WHERE tip.policy_id = ?"#)
+        .bind(id)
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| {
+            eprintln!("Database Error (Tests): {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR 
+        })?;
+
+    let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| {
+        TestMeta {
+            name: row.get("name"),
+            description: row.get("description"),
+            rational: row.get("rational"),
+            remediation: row.get("remediation"),
+        }
+    }).collect();
+
+    // 3. Fetch Results
+    let result_rows = sqlx::query(r#"
+        SELECT DISTINCT
+            s.name as system_name,
+            t.name as test_name,
+            r.result as status
+        FROM results r
+        JOIN systems s ON r.system_id = s.id
+        JOIN tests t ON r.test_id = t.id
+        JOIN systems_in_groups sig ON s.id = sig.system_id
+        JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+        JOIN tests_in_policy tip ON t.id = tip.test_id
+        WHERE sip.policy_id = ?
+          AND tip.policy_id = ?"#)
+        .bind(id)
+        .bind(id)
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| {
+            eprintln!("Database Error (Results): {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
+    // 4. Group results by System Name
+    let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
+    for row in result_rows {
+        // Use Option to handle cases where a system name might be NULL
+        let system_name = row.get::<Option<String>, _>("system_name")
+            .unwrap_or_else(|| "Unknown System".to_string());
+            
+        let test_name: String = row.get("test_name");
+        let status_str: String = row.get("status");
+        let status = status_str == "true";
+
+        system_map
+            .entry(system_name)
+            .or_insert_with(Vec::new)
+            .push(IndividualResult { test_name, status });
+    }
+
+    // Convert the BTreeMap into a Vec<SystemReport>
+    let system_reports: Vec<SystemReport> = system_map
+        .into_iter()
+        .map(|(name, results)| SystemReport {
+            system_name: name,
+            results,
+        })
+        .collect();
+
+    // 5. Build context
+    let report_data = ReportData {
+        policy_name: policy_row.get("name"),
+        version: policy_row.get("version"),
+        description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
+        submission_date: Local::now().format("%Y-%m-%d %H:%M").to_string(),
+        submitter_name,
+        tests_metadata,
+        system_reports, // Now this variable exists!
+    };
+
+    let mut context = Context::new();
+    context.insert("report", &report_data);
+    render_template(&tera,Some(&pool),"policies_report.html", context, Some(auth)).await
+}
+
+
 //////////////////// Reports /////////////////////////
 // reports
 pub async fn reports(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
@@ -2264,8 +2376,6 @@ pub async fn reports(auth: AuthSession, pool: Extension<SqlitePool>, tera: Exten
     let context = Context::new();
     render_template(&tera,Some(&pool), "reports.html", context, Some(auth)).await
 }
-
-
 
 
 
