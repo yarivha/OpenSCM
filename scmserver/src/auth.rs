@@ -11,7 +11,7 @@ use bcrypt::verify;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tera::{Tera, Context};
-use tracing::{info, warn, error};
+use tracing::{debug, info, warn, error};
 
 use crate::models::ErrorQuery;
 use crate::handlers::render_template;
@@ -37,7 +37,7 @@ where
             let jar = CookieJar::from_headers(&parts.headers);
 
             if let Some(cookie) = jar.get("session") {
-                info!("AuthSession: found session cookie: {}", cookie.value());
+                debug!("AuthSession: found session cookie: {}", cookie.value());
 
                 if let Ok(session_json) = serde_json::from_str::<Value>(cookie.value()) {
                     if let (Some(username), Some(role)) = (
