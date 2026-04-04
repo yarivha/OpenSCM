@@ -87,7 +87,7 @@
     			</div>
                     </div>
                     <div class="col-5 text-center">
-		      <i class="nav-icon fas fa-certificate fa-5x 
+			<a href="/policies/report/{{ policy.policy_id }}"><i class="nav-icon fas fa-certificate fa-5x 
     			{% if policy.compliance == -1.0 %}
         		text-secondary  {# Gray for No Data #}
     			{% elif policy.compliance < 50 %}
@@ -97,7 +97,7 @@
     			{% else %}
         		text-success    {# Green for Compliant #}
     			{% endif %}
-		      "></i>
+			"></i></a>
                     </div>
                   </div>
                 </div>
