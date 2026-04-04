@@ -230,6 +230,7 @@ pub struct TestMeta {
 pub struct SystemReport {
     pub system_name: String,
     pub results: Vec<IndividualResult>,
+    pub is_passed: bool,
 }
 
 /// The pass/fail status for a specific test on a specific system

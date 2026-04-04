@@ -2345,14 +2345,21 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 
     // Convert the BTreeMap into a Vec<SystemReport>
     let system_reports: Vec<SystemReport> = system_map
-        .into_iter()
-        .map(|(name, results)| SystemReport {
+    .into_iter()
+    .map(|(name, results)| {
+        // A system is passed ONLY if all its results are true
+        let is_passed = results.iter().all(|r| r.status);
+
+        SystemReport {
             system_name: name,
             results,
-        })
-        .collect();
+            is_passed, // Pass the pre-calculated value
+        }
+    })
+    .collect();
 
-    // 5. Build context
+
+    // Build context
     let report_data = ReportData {
         policy_name: policy_row.get("name"),
         version: policy_row.get("version"),
