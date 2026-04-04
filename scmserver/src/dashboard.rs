@@ -1,42 +1,16 @@
-use axum::response::{Html, Response, IntoResponse, Redirect};
-use axum::http::{StatusCode, header};
-use axum::extract::{RawForm, Extension, Query, Path};
-use http_body_util::Full;
+use axum::response::Html;
+use axum::http::StatusCode;
+use axum::extract::Extension;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
-use urlencoding;
-use std::collections::{HashMap, BTreeMap};
-use urlencoding::decode;
 use tracing::error;
-use bytes::Bytes;
-use bcrypt::{hash, DEFAULT_COST};
-use chrono::Local;
 
-use crate::models::ErrorQuery;
-use crate::models::Notification;
-use crate::models::User;
-use crate::models::System;
-use crate::models::SystemGroup;
-use crate::models::SystemInsideGroup;
-use crate::models::Test;
-use crate::models::Policy;
-use crate::models::SystemInsidePolicy;
-use crate::models::TestInsidePolicy;
 use crate::models::SystemCompliance;
 use crate::models::PolicyCompliance;
-use crate::models::Element;
-use crate::models::SElement;
-use crate::models::Condition;
-use crate::models::ReportData;
-use crate::models::TestMeta;
-use crate::models::SystemReport;
-use crate::models::IndividualResult;
 use crate::auth::AuthSession;
 use crate::handlers::render_template;
-use crate::handlers::parse_form_data;
-use crate::handlers::not_found;
 
 
 
