@@ -193,6 +193,22 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
    .await?;
 
 
+    // Create reports table
+    sqlx::query(
+        "CREATE TABLE if NOT EXISTS reports (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            report_name TEXT NOT NULL,
+            file_path TEXT NOT NULL,
+            policy_name TEXT NOT NULL,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            created_by TEXT NOT NULL,
+            status_summary TEXT -- e.g., "Passed" or "Failed"
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+
 
     // Create severity table
     sqlx::query(
