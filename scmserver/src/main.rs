@@ -5,6 +5,7 @@ mod schema;
 mod auth;
 mod client;
 mod dashboard;
+mod reports;
 mod settings;
 
 use tera::Tera;
@@ -20,6 +21,7 @@ use crate::schema::*;
 use crate::auth::*;
 use crate::client::*;
 use crate::dashboard::*;
+use crate::reports::*;
 use crate::settings::*;
 
 // Embedded templates/static files

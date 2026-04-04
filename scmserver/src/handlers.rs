@@ -2245,14 +2245,4 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 }
 
 
-//////////////////// Reports /////////////////////////
-// reports
-pub async fn reports(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
-    -> Result<Html<String>, StatusCode> {
-    let context = Context::new();
-    render_template(&tera,Some(&pool), "reports.html", context, Some(auth)).await
-}
-
-
-
 
