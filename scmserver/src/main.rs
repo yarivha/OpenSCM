@@ -5,6 +5,7 @@ mod schema;
 mod auth;
 mod client;
 mod dashboard;
+mod settings;
 
 use tera::Tera;
 use axum::{Extension, Router, response::{Response, IntoResponse}, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
@@ -19,6 +20,7 @@ use crate::schema::*;
 use crate::auth::*;
 use crate::client::*;
 use crate::dashboard::*;
+use crate::settings::*;
 
 // Embedded templates/static files
 static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");

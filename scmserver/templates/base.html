@@ -89,6 +89,11 @@
             </div>
           </form>
         </div>
+      <li class="nav-item">
+    	<a class="nav-link" id="dark-mode-toggle" href="#" role="button">
+          <i class="fas fa-moon" id="dark-mode-icon"></i>
+    	</a>
+      </li>
       </li>
       <!-- Notifications Dropdown Menu -->
       <li class="nav-item dropdown">
@@ -403,6 +408,51 @@
     window.stepper = new Stepper(document.querySelector('.bs-stepper'))
   })
 
+</script>
+
+<script>
+  /**
+   * OpenSCM Theme Manager
+   * Handles Dark/Light mode switching and persistence
+   */
+  const toggleBtn = document.getElementById('dark-mode-toggle');
+  const icon = document.getElementById('dark-mode-icon');
+  const body = document.body;
+  const navbar = document.querySelector('.main-header');
+
+  // Function to apply the theme
+  function setDarkMode(isDark) {
+    if (isDark) {
+      body.classList.add('dark-mode');
+      // Update Navbar to match Dark Mode
+      navbar.classList.replace('navbar-white', 'navbar-dark');
+      navbar.classList.replace('navbar-light', 'navbar-dark');
+      // Update Icon
+      icon.classList.replace('fa-moon', 'fa-sun');
+      localStorage.setItem('theme', 'dark');
+    } else {
+      body.classList.remove('dark-mode');
+      // Update Navbar to match Light Mode
+      navbar.classList.replace('navbar-dark', 'navbar-white');
+      navbar.classList.add('navbar-light');
+      // Update Icon
+      icon.classList.replace('fa-sun', 'fa-moon');
+      localStorage.setItem('theme', 'light');
+    }
+  }
+
+  // Load saved preference on page start
+  const savedTheme = localStorage.getItem('theme');
+  if (savedTheme === 'dark') {
+    setDarkMode(true);
+  }
+
+  // Toggle listener
+  toggleBtn.addEventListener('click', (e) => {
+    e.preventDefault();
+    const isNowDark = !body.classList.contains('dark-mode');
+    setDarkMode(isNowDark);
+  });
 </script>
 
 {% block scripts %}{% endblock %}
