@@ -9,7 +9,7 @@ use std::sync::Arc;
 use urlencoding;
 use std::collections::HashMap;
 use urlencoding::decode;
-use tracing::error;
+use tracing::{warn, error};
 use bytes::Bytes;
 
 use crate::models::ErrorQuery;
@@ -25,9 +25,6 @@ use crate::auth::AuthSession;
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 
-
-
-////////////////////////// Inventory //////////////////////////////
 
 
 // systems
@@ -184,12 +181,26 @@ pub async fn systems_delete(
 pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
 
     // capture system
-    let row = sqlx::query("
-                SELECT id,name,ver,ip,os,arch,status from systems where id=?")
+    let row_result = sqlx::query("
+        SELECT id, name, ver, ip, os, arch, status 
+        FROM systems 
+        WHERE id = ? AND status = 'active'
+    ")
     .bind(id)
-    .fetch_one(&*pool)
-    .await
-    .unwrap();
+    .fetch_optional(&*pool)
+    .await;
+
+    // 2. Handle potential Database Errors AND missing rows
+    let row = match row_result {
+        Ok(Some(r)) => r,
+        _ => {
+            warn!("System ID {} not found or not active.", id);
+            // We MUST call .into_response() here
+            return Redirect::to("/systems").into_response(); 
+        }
+    };
+
+
 
     let system = System {
             id: row.try_get("id").unwrap(),
@@ -250,7 +261,7 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
     context.insert("system", &system);
     context.insert("groups", &groups);
     context.insert("systems_in_groups", &systems_in_groups);
-    render_template(&tera, Some(&pool), "systems_edit.html",context, Some(auth)).await
+    render_template(&tera, Some(&pool), "systems_edit.html",context, Some(auth)).await.into_response()
 }
 
 // system_edit_save
@@ -455,7 +466,7 @@ pub async fn system_groups(auth: AuthSession, Query(query): Query<ErrorQuery>, p
 pub async fn system_groups_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
     -> Result<Html<String>, StatusCode> {
     let rows = sqlx::query("
-        SELECT id,name,status from systems")
+        SELECT id,name,status from systems where status='active'")
         .fetch_all(&*pool)
         .await
         .unwrap();
@@ -643,7 +654,7 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
     
     // capture system list
     let rows = sqlx::query("
-         SELECT id, name, status from systems ")
+         SELECT id, name, status from systems where status='active' ")
         .fetch_all(&*pool)
         .await
         .unwrap();
