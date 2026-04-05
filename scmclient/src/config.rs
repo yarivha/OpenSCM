@@ -47,7 +47,7 @@ impl Default for Config {
 
         Self {
             server: ServerConfig {
-                url: "https://demo.openscm.io:8000".to_string(),
+                url: "http://localhost:8000".to_string(),
             },
             client: ClientConfig {
                 heartbeat: Some("300".to_string()),
@@ -125,7 +125,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
 
     let config = Config {
         server: ServerConfig {
-            url: get_val("ServerURL", "https://demo.openscm.io:8000"),
+            url: get_val("ServerURL", "http://localhost:8000"),
         },
         client: ClientConfig {
             heartbeat: Some(get_val("Heartbeat", "300")),
