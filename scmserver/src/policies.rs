@@ -1,15 +1,20 @@
 use axum::response::{Html, Response, IntoResponse, Redirect};
-use axum::http::StatusCode;
+use axum::http::{StatusCode,header} ;
 use axum::extract::{RawForm, Extension, Query, Path};
+use axum::Form; 
 use http_body_util::Full;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
+use std::error::Error;
+use std::fs;
 use urlencoding;
 use std::collections::BTreeMap;
 use tracing::error;
 use chrono::Local;
+use genpdf::{elements, style, Element};
+
 
 use crate::models::ErrorQuery;
 use crate::models::SystemGroup;
@@ -687,7 +692,7 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
     let submitter_name = auth.username.clone();
 
     // 1. Fetch Policy
-    let policy_row = sqlx::query("SELECT name, version, description FROM policies WHERE id = ?")
+    let policy_row = sqlx::query("SELECT id, name, version, description FROM policies WHERE id = ?")
         .bind(id)
         .fetch_one(&*pool)
         .await
@@ -777,6 +782,7 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 
     // Build context
     let report_data = ReportData {
+        policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
         version: policy_row.get("version"),
         description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
@@ -792,4 +798,117 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 }
 
 
+pub async fn policies_report_save(
+    Path(id): Path<i64>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+    // --- 1. DATA FETCHING ---
+    // In a real scenario, you'd join your policies, tests, and results tables here.
+    // For this example, we'll build the ReportData object based on the ID.
+    let policy_name = "Standard Security Hardening";
 
+    // Example: Fetching the policy description from DB
+    let description = match sqlx::query("SELECT description FROM policies WHERE id = ?")
+        .bind(id)
+        .fetch_one(&pool)
+        .await {
+            Ok(row) => row.get::<String, _>("description"),
+            Err(_) => "OpenSCM Compliance Policy".to_string(),
+        };
+
+    // --- 2. PDF INITIALIZATION ---
+    let font_dir = "./static/dist/fonts";
+    let font_family = match genpdf::fonts::from_files(font_dir, "LiberationSans", None) {
+        Ok(f) => f,
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Font files missing in /dist/fonts").into_response(),
+    };
+
+    let mut doc = genpdf::Document::new(font_family);
+    doc.set_title(format!("OpenSCM Report - {}", policy_name));
+
+    let mut decorator = genpdf::SimplePageDecorator::new();
+    decorator.set_margins(15);
+    doc.set_page_decorator(decorator);
+
+    // --- 3. BUILDING THE PDF CONTENT ---
+
+    // Header Section
+    doc.push(elements::Text::new("OpenSCM Compliance Report")
+        .styled(style::Style::new().with_color(style::Color::Rgb(0, 0, 128)).bold()));
+    doc.push(elements::Break::new(1.5));
+    doc.push(elements::Paragraph::new(format!("Policy: {}", policy_name)));
+    doc.push(elements::Paragraph::new(format!("Report ID: {}", id)));
+    doc.push(elements::Paragraph::new(format!("Description: {}", description)));
+    doc.push(elements::Break::new(2.0));
+
+    // Results Table (Example with one system - you would loop through your DB results here)
+    doc.push(elements::Text::new("System Results").styled(style::Style::new().bold()));
+    doc.push(elements::Break::new(1.0));
+
+    let mut table = elements::TableLayout::new(vec![3, 1]);
+    table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+    // Table Header (Must be Boxed)
+    table.push_row(vec![
+        Box::new(elements::Text::new("Security Control").styled(style::Style::new().bold())),
+        Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
+    ]);
+
+    // Example Row (You would put your 'for' loop here)
+    let test_status = true; // Mock status
+    let (status_text, status_color) = if test_status {
+        ("PASS", style::Color::Rgb(0, 128, 0))
+    } else {
+        ("FAIL", style::Color::Rgb(200, 0, 0))
+    };
+
+    table.push_row(vec![
+        Box::new(elements::Text::new("Ensure Password Complexity is Enabled")),
+        Box::new(elements::Text::new(status_text)
+            .styled(style::Style::new().with_color(status_color).bold())),
+    ]);
+
+    doc.push(table);
+
+    // --- 4. RENDERING & RESPONSE ---
+    let mut buffer = Vec::new();
+    if let Err(e) = doc.render(&mut buffer) {
+        return (StatusCode::INTERNAL_SERVER_ERROR, "PDF Render Error").into_response();
+    }
+
+    // --- NEW: SAVE TO SERVER LOGIC ---
+    
+    // 1. Define the storage path
+    let storage_dir = "./storage/reports";
+    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
+    let file_path = format!("{}/report_{}_{}.pdf", storage_dir, id, timestamp);
+
+    // 2. Create the directory if it doesn't exist
+    if let Err(e) = fs::create_dir_all(storage_dir) {
+        tracing::error!("Failed to create storage directory: {}", e);
+        // We continue anyway so the user still gets their download
+    } else {
+        // 3. Write the buffer to the server's disk asynchronously
+        if let Err(e) = fs::write(&file_path, &buffer) {
+            tracing::error!("Failed to save report to server: {}", e);
+        } else {
+            println!("Report saved successfully to: {}", file_path);
+            
+            // OPTIONAL: Update your DB to record the file path
+            // let _ = sqlx::query("UPDATE policies SET last_report_path = ? WHERE id = ?")
+            //     .bind(&file_path).bind(id).execute(&pool).await;
+        }
+    }
+
+    // --- RETURN TO BROWSER ---
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/pdf")
+        .header(
+            header::CONTENT_DISPOSITION, 
+            format!("attachment; filename=\"OpenSCM_Report_{}.pdf\"", id)
+        )
+        .body(axum::body::Body::from(buffer))
+        .unwrap()
+        .into_response()
+}
