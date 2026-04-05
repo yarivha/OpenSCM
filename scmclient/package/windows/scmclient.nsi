@@ -50,7 +50,7 @@ Section "Install"
     
     SetOutPath "$INSTDIR"
     # Update this path to your actual build artifact location
-    File "scmclient.exe"
+    File "/Apps/OpenSCM/build/target/x86_64-pc-windows-gnu/release/scmclient.exe"
     
     # Using unique names for the service wrapper
     File "scmclient-service.exe"
