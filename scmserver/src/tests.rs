@@ -349,7 +349,7 @@ pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extensio
 pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
 
     // capture system
-    let row = sqlx::query("
+    let row_result = sqlx::query("
                 SELECT id,name,description,severity,rational,remediation,filter,
                 element_1,input_1,selement_1,condition_1,sinput_1,
                 element_2,input_2,selement_2,condition_2,sinput_2,
@@ -358,9 +358,21 @@ pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<S
                 element_5,input_5,selement_5,condition_5,sinput_5
                 from tests where id=?")
     .bind(id)
-    .fetch_one(&*pool)
-    .await
-    .unwrap();
+    .fetch_optional(&*pool)
+    .await;
+
+    // Handle potential Database Errors AND missing rows
+    let row = match row_result {
+        Ok(Some(r)) => r, // We found the test
+        Ok(None) => {     // The query worked, but no test found
+            return Redirect::to("/tests?error_message=Test+not+found").into_response();
+        }
+        Err(e) => {      // Database error (connection lost, etc.)
+            error!("Database error: {}", e);
+            return Redirect::to("/tests?error_message=Database+error").into_response();
+        }
+    };
+
 
     let test = Test {
             id: row.get("id"),
@@ -452,7 +464,7 @@ pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<S
     context.insert("elements", &elements);
     context.insert("selements", &selements);
     context.insert("conditions", &conditions);
-    render_template(&tera, Some(&pool), "tests_edit.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "tests_edit.html", context, Some(auth)).await.into_response()
 }
 
 

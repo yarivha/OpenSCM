@@ -307,12 +307,23 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
 //policies_edit
 pub async fn policies_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
 
-let row = sqlx::query("
+let row_result = sqlx::query("
                 SELECT id,name,version,description from policies where id=?")
     .bind(id)
-    .fetch_one(&*pool)
-    .await
-    .unwrap();
+    .fetch_optional(&*pool)
+    .await;
+
+    // Handle potential Database Errors AND missing rows
+    let row = match row_result {
+        Ok(Some(r)) => r, // We found the test
+        Ok(None) => {     // The query worked, but no test found
+            return Redirect::to("/policies?error_message=Policy+not+found").into_response();
+        }
+        Err(e) => {      // Database error (connection lost, etc.)
+            error!("Database error: {}", e);
+            return Redirect::to("/tests?error_message=Database+error").into_response();
+        }
+    };
 
     let policy = Policy {
             id: row.try_get("id").unwrap(),
@@ -419,7 +430,7 @@ let row = sqlx::query("
     context.insert("system_groups",&system_groups);
     context.insert("tests_in_policy", &tests_in_policy);
     context.insert("systems_in_policy", &systems_in_policy);
-    render_template(&tera,Some(&pool), "policies_edit.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool), "policies_edit.html", context, Some(auth)).await.into_response()
 
 }
 
