@@ -5,6 +5,7 @@ mod schema;
 mod auth;
 mod client;
 mod dashboard;
+mod policies;
 mod reports;
 mod settings;
 
@@ -21,6 +22,7 @@ use crate::schema::*;
 use crate::auth::*;
 use crate::client::*;
 use crate::dashboard::*;
+use crate::policies::*;
 use crate::reports::*;
 use crate::settings::*;
 
