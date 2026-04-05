@@ -190,16 +190,17 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
     .fetch_optional(&*pool)
     .await;
 
-    // 2. Handle potential Database Errors AND missing rows
+    // Handle potential Database Errors AND missing rows
     let row = match row_result {
-        Ok(Some(r)) => r,
-        _ => {
-            warn!("System ID {} not found or not active.", id);
-            // We MUST call .into_response() here
-            return Redirect::to("/systems").into_response(); 
+        Ok(Some(r)) => r, // We found the group
+        Ok(None) => {     // The query worked, but no group found
+            return Redirect::to("/system?error_message=System+group+not+found").into_response();
+        }
+        Err(e) => {      // Database error (connection lost, etc.)
+            error!("Database error: {}", e);
+            return Redirect::to("/system?error_message=Database+error").into_response();
         }
     };
-
 
 
     let system = System {
@@ -638,12 +639,24 @@ pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: 
 pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
 
     // capture system
-    let row = sqlx::query("
+    let row_result = sqlx::query("
                 SELECT id,name,description from system_groups where id=?")
     .bind(id)
-    .fetch_one(&*pool)
-    .await
-    .unwrap();
+    .fetch_optional(&*pool)
+    .await;
+
+    // Handle potential Database Errors AND missing rows
+    let row = match row_result {
+        Ok(Some(r)) => r, // We found the group
+        Ok(None) => {     // The query worked, but no group found
+            return Redirect::to("/system_groups?error_message=System+group+not+found").into_response();
+        }
+        Err(e) => {      // Database error (connection lost, etc.)
+            error!("Database error: {}", e);
+            return Redirect::to("/system_groups?error_message=Database+error").into_response();
+        }
+    };
+
 
     let group = SystemGroup {
             id: row.try_get("id").unwrap(),
@@ -698,7 +711,7 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
     context.insert("group", &group);
     context.insert("systems", &systems);
     context.insert("systems_in_groups", &systems_in_groups);
-    render_template(&tera, Some(&pool), "system_groups_edit.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "system_groups_edit.html", context, Some(auth)).await.into_response()
 }
 
 
