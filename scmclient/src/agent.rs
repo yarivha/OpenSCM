@@ -23,11 +23,7 @@ pub async fn send_system_info(
     let my_ver = env!("CARGO_PKG_VERSION").to_string();
 
     // 2. CONSTRUCT URLS
-    let base_url = format!(
-        "http://{}:{}",
-        config.server.host.as_deref().unwrap_or("localhost"),
-        config.server.port.as_deref().unwrap_or("8000")
-    );
+    let base_url = config.server.url.trim_end_matches('/').to_string();
     let send_url = format!("{}/send", base_url);
     let result_url = format!("{}/result", base_url);
 

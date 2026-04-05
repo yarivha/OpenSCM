@@ -25,8 +25,7 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ServerConfig {
-    pub port: Option<String>,
-    pub host: Option<String>,
+    pub url: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -56,8 +55,7 @@ impl Default for Config {
 
         Self {
             server: ServerConfig {
-                host: Some("127.0.0.1".to_string()),
-                port: Some("8000".to_string()),
+                url: "https://demo.openscm.io:8000".to_string(),
             },
             client: ClientConfig {
                 id: Some("0".to_string()),
@@ -86,8 +84,7 @@ impl Config {
             let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
             
             // Save each field if it exists
-            if let Some(h) = &self.server.host { key.set_value("ServerName", h)?; }
-            if let Some(p) = &self.server.port { key.set_value("ServerPort", p)?; }
+            if let Some(h) = &self.server.url { key.set_value("ServerURL", h)?; }
             if let Some(i) = &self.client.id { key.set_value("ClientID", i)?; }
             if let Some(hb) = &self.client.heartbeat { key.set_value("Heartbeat", hb)?; }
             if let Some(ll) = &self.client.loglevel { key.set_value("LogLevel", ll)?; }
@@ -158,8 +155,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
 
     let mut config = Config {
         server: ServerConfig {
-            host: Some(get_val("ServerName", "localhost")),
-            port: Some(get_val("ServerPort", "8000")),
+            url: Some(get_val("ServerURL", "https://openscm.io:8000")),
         },
         client: ClientConfig {
             id: Some(get_val("ClientID", "0")),
@@ -214,14 +210,6 @@ fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
 
 fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
     let mut valid = true;
-
-    // 1. Validate Numeric Fields
-    if let Some(p) = &config.server.port {
-        if p.parse::<u16>().is_err() {
-            error!("Invalid port in config: {}", p);
-            valid = false;
-        }
-    }
 
     if let Some(h) = &config.client.heartbeat {
         if h.parse::<u32>().is_err() {

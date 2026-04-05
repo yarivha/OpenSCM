@@ -34,8 +34,7 @@ async fn main() {
 
 
     // === Print startup configuration ===
-    let server_host = config.server.host.as_deref().unwrap_or("localhost");
-    let server_port = config.server.port.as_deref().unwrap_or("8000");
+    let server_url = &config.server.url;
     let client_id = config.client.id.as_deref().unwrap_or("0");
     let heartbeat = config.client.heartbeat
         .as_deref()
@@ -44,7 +43,7 @@ async fn main() {
     let log_level = config.client.loglevel.as_deref().unwrap_or("info");
 
     info!("================ SCM Agent Configuration ================");
-    info!("Server URL     : http://{}:{}", server_host, server_port);
+    info!("Server URL     : {}", server_url);
     info!("Client Version : {}", env!("CARGO_PKG_VERSION"));
     info!("Client ID      : {}", client_id);
     info!("Heartbeat      : {} seconds", heartbeat);

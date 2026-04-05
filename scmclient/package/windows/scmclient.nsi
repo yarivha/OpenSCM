@@ -22,31 +22,23 @@ Page custom SetCustom GetCustom
 
 !insertmacro MUI_LANGUAGE "English"
 
-Var ServerName
-Var ServerPort
+Var ServerURL
 Var Dialog
 Var Label1
-Var Label2
 Var Text1
-Var Text2
 
 Function SetCustom
     nsDialogs::Create 1018
     Pop $Dialog
-    ${NSD_CreateLabel} 0 0u 100% 10u "Enter Server Name:"
+    ${NSD_CreateLabel} 0 0u 100% 10u "Enter Server URL:"
     Pop $Label1
-    ${NSD_CreateText} 0 12u 100% 12u "localhost"
+    ${NSD_CreateText} 0 12u 100% 12u "http://localhost"
     Pop $Text1
-    ${NSD_CreateLabel} 0 30u 100% 10u "Enter Port Number:"
-    Pop $Label2
-    ${NSD_CreateText} 0 42u 50u 12u "8000"
-    Pop $Text2
     nsDialogs::Show
 FunctionEnd
 
 Function GetCustom
-    ${NSD_GetText} $Text1 $ServerName
-    ${NSD_GetText} $Text2 $ServerPort
+    ${NSD_GetText} $Text1 $ServerURL
 FunctionEnd
 
 Section "Install"
@@ -66,8 +58,7 @@ Section "Install"
     CreateDirectory "$APPDATA\OpenSCM\Client\keys"
 
     # --- Save to Registry (New Model: Nested under \Client) ---
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerName" "$ServerName"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerPort" "$ServerPort"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerName" "$ServerURL"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ClientID" "0"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
