@@ -6,163 +6,21 @@ use std::path::PathBuf;
 use base64::{engine::general_purpose, Engine as _};
 use reqwest;
 use chrono;
+use sha2::{Sha256, Digest};
+use rand::rngs::OsRng;
 
 // Project-specific imports
 use crate::models::{UnsignedPayload, SignedRequest, SignedResponse, Test, ComplianceResult};
 use crate::config::Config;
 use crate::compliance::evaluate;
 
-pub async fn send_system_info(
-    config: &mut Config,
-) -> Result<(), Box<dyn std::error::Error>> {
-    // 1. COLLECT SYSTEM METADATA
-    let my_local_ip = local_ip_address::local_ip()?.to_string();
-    let my_hostname = gethostname::gethostname().to_string_lossy().into_owned();
-    let my_os = format!("{} {}", sys_info::os_type()?, sys_info::os_release()?);
-    let my_arch = std::env::consts::ARCH.to_string();
-    let my_ver = env!("CARGO_PKG_VERSION").to_string();
-
-    // 2. CONSTRUCT URLS
-    let base_url = config.server.url.trim_end_matches('/').to_string();
-    let send_url = format!("{}/send", base_url);
-    let result_url = format!("{}/result", base_url);
-
-    // 3. LOAD CLIENT IDENTITY KEYS
-    let key_dir = PathBuf::from(config.key.key_path.as_deref().ok_or("Key path missing in config")?);
-    let pub_path = key_dir.join(config.key.pub_key.as_deref().unwrap_or("scmclient.pub"));
-    let priv_path = key_dir.join(config.key.priv_key.as_deref().unwrap_or("scmclient.key"));
-    let server_pub_path = key_dir.join(config.key.server_key.as_deref().unwrap_or("scmserver.pub"));
-
-    let public_base64 = fs::read_to_string(&pub_path)?.trim().to_string();
-    let private_base64 = fs::read_to_string(&priv_path)?;
-    let private_bytes = general_purpose::STANDARD.decode(private_base64.trim())?;
-    
-    let signing_key = SigningKey::from_bytes(&private_bytes.try_into().map_err(|_| "Invalid private key format")?);
-
-    let client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()?;
-
-    // 4. COMMUNICATION LOOP
-    loop {
-        let current_id = config.client.id.clone().unwrap_or_else(|| "0".to_string());
-
-        // HANDSHAKE LOGIC: Send our key if we are new (ID 0) OR if we lost the server's public key
-        let needs_handshake = current_id == "0" || !server_pub_path.exists();
-
-        let unsigned_payload = UnsignedPayload {
-            id: current_id.clone(),
-            hostname: my_hostname.clone(),
-            ver: my_ver.clone(),
-            ip: my_local_ip.clone(),
-            os: my_os.clone(),
-            arch: my_arch.clone(),
-            timestamp: chrono::Utc::now().timestamp().to_string(),
-            public_key: if needs_handshake { Some(public_base64.clone()) } else { None },
-        };
-
-        // Sign the request
-        let message_bytes = bincode::serialize(&unsigned_payload)?;
-        let signature = signing_key.sign(&message_bytes);
-        let request = SignedRequest {
-            payload: unsigned_payload,
-            signature: general_purpose::STANDARD.encode(signature.to_bytes()),
-        };
-
-        // Dispatch Heartbeat
-        let response = match client.post(&send_url).json(&request).send().await {
-            Ok(res) => res,
-            Err(e) => {
-                error!("Connection failed to {}: {}", send_url, e);
-                return Err(e.into());
-            }
-        };
-
-        // Handle 404 (Server lost our ID)
-        if response.status() == reqwest::StatusCode::NOT_FOUND {
-            warn!("Agent ID {} not recognized by server. Resetting to 0.", current_id);
-            config.client.id = Some("0".to_string());
-            config.save()?;
-            continue; 
-        }
-
-        if !response.status().is_success() {
-            error!("Server returned error status: {}", response.status());
-            return Ok(());
-        }
-
-        // ==========================================
-        // 5. UNWRAP AND VERIFY SERVER RESPONSE
-        // ==========================================
-        let signed_res: SignedResponse = response.json().await?;
-        debug!("Message received: Secure envelope successfully extracted.");
-
-        let inner_json = &signed_res.payload;
-
-        // Verify Signature if we have the server's public key
-        if server_pub_path.exists() {
-            let server_pub_base64 = fs::read_to_string(&server_pub_path)?;
-            let server_pub_bytes = general_purpose::STANDARD.decode(server_pub_base64.trim())?;
-            let verifier = VerifyingKey::from_bytes(&server_pub_bytes.try_into().map_err(|_| "Invalid server pubkey")?)?;
-            
-            let sig_bytes = general_purpose::STANDARD.decode(&signed_res.signature)?;
-            let signature = Signature::from_bytes(&sig_bytes.try_into().map_err(|_| "Invalid signature length")?);
-            
-            let payload_bytes = bincode::serialize(inner_json)?;
-            
-            if let Err(e) = verifier.verify(&payload_bytes, &signature) {
-                error!("SECURITY ALERT: Server signature verification FAILED! Packet dropped. Error: {}", e);
-                return Ok(()); 
-            }
-            info!("✅ Server identity verified. Signature approved.");
-        } else {
-            warn!("Handshake in progress: Processing unsigned response (Initial trust).");
-        }
-
-        // ==========================================
-        // 6. PROCESS VERIFIED PAYLOAD
-        // ==========================================
-        
-        // Check for Server Public Key (Self-Healing Handshake)
-        if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str()) {
-            fs::write(&server_pub_path, server_key.trim())?;
-            info!("Identity Handshake: Server public key saved successfully.");
-        }
-
-        // Extract and Match Command
-        match inner_json.get("command").and_then(|c| c.as_str()) {
-            Some("REGISTER") => {
-                if let Some(new_id_val) = inner_json.get("id").and_then(|id| id.as_i64()) {
-                    let id_str = new_id_val.to_string();
-                    info!("Registration Complete: New Agent ID assigned: {}", id_str);
-                    config.client.id = Some(id_str);
-                    config.save()?;
-                }
-            },
-            Some("TEST") => {
-                if let Some(tests_value) = inner_json.get("data") {
-                    let tests: Vec<Test> = serde_json::from_value(tests_value.clone())?;
-                    info!("Verified command received: Processing {} compliance tests.", tests.len());
-                    
-                    process_compliance_tests(
-                        tests, 
-                        &current_id, 
-                        &signing_key, 
-                        &client, 
-                        &result_url
-                    ).await;
-                }
-            },
-            Some("NONE") => debug!("Heartbeat successful: No pending commands."),
-            _ => warn!("Received unknown or empty command from server."),
-        }
-
-        break; 
-    }
-
-    Ok(())
+/// Generates a consistent 8-character hex prefix based on the server URL.
+fn get_url_namespace(url: &str) -> String {
+    let mut hasher = Sha256::new();
+    hasher.update(url.trim_end_matches('/').as_bytes());
+    let result = hasher.finalize();
+    hex::encode(result)[..8].to_string()
 }
-
 
 /// Helper function to process tests without cluttering the main loop
 async fn process_compliance_tests(
@@ -178,6 +36,7 @@ async fn process_compliance_tests(
         let test_id = test.id.unwrap_or(0);
         let mut results = Vec::new();
 
+        // Check each of the 5 potential conditions in the OpenSCM test model
         let conditions = [
             (&test.element_1, &test.input_1, &test.selement_1, &test.condition_1, &test.sinput_1),
             (&test.element_2, &test.input_2, &test.selement_2, &test.condition_2, &test.sinput_2),
@@ -209,7 +68,7 @@ async fn process_compliance_tests(
             result: final_result,
         };
 
-        // Sign and Send Result
+        // Sign and Send Result back to the server
         if let Ok(bytes) = bincode::serialize(&payload) {
             let signature = signing_key.sign(&bytes);
             let req = SignedRequest {
@@ -217,7 +76,141 @@ async fn process_compliance_tests(
                 signature: general_purpose::STANDARD.encode(signature.to_bytes()),
             };
 
-            let _ = http_client.post(result_url).json(&req).send().await;
+            match http_client.post(result_url).json(&req).send().await {
+                Ok(_) => debug!("Test {} result sent successfully.", test_id),
+                Err(e) => error!("Failed to send test {} result: {}", test_id, e),
+            }
         }
     }
+}
+
+
+pub async fn send_system_info(
+    config: &Config, // Removed 'mut' - we don't need to save the config anymore
+) -> Result<(), Box<dyn std::error::Error>> {
+    // 1. DERIVE NAMESPACED PATHS
+    let namespace = get_url_namespace(&config.server.url);
+    let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or("."));
+    
+    // Identity is now stored in files like 'client_a1b2c3d4.id'
+    let id_path = key_dir.join(format!("client_{}.id", namespace));
+    let priv_path = key_dir.join(format!("client_{}.key", namespace));
+    let pub_path = key_dir.join(format!("client_{}.pub", namespace));
+    let server_pub_path = key_dir.join(format!("server_{}.pub", namespace));
+
+    // 2. ENSURE CLIENT KEYS EXIST (Self-generate if missing for this namespace)
+    if !priv_path.exists() {
+        info!("No identity found for namespace {}. Generating new keys...", namespace);
+        let mut csprng = OsRng;
+        let signing_key = SigningKey::generate(&mut csprng);
+        let verifying_key = VerifyingKey::from(&signing_key);
+        
+        fs::write(&priv_path, general_purpose::STANDARD.encode(signing_key.to_bytes()))?;
+        fs::write(&pub_path, general_purpose::STANDARD.encode(verifying_key.to_bytes()))?;
+    }
+
+    // 3. LOAD IDENTITY
+    let current_id = if id_path.exists() {
+        fs::read_to_string(&id_path)?.trim().to_string()
+    } else {
+        "0".to_string()
+    };
+
+    let private_base64 = fs::read_to_string(&priv_path)?;
+    let private_bytes = general_purpose::STANDARD.decode(private_base64.trim())?;
+    let signing_key = SigningKey::from_bytes(&private_bytes.try_into().map_err(|_| "Invalid key format")?);
+    let public_base64 = fs::read_to_string(&pub_path)?.trim().to_string();
+
+    // 4. COLLECT SYSTEM METADATA
+    let my_local_ip = local_ip_address::local_ip()?.to_string();
+    let my_hostname = gethostname::gethostname().to_string_lossy().into_owned();
+    let my_os = format!("{} {}", sys_info::os_type()?, sys_info::os_release()?);
+    let my_arch = std::env::consts::ARCH.to_string();
+    let my_ver = env!("CARGO_PKG_VERSION").to_string();
+
+    let base_url = config.server.url.trim_end_matches('/').to_string();
+    let send_url = format!("{}/send", base_url);
+    let result_url = format!("{}/result", base_url);
+
+    let client = reqwest::Client::builder()
+        .timeout(std::time::Duration::from_secs(15))
+        .build()?;
+
+    // 5. COMMUNICATION LOOP
+    loop {
+        let needs_handshake = current_id == "0" || !server_pub_path.exists();
+
+        let unsigned_payload = UnsignedPayload {
+            id: current_id.clone(),
+            hostname: my_hostname.clone(),
+            ver: my_ver.clone(),
+            ip: my_local_ip.clone(),
+            os: my_os.clone(),
+            arch: my_arch.clone(),
+            timestamp: chrono::Utc::now().timestamp().to_string(),
+            public_key: if needs_handshake { Some(public_base64.clone()) } else { None },
+        };
+
+        let message_bytes = bincode::serialize(&unsigned_payload)?;
+        let signature = signing_key.sign(&message_bytes);
+        let request = SignedRequest {
+            payload: unsigned_payload,
+            signature: general_purpose::STANDARD.encode(signature.to_bytes()),
+        };
+
+        let response = client.post(&send_url).json(&request).send().await?;
+
+        // Handle 404 (Server lost our ID for this specific URL)
+        if response.status() == reqwest::StatusCode::NOT_FOUND {
+            warn!("Server at {} rejected ID {}. Resetting identity.", base_url, current_id);
+            let _ = fs::remove_file(&id_path);
+            let _ = fs::remove_file(&server_pub_path);
+            return Ok(()); // Exit loop to trigger re-registration on next start
+        }
+
+        if !response.status().is_success() {
+            error!("Server error: {}", response.status());
+            return Ok(());
+        }
+
+        let signed_res: SignedResponse = response.json().await?;
+        let inner_json = &signed_res.payload;
+
+        // VERIFY SERVER IDENTITY (Only if we have the server key)
+        if server_pub_path.exists() {
+            let server_pub_bytes = general_purpose::STANDARD.decode(fs::read_to_string(&server_pub_path)?.trim())?;
+            let verifier = VerifyingKey::from_bytes(&server_pub_bytes.try_into().map_err(|_| "Bad server key")?)?;
+            let sig_bytes = general_purpose::STANDARD.decode(&signed_res.signature)?;
+            let signature = Signature::from_bytes(&sig_bytes.try_into().map_err(|_| "Bad sig")?);
+            
+            if verifier.verify(&bincode::serialize(inner_json)?, &signature).is_err() {
+                error!("SECURITY ALERT: Mismatch on {}! Connection dropped.", base_url);
+                return Ok(()); 
+            }
+        }
+
+        // PROCESS COMMANDS
+        if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str()) {
+            fs::write(&server_pub_path, server_key.trim())?;
+            info!("Server key saved for namespace {}", namespace);
+        }
+
+        match inner_json.get("command").and_then(|c| c.as_str()) {
+            Some("REGISTER") => {
+                if let Some(new_id) = inner_json.get("id").and_then(|id| id.as_i64()) {
+                    fs::write(&id_path, new_id.to_string())?;
+                    info!("Registered as ID: {} for {}", new_id, base_url);
+                }
+            },
+            Some("TEST") => {
+                if let Some(tests_val) = inner_json.get("data") {
+                    let tests: Vec<Test> = serde_json::from_value(tests_val.clone())?;
+                    process_compliance_tests(tests, &current_id, &signing_key, &client, &result_url).await;
+                }
+            },
+            _ => debug!("Heartbeat OK."),
+        }
+        break; 
+    }
+    Ok(())
 }

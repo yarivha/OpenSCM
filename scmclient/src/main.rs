@@ -35,7 +35,6 @@ async fn main() {
 
     // === Print startup configuration ===
     let server_url = &config.server.url;
-    let client_id = config.client.id.as_deref().unwrap_or("0");
     let heartbeat = config.client.heartbeat
         .as_deref()
         .and_then(|s| s.parse::<u64>().ok())
@@ -45,14 +44,10 @@ async fn main() {
     info!("================ SCM Agent Configuration ================");
     info!("Server URL     : {}", server_url);
     info!("Client Version : {}", env!("CARGO_PKG_VERSION"));
-    info!("Client ID      : {}", client_id);
     info!("Heartbeat      : {} seconds", heartbeat);
     info!("Log Level      : {}", log_level);
     info!("=========================================================");
 
-    if client_id == "0" {
-        warn!("Client is not registered yet (ID=0)");
-    }
 
     // === Apply log level from config ===
     if let Err(e) = reload_handle.reload(EnvFilter::new(log_level)) {

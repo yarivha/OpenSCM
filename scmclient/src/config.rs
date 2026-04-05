@@ -1,11 +1,8 @@
-use ed25519_dalek::{SigningKey, VerifyingKey};
-use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
-use std::io::Write;
 use std::path::{Path, PathBuf};
-use tracing::{debug, info, warn, error};
+use tracing::{info, warn, error};
 use toml;
 
 // Windows-specific imports
@@ -25,91 +22,71 @@ pub struct Config {
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ServerConfig {
-    pub url: String,
+    pub url: String, // Mandatory: Agent can't run without it
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
 pub struct ClientConfig {
-    pub id: Option<String>,
+    // ID is REMOVED. It is now handled as state in agent.rs
     pub heartbeat: Option<String>,
     pub loglevel: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct KeyPair {
-    pub key_path: Option<String>,
-    pub pub_key: Option<String>,
-    pub priv_key: Option<String>,
-    pub server_key: Option<String>,
+    pub key_path: Option<String>, // The directory where hashed keys/IDs are kept
 }
 
 impl Default for Config {
     fn default() -> Self {
-        // Fallback directory logic for keys if not specified
-        let base_dir = get_config_path()
-            .parent()
-            .map(|p| p.to_path_buf())
-            .unwrap_or_else(|| PathBuf::from("."));
-
-        let keys_path = base_dir.join("keys");
+        let base_dir = if cfg!(target_os = "windows") {
+            PathBuf::from(r"C:\ProgramData\OpenSCM\Client")
+        } else {
+            PathBuf::from("/etc/openscm")
+        };
 
         Self {
             server: ServerConfig {
                 url: "https://demo.openscm.io:8000".to_string(),
             },
             client: ClientConfig {
-                id: Some("0".to_string()),
                 heartbeat: Some("300".to_string()),
                 loglevel: Some("info".to_string()),
             },
             key: KeyPair {
-                key_path: Some(keys_path.to_string_lossy().into_owned()),
-                pub_key: Some("scmclient.pub".to_string()),
-                priv_key: Some("scmclient.key".to_string()),
-                server_key: Some("scmserver.pub".to_string()),
+                key_path: Some(base_dir.join("keys").to_string_lossy().into_owned()),
             },
         }
     }
 }
 
-
-
 impl Config {
-    /// The "Smart Save": Persists changes to the Registry (Windows) or TOML (Unix)
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
         #[cfg(target_os = "windows")]
         {
             let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            // create_subkey opens the key for writing (creates it if missing)
             let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
             
-            // Save each field if it exists
-            if let Some(h) = &self.server.url { key.set_value("ServerURL", h)?; }
-            if let Some(i) = &self.client.id { key.set_value("ClientID", i)?; }
+            // Note: We no longer save ClientID here.
+            key.set_value("ServerURL", &self.server.url)?;
             if let Some(hb) = &self.client.heartbeat { key.set_value("Heartbeat", hb)?; }
             if let Some(ll) = &self.client.loglevel { key.set_value("LogLevel", ll)?; }
-    
-            // Key Locations
             if let Some(kp) = &self.key.key_path { key.set_value("KeyPath", kp)?; }
-            if let Some(pk) = &self.key.pub_key { key.set_value("PubKeyFile", pk)?; }
-            if let Some(sk) = &self.key.priv_key { key.set_value("PrivKeyFile", sk)?; }
-            if let Some(svk) = &self.key.server_key { key.set_value("ServerKeyFile", svk)?; }
 
-            info!("Configuration successfully saved to Windows Registry.");
+            info!("Configuration saved to Windows Registry.");
             Ok(())
         }
 
         #[cfg(not(target_os = "windows"))]
         {
-            let path = get_config_path(); // Uses the private path helper in this file
+            let path = get_config_path();
             let toml_string = toml::to_string_pretty(self)?;
             fs::write(&path, toml_string)?;
-            info!("Configuration successfully saved to {:?}", path);
+            info!("Configuration saved to {:?}", path);
             Ok(())
         }
     }
 }
-
 
 pub fn get_config() -> Result<Config, Box<dyn Error>> {
     #[cfg(target_os = "windows")]
@@ -129,23 +106,16 @@ pub fn get_config() -> Result<Config, Box<dyn Error>> {
 
 // --- Private Helpers ---
 
-/// Determines the standard config path for the OS.
 fn get_config_path() -> PathBuf {
-        PathBuf::from("/etc/openscm/scmclient.config")
+    PathBuf::from("/etc/openscm/scmclient.config")
 }
 
-
-//  load_from_registry in windows
 #[cfg(target_os = "windows")]
 fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-    
-    // create_subkey ensures the "OpenSCM" folder exists in the Registry
     let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
     let mut needs_repair = false;
-
-    // A helper to pull a string or mark that the Registry needs a "save" to fill the gap
     let mut get_val = |name: &str, default: &str| {
         key.get_value(name).unwrap_or_else(|_| {
             needs_repair = true; 
@@ -153,44 +123,34 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         })
     };
 
-    let mut config = Config {
+    let config = Config {
         server: ServerConfig {
-            url: Some(get_val("ServerURL", "https://openscm.io:8000")),
+            url: get_val("ServerURL", "https://demo.openscm.io:8000"),
         },
         client: ClientConfig {
-            id: Some(get_val("ClientID", "0")),
             heartbeat: Some(get_val("Heartbeat", "300")),
             loglevel: Some(get_val("LogLevel", "info")),
-            ..ClientConfig::default()
         },
         key: KeyPair {
-            // Path and dynamic filenames
             key_path: Some(get_val("KeyPath", r"C:\ProgramData\OpenSCM\Client\keys")),
-            pub_key: Some(get_val("PubKeyFile", "scmclient.pub")),
-            priv_key: Some(get_val("PrivKeyFile", "scmclient.key")),
-            server_key: Some(get_val("ServerKeyFile", "scmserver.pub")),
         },
-        ..Config::default()
     };
 
-    // If any of the above fallback defaults were used, we save the config 
-    // immediately to ensure the Registry is fully populated.
     if needs_repair {
-        warn!("Registry configuration was incomplete or corrupted. Performing self-repair...");
+        warn!("Registry incomplete. Repairing...");
         config.save()?; 
     }
 
-    // Now proceed to ensure the physical key files exist on the disk
-    validate_and_setup_keys(&mut config)?;
-    
+    // Ensure directory exists
+    if let Some(path) = &config.key.key_path {
+        fs::create_dir_all(path)?;
+    }
+
     Ok(config)
 }
 
-
-
 #[cfg(not(target_os = "windows"))]
 fn bootstrap_default_config(path: &Path) -> Result<(), Box<dyn Error>> {
-    warn!("Config not found at {:?}. Generating default TOML.", path);
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -203,65 +163,12 @@ fn bootstrap_default_config(path: &Path) -> Result<(), Box<dyn Error>> {
 #[cfg(not(target_os = "windows"))]
 fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
     let content = fs::read_to_string(path)?;
-    let mut config: Config = toml::from_str(&content)?;
-    validate_and_setup_keys(&mut config)?;
+    let config: Config = toml::from_str(&content)?;
+    
+    // Ensure key directory exists
+    if let Some(key_path) = &config.key.key_path {
+        fs::create_dir_all(key_path)?;
+    }
+    
     Ok(config)
 }
-
-fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
-    let mut valid = true;
-
-    if let Some(h) = &config.client.heartbeat {
-        if h.parse::<u32>().is_err() {
-            error!("Invalid heartbeat in config: {}", h);
-            valid = false;
-        }
-    }
-
-    // 2. Determine base directory for keys
-    let base_dir = if cfg!(target_os = "windows") {
-        // Match the installer: C:\ProgramData\OpenSCM\Client
-        PathBuf::from(r"C:\ProgramData\OpenSCM\Client")
-    } else {
-        // On Linux: /etc/openscm
-        get_config_path().parent().unwrap_or(Path::new("/etc/openscm")).to_path_buf()
-    };
-
-    let key_dir = config.key.key_path.as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| base_dir.join("keys"));
-
-    if !key_dir.exists() {
-        info!("Creating keys directory at: {}", key_dir.display());
-        fs::create_dir_all(&key_dir)?;
-    }
-
-    let pub_path = key_dir.join(config.key.pub_key.as_deref().unwrap_or("scmclient.pub"));
-    let priv_path = key_dir.join(config.key.priv_key.as_deref().unwrap_or("scmclient.key"));
-
-    generate_keys_if_missing(
-        &pub_path.to_string_lossy(),
-        &priv_path.to_string_lossy(),
-    )?;
-
-    if valid { Ok(()) } else { Err("Configuration validation failed".into()) }
-}
-
-pub fn generate_keys_if_missing(public_key_path: &str, private_key_path: &str) -> Result<(), Box<dyn Error>> {
-    if Path::new(public_key_path).exists() && Path::new(private_key_path).exists() {
-        return Ok(());
-    }
-
-    warn!("Key files missing. Generating new Ed25519 keypair...");
-    let mut csprng = OsRng;
-    let signing_key = SigningKey::generate(&mut csprng);
-    let verify_key = VerifyingKey::from(&signing_key);
-
-    // Save keys as base64 strings
-    fs::write(private_key_path, base64::encode(signing_key.to_bytes()))?;
-    fs::write(public_key_path, base64::encode(verify_key.to_bytes()))?;
-
-    info!("Keypair successfully generated and saved.");
-    Ok(())
-}
-
