@@ -6,13 +6,19 @@ mod compliance;
 use tokio::time::{sleep, Duration};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use tracing::{debug, info, warn, error};
-use std::path::{Path, PathBuf};
-
-
+use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
-    // === Logging setup ===
+    // We call a separate run function so we can use '?' and Result
+    if let Err(e) = run().await {
+        eprintln!("Fatal Error: {}", e);
+        std::process::exit(1);
+    }
+}
+
+async fn run() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. LOGGING SETUP (Initial)
     let env_filter = EnvFilter::new("info");
     let (reload_layer, reload_handle) = reload::Layer::new(env_filter);
 
@@ -21,66 +27,108 @@ async fn main() {
         .with(fmt::layer())
         .init();
 
-    info!("Starting SCM Agent v{}...", env!("CARGO_PKG_VERSION"));
-    info!("Loading config file");
-    // === Load config ===
-    let mut config = match config::get_config() {
-        Ok(cfg) => cfg,
-        Err(e) => {
-            error!("Configuration error: {}", e);
-            std::process::exit(1);
+    // 2. VERSION & CLI ARGS
+    let version = env!("CARGO_PKG_VERSION");
+    let args: Vec<String> = std::env::args().collect();
+
+    // Handle early-exit flags
+    for arg in &args {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
+            "-ver" | "--version" => {
+                println!("OpenSCM Client version: {}", version);
+                return Ok(());
+            }
+            _ => {}
         }
-    };
+    }
 
+    // 3. LOAD CONFIG
+    info!("Loading configuration...");
+    let mut config = config::get_config().map_err(|e| {
+        error!("Configuration error: {}", e);
+        e
+    })?;
 
-    // === Print startup configuration ===
+    // 4. HANDLE URL OVERRIDE
+    let mut config_changed = false;
+    for i in 0..args.len() {
+        if args[i] == "--url" && i + 1 < args.len() {
+            let new_url = args[i + 1].clone();
+            info!("CLI Override: Setting Server URL to {}", new_url);
+            config.server.url = new_url;
+            config_changed = true;
+        }
+    }
+
+    if config_changed {
+        config.save()?;
+        info!("New configuration persisted to registry/file.");
+    }
+
+    // 5. STARTUP INFO
     let server_url = &config.server.url;
-    let heartbeat = config.client.heartbeat
+    let log_level = config.client.loglevel.as_deref().unwrap_or("info");
+    let heartbeat_secs = config.client.heartbeat
         .as_deref()
         .and_then(|s| s.parse::<u64>().ok())
         .unwrap_or(300);
-    let log_level = config.client.loglevel.as_deref().unwrap_or("info");
 
-    info!("================ SCM Agent Configuration ================");
+    info!("================ OpenSCM Agent Configuration ================");
     info!("Server URL     : {}", server_url);
-    info!("Client Version : {}", env!("CARGO_PKG_VERSION"));
-    info!("Heartbeat      : {} seconds", heartbeat);
+    info!("Client Version : {}", version);
+    info!("Heartbeat      : {} seconds", heartbeat_secs);
     info!("Log Level      : {}", log_level);
-    info!("=========================================================");
+    info!("=============================================================");
 
+    // Apply log level from config
+    let _ = reload_handle.reload(EnvFilter::new(log_level));
 
-    // === Apply log level from config ===
-    if let Err(e) = reload_handle.reload(EnvFilter::new(log_level)) {
-        error!("Failed to update log level: {}", e);
-    } else {
-        info!("Log level set to '{}'", log_level);
-    }
-
-    // === Main loop ===
+    // 6. MAIN HEARTBEAT LOOP
     loop {
         debug!("Starting heartbeat cycle");
 
+        // Note: Passing &mut config so agent can update state (like IDs)
         match agent::send_system_info(&mut config).await {
             Ok(_) => debug!("Heartbeat completed successfully"),
             Err(e) => warn!("Heartbeat failed: {}", e),
         }
-        
-        // 1. FRESH HEARTBEAT: Always pull from config in case it changed
-        let heartbeat_secs = config.client.heartbeat
+
+        // Re-calculate heartbeat and log level in case they changed during the cycle
+        let current_heartbeat = config.client.heartbeat
             .as_deref()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(300);
 
-        // 2. DYNAMIC LOGGING: Optional - re-apply log level if you want remote changes to take effect
         if let Some(level) = &config.client.loglevel {
             let _ = reload_handle.reload(EnvFilter::new(level));
         }
 
-        // 3. Jitter
+        // Apply Jitter (0-9 seconds)
         let jitter = rand::random::<u64>() % 10;
-        let sleep_time = heartbeat_secs + jitter;
+        let sleep_time = current_heartbeat + jitter;
 
         debug!("Next heartbeat in {} seconds", sleep_time);
         sleep(Duration::from_secs(sleep_time)).await;
     }
+}
+
+fn print_usage() {
+    println!(r#"
+OpenSCM Client - Security Compliance Manager Agent
+
+USAGE:
+    scmclient [OPTIONS]
+
+OPTIONS:
+    -h, --help          Print this help message
+    -ver, --version     Print version information
+    --url <URL>         Set or override the Server URL (e.g., http://localhost:8000)
+
+EXAMPLE:
+    scmclient --url https://demo.openscm.io:8000
+    "#);
 }
