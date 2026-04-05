@@ -44,24 +44,31 @@ Function GetCustom
 FunctionEnd
 
 Section "Install"
-    # IMPORTANT: Makes $APPDATA point to C:\ProgramData
-    SetShellVarContext all
+    # --- 1. DETECT AND UNINSTALL PREVIOUS VERSION ---
+    # This prevents the "Error opening file for writing" bug
     SetRegView 64
+    ReadRegStr $R0 HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "UninstallString"
+    
+    StrCmp $R0 "" +3
+        DetailPrint "Removing previous version..."
+        # Run the uninstaller silently and wait for it to finish
+        # _?=$INSTDIR is vital: it tells the uninstaller not to copy itself to a temp folder
+        ExecWait '"$INSTDIR\uninstall.exe" /S _?=$INSTDIR'
+
+    # --- 2. START FRESH INSTALLATION ---
+    SetShellVarContext all
     
     SetOutPath "$INSTDIR"
     # Update this path to your actual build artifact location
     File "/Apps/OpenSCM/build/target/x86_64-pc-windows-gnu/release/scmclient.exe"
-    
-    # Using unique names for the service wrapper
     File "scmclient-service.exe"
     File "scmclient-service.xml"
     
-    # Create private data areas for the client state (IDs and Hashed Keys)
+    # Create private data areas
     CreateDirectory "$APPDATA\OpenSCM\Client"
     CreateDirectory "$APPDATA\OpenSCM\Client\keys"
 
-    # --- Save to Registry (Synced with config.rs load_from_registry) ---
-    # We REMOVED ClientID, PubKeyFile, PrivKeyFile, etc.
+    # Save to Registry
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL" "$ServerURL"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
@@ -87,31 +94,24 @@ Section "Install"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "NoRepair" 1
 SectionEnd
 
-# --- The Uninstaller Logic ---
 Section "Uninstall"
     SetShellVarContext all
     SetRegView 64
 
-    # 1. Stop and Remove the Windows Service
+    # Stop and Remove the Windows Service
     DetailPrint "Stopping and removing service..."
     ExecWait '"$INSTDIR\scmclient-service.exe" stop'
     ExecWait '"$INSTDIR\scmclient-service.exe" uninstall'
 
-    # 2. Delete the binary files
+    # Delete files
     Delete "$INSTDIR\scmclient.exe"
     Delete "$INSTDIR\scmclient-service.exe"
     Delete "$INSTDIR\scmclient-service.xml"
     Delete "$INSTDIR\uninstall.exe"
 
-    # 3. Remove the Registry keys
+    # Remove Registry keys
     DeleteRegKey HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client"
     DeleteRegKey HKLM "Software\OpenSCM\Client"
 
-    # 4. Cleanup Directories
     RMDir "$INSTDIR"
-    
-    # Note: We leave $APPDATA\OpenSCM\Client\keys alone by default 
-    # so that re-installing doesn't lose the machine's identity,
-    # unless you want a total wipe:
-    # RMDir /r "$APPDATA\OpenSCM"
 SectionEnd
