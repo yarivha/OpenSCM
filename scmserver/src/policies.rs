@@ -799,22 +799,131 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 
 
 pub async fn policies_report_download(
-    Path(id): Path<i64>,
+    auth: AuthSession,Path(id): Path<i64>,
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
-    // --- 1. DATA FETCHING ---
-    // In a real scenario, you'd join your policies, tests, and results tables here.
-    // For this example, we'll build the ReportData object based on the ID.
-    let policy_name = "Standard Security Hardening";
 
-    // Example: Fetching the policy description from DB
-    let description = match sqlx::query("SELECT description FROM policies WHERE id = ?")
+    // Safely get the username
+    let submitter_name = auth.username.clone();
+
+    // 1. Fetch Policy
+    let policy_row = match sqlx::query("SELECT id, name, version, description FROM policies WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
-        .await {
-            Ok(row) => row.get::<String, _>("description"),
-            Err(_) => "OpenSCM Compliance Policy".to_string(),
-        };
+        .await 
+    {
+        Ok(row) => row,
+        Err(e) => {
+            eprintln!("Database Error (Policy): {}", e);
+            // Returns a 404 response immediately
+            return StatusCode::NOT_FOUND.into_response();
+        }
+    };
+
+
+    // 2. Fetch Tests
+    let test_rows = match sqlx::query(r#"
+        SELECT t.name, t.description, t.rational, t.remediation 
+        FROM tests t
+        JOIN tests_in_policy tip ON t.id = tip.test_id
+        WHERE tip.policy_id = ?"#)
+        .bind(id)
+        .fetch_all(&pool)
+        .await 
+    {
+    Ok(rows) => rows,
+    Err(e) => {
+            eprintln!("Database Error (Tests): {}", e);
+            // This stops the function and sends a 500 error to the browser
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+    };
+
+
+
+    let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| {
+        TestMeta {
+            name: row.get("name"),
+            description: row.get("description"),
+            rational: row.get("rational"),
+            remediation: row.get("remediation"),
+        }
+    }).collect();
+
+    // 3. Fetch Results
+    let result_rows = match sqlx::query(r#"
+        SELECT DISTINCT
+            s.name as system_name,
+            t.name as test_name,
+            r.result as status
+        FROM results r
+        JOIN systems s ON r.system_id = s.id
+        JOIN tests t ON r.test_id = t.id
+        JOIN systems_in_groups sig ON s.id = sig.system_id
+        JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+        JOIN tests_in_policy tip ON t.id = tip.test_id
+        WHERE sip.policy_id = ?
+          AND tip.policy_id = ?"#)
+        .bind(id)
+        .bind(id)
+        .fetch_all(&pool)
+        .await 
+{
+    Ok(rows) => rows,
+    Err(e) => {
+        eprintln!("Database Error (Results): {}", e);
+        // Return a response immediately instead of using '?'
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+};
+
+
+    // 4. Group results by System Name
+    let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
+    for row in result_rows {
+        // Use Option to handle cases where a system name might be NULL
+        let system_name = row.get::<Option<String>, _>("system_name")
+            .unwrap_or_else(|| "Unknown System".to_string());
+            
+        let test_name: String = row.get("test_name");
+        let status_str: String = row.get("status");
+        let status = status_str == "true";
+
+        system_map
+            .entry(system_name)
+            .or_insert_with(Vec::new)
+            .push(IndividualResult { test_name, status });
+    }
+
+    // Convert the BTreeMap into a Vec<SystemReport>
+    let system_reports: Vec<SystemReport> = system_map
+    .into_iter()
+    .map(|(name, results)| {
+        // A system is passed ONLY if all its results are true
+        let is_passed = results.iter().all(|r| r.status);
+
+        SystemReport {
+            system_name: name,
+            results,
+            is_passed, // Pass the pre-calculated value
+        }
+    })
+    .collect();
+
+
+    // Build context
+    let report_data = ReportData {
+        policy_id: policy_row.get("id"),
+        policy_name: policy_row.get("name"),
+        version: policy_row.get("version"),
+        description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
+        submission_date: Local::now().format("%Y-%m-%d %H:%M").to_string(),
+        submitter_name,
+        tests_metadata,
+        system_reports, // Now this variable exists!
+    };
+
+
 
     // --- 2. PDF INITIALIZATION ---
     let font_dir = "static/dist/fonts";
@@ -824,7 +933,7 @@ pub async fn policies_report_download(
     };
 
     let mut doc = genpdf::Document::new(font_family);
-    doc.set_title(format!("OpenSCM Report - {}", policy_name));
+    doc.set_title(format!("OpenSCM Report - {}", report_data.policy_name));
 
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_margins(15);
@@ -869,39 +978,45 @@ pub async fn policies_report_download(
     doc.push(elements::Text::new("OpenSCM Compliance Report")
         .styled(style::Style::new().with_color(style::Color::Rgb(0, 0, 128)).bold()));
     doc.push(elements::Break::new(1.5));
-    doc.push(elements::Paragraph::new(format!("Policy: {}", policy_name)));
-    doc.push(elements::Paragraph::new(format!("Report ID: {}", id)));
-    doc.push(elements::Paragraph::new(format!("Description: {}", description)));
-    doc.push(elements::Break::new(2.0));
-
-    // Results Table (Example with one system - you would loop through your DB results here)
-    doc.push(elements::Text::new("System Results").styled(style::Style::new().bold()));
+    doc.push(elements::Paragraph::new(format!("Policy: {}", report_data.policy_name)));
+    doc.push(elements::Paragraph::new(format!("Policy Version: {}", report_data.version)));
+    doc.push(elements::Paragraph::new(format!("Submission Date: {}",chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string())));
+    doc.push(elements::Paragraph::new(format!("Published by: {}", report_data.submitter_name)));
     doc.push(elements::Break::new(1.0));
 
-    let mut table = elements::TableLayout::new(vec![3, 1]);
-    table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+    for system in report_data.system_reports {
+        // Results Table (Example with one system - you would loop through your DB results here)
+        doc.push(elements::Break::new(2.0));
+        doc.push(elements::Text::new("System ".to_owned()+&system.system_name+" Results").styled(style::Style::new().bold()));
+        doc.push(elements::Break::new(1.0));
 
-    // Table Header (Must be Boxed)
-    table.push_row(vec![
-        Box::new(elements::Text::new("Security Control").styled(style::Style::new().bold())),
-        Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
-    ]);
+        let mut table = elements::TableLayout::new(vec![3, 1]);
+        table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
-    // Example Row (You would put your 'for' loop here)
-    let test_status = true; // Mock status
-    let (status_text, status_color) = if test_status {
-        ("PASS", style::Color::Rgb(0, 128, 0))
-    } else {
-        ("FAIL", style::Color::Rgb(200, 0, 0))
-    };
+        // Table Header (Must be Boxed)
+        table.push_row(vec![
+            Box::new(elements::Text::new("Test Security Requirement").styled(style::Style::new().bold())),
+            Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
+        ]);
 
-    table.push_row(vec![
-        Box::new(elements::Text::new("Ensure Password Complexity is Enabled")),
-        Box::new(elements::Text::new(status_text)
-            .styled(style::Style::new().with_color(status_color).bold())),
-    ]);
+        for res in system.results {
 
-    doc.push(table);
+            let (status_text, status_color) = if res.status {
+            ("PASS", style::Color::Rgb(0, 128, 0))
+            } else {
+            ("FAIL", style::Color::Rgb(200, 0, 0))
+            };
+
+        
+            table.push_row(vec![
+                Box::new(elements::Text::new(res.test_name)),
+                Box::new(elements::Text::new(status_text)
+                    .styled(style::Style::new().with_color(status_color).bold())),
+            ]);
+        }
+
+        doc.push(table);
+    }
 
     // --- 4. RENDERING & RESPONSE ---
     let mut buffer = Vec::new();
