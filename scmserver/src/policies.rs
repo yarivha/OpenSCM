@@ -798,59 +798,53 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 }
 
 
+
 pub async fn policies_report_download(
-    auth: AuthSession,Path(id): Path<i64>,
+    auth: AuthSession,
+    Path(id): Path<i64>,
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
-
-    // Safely get the username
+    // 1. DATA ACQUISITION
     let submitter_name = auth.username.clone();
 
-    // 1. Fetch Policy
+    // Fetch Policy Header
     let policy_row = match sqlx::query("SELECT id, name, version, description FROM policies WHERE id = ?")
         .bind(id)
         .fetch_one(&pool)
-        .await 
+        .await
     {
         Ok(row) => row,
         Err(e) => {
             eprintln!("Database Error (Policy): {}", e);
-            // Returns a 404 response immediately
             return StatusCode::NOT_FOUND.into_response();
         }
     };
 
-
-    // 2. Fetch Tests
+    // Fetch Test Definitions (Metadata)
     let test_rows = match sqlx::query(r#"
-        SELECT t.name, t.description, t.rational, t.remediation 
+        SELECT t.name, t.description, t.rational, t.remediation
         FROM tests t
         JOIN tests_in_policy tip ON t.id = tip.test_id
         WHERE tip.policy_id = ?"#)
         .bind(id)
         .fetch_all(&pool)
-        .await 
+        .await
     {
-    Ok(rows) => rows,
-    Err(e) => {
+        Ok(rows) => rows,
+        Err(e) => {
             eprintln!("Database Error (Tests): {}", e);
-            // This stops the function and sends a 500 error to the browser
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-            }
+        }
     };
 
-
-
-    let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| {
-        TestMeta {
-            name: row.get("name"),
-            description: row.get("description"),
-            rational: row.get("rational"),
-            remediation: row.get("remediation"),
-        }
+    let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| TestMeta {
+        name: row.get("name"),
+        description: row.get::<Option<String>, _>("description").unwrap_or_default(),
+        rational: row.get::<Option<String>, _>("rational").unwrap_or_default(),
+        remediation: row.get::<Option<String>, _>("remediation").unwrap_or_default(),
     }).collect();
 
-    // 3. Fetch Results
+    // Fetch Raw Audit Results
     let result_rows = match sqlx::query(r#"
         SELECT DISTINCT
             s.name as system_name,
@@ -867,171 +861,177 @@ pub async fn policies_report_download(
         .bind(id)
         .bind(id)
         .fetch_all(&pool)
-        .await 
-{
-    Ok(rows) => rows,
-    Err(e) => {
-        eprintln!("Database Error (Results): {}", e);
-        // Return a response immediately instead of using '?'
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
-};
+        .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            eprintln!("Database Error (Results): {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
-
-    // 4. Group results by System Name
+    // Group results by System
     let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
     for row in result_rows {
-        // Use Option to handle cases where a system name might be NULL
-        let system_name = row.get::<Option<String>, _>("system_name")
-            .unwrap_or_else(|| "Unknown System".to_string());
-            
+        let system_name = row.get::<Option<String>, _>("system_name").unwrap_or_else(|| "Unknown System".to_string());
         let test_name: String = row.get("test_name");
         let status_str: String = row.get("status");
-        let status = status_str == "true";
+        let status = status_str.to_lowercase() == "pass" || status_str == "true" || status_str == "1";
 
-        system_map
-            .entry(system_name)
-            .or_insert_with(Vec::new)
-            .push(IndividualResult { test_name, status });
+        system_map.entry(system_name).or_default().push(IndividualResult { test_name, status });
     }
 
-    // Convert the BTreeMap into a Vec<SystemReport>
-    let system_reports: Vec<SystemReport> = system_map
-    .into_iter()
-    .map(|(name, results)| {
-        // A system is passed ONLY if all its results are true
+    let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
         let is_passed = results.iter().all(|r| r.status);
+        SystemReport { system_name: name, results, is_passed }
+    }).collect();
 
-        SystemReport {
-            system_name: name,
-            results,
-            is_passed, // Pass the pre-calculated value
-        }
-    })
-    .collect();
-
-
-    // Build context
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
         version: policy_row.get("version"),
         description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
-        submission_date: Local::now().format("%Y-%m-%d %H:%M").to_string(),
+        submission_date: Local::now().format("%b %d, %Y %I:%M %p").to_string(),
         submitter_name,
         tests_metadata,
-        system_reports, // Now this variable exists!
+        system_reports,
     };
 
-
-
-    // --- 2. PDF INITIALIZATION ---
+    // 2. PDF GENERATION
     let font_dir = "static/dist/fonts";
+    let logo_path = "static/dist/img/Logo_report.jpg";
     let font_family = match genpdf::fonts::from_files(font_dir, "LiberationSans", None) {
         Ok(f) => f,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Font files missing in /dist/fonts").into_response(),
+        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Font files missing").into_response(),
     };
 
     let mut doc = genpdf::Document::new(font_family);
-    doc.set_title(format!("OpenSCM Report - {}", report_data.policy_name));
-
+    doc.set_title(format!("OpenSCM Compliance Report - {}", report_data.policy_name));
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_margins(15);
     doc.set_page_decorator(decorator);
 
-    // Cover Page
-    
-    let mut title_table = elements::TableLayout::new(vec![1, 4, 1]); // Left, Middle, Right weights
-    title_table.set_cell_decorator(elements::FrameCellDecorator::new(false, false, false)); // No borders
+    // Main Title
+    let mut title = elements::Paragraph::new("OpenSCM Compliance Report");
+    title.set_alignment(genpdf::Alignment::Center);
+    doc.push(title.styled(style::Style::new().with_font_size(30).bold().with_color(style::Color::Rgb(0, 0, 128))));
+    doc.push(elements::Break::new(2.0));
+    let mut submitter = elements::Paragraph::new(format!("Generated on {} by {}", report_data.submission_date, report_data.submitter_name));
+    submitter.set_alignment(genpdf::Alignment::Center);
+    doc.push(submitter);
+    doc.push(elements::Break::new(0.5));
+   
+    // Put logo to openscm
+    if std::path::Path::new(logo_path).exists() {
+    match elements::Image::from_path(logo_path) {
+        Ok(mut logo) => {
+            // Force a specific width (e.g., 40mm) to ensure it's not
+            // rendering at 0.1px or 1000px and disappearing
+            logo.set_dpi(40.0);
+            logo.set_alignment(genpdf::Alignment::Center);
 
-    title_table.push_row(vec![
-        Box::new(elements::Text::new("")), // Empty spacer
-        Box::new(elements::Paragraph::new("OpenSCM Compliance Audit")
-            .styled(style::Style::new()
-            .with_color(style::Color::Rgb(0, 0, 128))
-            .with_font_size(24)
-            .bold())),
-        Box::new(elements::Text::new("")), // Empty spacer
+            // Let's try pushing it directly to the doc first (no table)
+            // This is safer to test if the image works at all
+            doc.push(logo);
+            doc.push(elements::Break::new(1.0));
+        }
+        Err(e) => {
+            error!("IMAGE DECODE ERROR: The file exists, but genpdf couldn't read it: {}", e);
+        }
+    }
+    } 
+
+
+    // policy information
+    // Report Details Table
+    doc.push(elements::Text::new("Report Details").styled(style::Style::new().bold()));
+    let mut details_table = elements::TableLayout::new(vec![1, 3]);
+    details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+    details_table.push_row(vec![
+        Box::new(elements::Text::new("Policy Name")),
+        Box::new(elements::Text::new(format!(": {} v{}", report_data.policy_name, report_data.version))),
     ]);
-    doc.push(title_table);
-
-    doc.push(elements::Break::new(1.5));
-
-    // --- 2. CENTER THE BANNER LINE ---
-    let mut banner_table = elements::TableLayout::new(vec![1, 8, 1]);
-    banner_table.set_cell_decorator(elements::FrameCellDecorator::new(false, false, false));
-
-    banner_table.push_row(vec![
-        Box::new(elements::Text::new("")),
-        Box::new(elements::Text::new("__________________________________________________________")
-            .styled(style::Style::new().with_color(style::Color::Rgb(200, 200, 200)))),
-        Box::new(elements::Text::new("")),
+    details_table.push_row(vec![
+        Box::new(elements::Text::new("Description")),
+        Box::new(elements::Text::new(format!(": {}", report_data.description))),
     ]);
-    doc.push(banner_table);
+    doc.push(details_table);
 
 
+    doc.push(elements::PageBreak::new());
 
-
-    // --- 3. BUILDING THE PDF CONTENT ---
-
-    // Header Section
-    doc.push(elements::Text::new("OpenSCM Compliance Report")
-        .styled(style::Style::new().with_color(style::Color::Rgb(0, 0, 128)).bold()));
-    doc.push(elements::Break::new(1.5));
-    doc.push(elements::Paragraph::new(format!("Policy: {}", report_data.policy_name)));
-    doc.push(elements::Paragraph::new(format!("Policy Version: {}", report_data.version)));
-    doc.push(elements::Paragraph::new(format!("Submission Date: {}",chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string())));
-    doc.push(elements::Paragraph::new(format!("Published by: {}", report_data.submitter_name)));
-    doc.push(elements::Break::new(1.0));
-
+    // Per-System Audit Section
     for system in report_data.system_reports {
-        // Results Table (Example with one system - you would loop through your DB results here)
-        doc.push(elements::Break::new(2.0));
-        doc.push(elements::Text::new("System ".to_owned()+&system.system_name+" Results").styled(style::Style::new().bold()));
+        doc.push(elements::Text::new(format!("Host Name: {}", system.system_name)).styled(style::Style::new().bold().with_font_size(14)));
+        doc.push(elements::Break::new(0.5));
+
+        // System Compliance Summary
+        let compliant_count = system.results.iter().filter(|r| r.status).count();
+        let violation_count = system.results.len() - compliant_count;
+
+        let mut summary_table = elements::TableLayout::new(vec![1, 1]);
+        summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+        summary_table.push_row(vec![
+            Box::new(elements::Text::new("Compliance Status")),
+            Box::new(elements::Text::new(if system.is_passed { ": Compliant" } else { ": Non-Compliant" })
+                .styled(style::Style::new().with_color(if system.is_passed { style::Color::Rgb(0, 128, 0) } else { style::Color::Rgb(200, 0, 0) }).bold())),
+        ]);
+        summary_table.push_row(vec![
+            Box::new(elements::Text::new("Violation Rule Count")),
+            Box::new(elements::Text::new(format!(": Critical - {}", violation_count))),
+        ]);
+        summary_table.push_row(vec![
+            Box::new(elements::Text::new("Compliant Rule Count")),
+            Box::new(elements::Text::new(format!(": {}", compliant_count))),
+        ]);
+        doc.push(summary_table);
         doc.push(elements::Break::new(1.0));
 
-        let mut table = elements::TableLayout::new(vec![3, 1]);
-        table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-
-        // Table Header (Must be Boxed)
-        table.push_row(vec![
-            Box::new(elements::Text::new("Test Security Requirement").styled(style::Style::new().bold())),
+        // Detailed Rules Breakdown
+        doc.push(elements::Text::new("Audit Rules Detailed Breakdown").styled(style::Style::new().bold()));
+        let mut rules_table = elements::TableLayout::new(vec![2, 1, 4]);
+        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+        rules_table.push_row(vec![
+            Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
             Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
+            Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
         ]);
 
-        for res in system.results {
+        for res in &system.results {
+            let desc = report_data.tests_metadata.iter()
+                .find(|t| t.name == res.test_name)
+                .map(|t| t.description.as_str())
+                .unwrap_or("No description provided");
 
             let (status_text, status_color) = if res.status {
-            ("PASS", style::Color::Rgb(0, 128, 0))
+                ("PASS", style::Color::Rgb(0, 128, 0))
             } else {
-            ("FAIL", style::Color::Rgb(200, 0, 0))
+                ("FAIL", style::Color::Rgb(200, 0, 0))
             };
 
-        
-            table.push_row(vec![
-                Box::new(elements::Text::new(res.test_name)),
-                Box::new(elements::Text::new(status_text)
-                    .styled(style::Style::new().with_color(status_color).bold())),
+            rules_table.push_row(vec![
+                Box::new(elements::Text::new(&res.test_name)),
+                Box::new(elements::Text::new(status_text).styled(style::Style::new().with_color(status_color).bold())),
+                Box::new(elements::Text::new(desc)),
             ]);
         }
-
-        doc.push(table);
+        doc.push(rules_table);
+        doc.push(elements::PageBreak::new());
     }
 
-    // --- 4. RENDERING & RESPONSE ---
+    // Confidentiality Footer
+    doc.push(elements::Break::new(2.0));
+    doc.push(elements::Paragraph::new("Note: This report contains confidential information about your infrastructure and should be treated as such. Unauthorized distribution is strictly prohibited.")
+        .styled(style::Style::new().with_font_size(10).with_color(style::Color::Rgb(100, 100, 100))));
+
+    // 3. RENDER & RESPONSE
     let mut buffer = Vec::new();
-    if let Err(e) = doc.render(&mut buffer) {
-        return (StatusCode::INTERNAL_SERVER_ERROR, "PDF Render Error").into_response();
-    }
+    doc.render(&mut buffer).unwrap();
 
-    // --- RETURN TO BROWSER ---
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/pdf")
-        .header(
-            header::CONTENT_DISPOSITION, 
-            format!("attachment; filename=\"OpenSCM_Report_{}.pdf\"", id)
-        )
+        .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"OpenSCM_Report_{}.pdf\"", id))
         .body(axum::body::Body::from(buffer))
         .unwrap()
         .into_response()
