@@ -39,6 +39,16 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
 
     let policies_count: i64 = policies_count_row.get("count");
 
+
+    // Get reports count
+    let reports_count_row = sqlx::query("SELECT COUNT(*) as count FROM reports")
+        .fetch_one(&*pool)
+        .await
+        .unwrap();
+
+    let reports_count: i64 = reports_count_row.get("count");
+
+
     // Get Top failed systems
     let rows = sqlx::query(r#"
         SELECT
@@ -70,6 +80,9 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
         error!("Systems stats DB error: {}", e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
+
+
+    
 
     let top_failed_systems: Vec<SystemCompliance> = rows.into_iter().map(|row| {
         SystemCompliance {
@@ -139,6 +152,7 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
 
     context.insert("systems_count", &systems_count.to_string());
     context.insert("policies_count", &policies_count.to_string());
+    context.insert("reports_count", &reports_count.to_string());
     context.insert("top_failed_systems", &top_failed_systems); 
     context.insert("top_failed_policies", &top_failed_policies);
     render_template(&tera,Some(&pool), "dashboard.html", context, Some(auth)).await
