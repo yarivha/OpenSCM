@@ -38,6 +38,8 @@ uuid = { version = "1.17", features = ["v4", "serde"] }
 bcrypt = "0.17.0"
 time = "0.3.41"
 bincode = "1.3"
+genpdf = { version = "0.2.0", features = ["images"] }
+image = "0.23"
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
