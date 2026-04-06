@@ -11,6 +11,7 @@ use std::collections::HashMap;
 use urlencoding::decode;
 use tracing::{warn, error};
 use bytes::Bytes;
+use chrono::{DateTime,Utc, Local};
 
 use crate::models::ErrorQuery;
 use crate::models::Notification;
@@ -119,8 +120,8 @@ pub async fn systems(
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: row.try_get("created_date").unwrap(),
-            last_seen: row.try_get("last_seen").unwrap(),
+            created_date: Some(row.try_get::<DateTime<Utc>, _>("created_date").unwrap_or_else(|_| Utc::now())),
+            last_seen: Some(row.try_get::<DateTime<Utc>, _>("last_seen").unwrap_or_else(|_| Utc::now())),
         })
         .collect();
 
@@ -217,7 +218,7 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
             trust_challenge: None,
             trust_proof: None,
             created_date: None,
-            last_seen: None
+            last_seen: None,
         };
     
     // capture groups list
@@ -405,8 +406,8 @@ pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>,
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: row.try_get("created_date").unwrap(),
-            last_seen: row.try_get("last_seen").unwrap(),
+            created_date: Some(row.try_get::<DateTime<Utc>, _>("created_date").unwrap_or_else(|_| Utc::now())),
+            last_seen: Some(row.try_get::<DateTime<Utc>, _>("last_seen").unwrap_or_else(|_| Utc::now())),
         }
     }).collect();
 
