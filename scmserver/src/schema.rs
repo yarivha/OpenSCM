@@ -50,13 +50,14 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             auth_signature TEXT,
             trust_challenge TEXT,
             trust_proof TEXT,
-            created_date TEXT,
-            last_seen TEXT
+            created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
     )
     .execute(pool)
     .await?;
-    
+   
+
     // Create system_groups table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS system_groups (
