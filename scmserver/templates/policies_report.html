@@ -104,7 +104,7 @@
       {% endfor %}
 
     </div>
-      <form action="/policies/report/1" method="POST">
+    <form action="/policies/report/{{ report.policy_id }}" method="POST">
         <div class="form-group mt-3">
           <button type="submit" class="btn btn-success">Save Report</button>
           <a href="/policies" class="btn btn-secondary">Cancel</a>
