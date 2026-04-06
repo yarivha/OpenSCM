@@ -8,7 +8,7 @@ description = "Server for Open Security Compliance Manager"
 
 
 [package.metadata]
-release = "6"
+release = "7"
 
 [dependencies]
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
@@ -17,7 +17,7 @@ axum-extra = { version = "0.10", features = ["cookie"] }
 tokio = { version = "1.34", features = ["full"] } 
 tower-http = { version = "0.5", features = ["fs"] }
 http-body-util = "0.1"
-sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls"] }
+sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "chrono"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
 serde_urlencoded = "0.7"
@@ -29,7 +29,7 @@ include_dir = "0.7"
 toml = "0.8.0"
 urlencoding = "2.1"
 mime_guess = "2.0"
-chrono = "0.4"
+chrono = { version = "0.4", features = ["serde"] }
 bytes = "1.6" 
 base64 = "0.21"
 rand = "0.8"
