@@ -141,8 +141,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/policies/edit/{id}", get(policies_edit).post(policies_edit_save))
         .route("/policies/delete/{id}", get(policies_delete))
         .route("/policies/run/{id}", get(policies_run))
-        .route("/policies/report/{id}",get(policies_report).post(policies_report_save))
+        .route("/policies/report/{id}",get(policies_report))
+        .route("/policies/download/{id}",get(policies_report_download))
         .route("/reports", get(reports))
+        .route("/reports/save/{id}",get(reports_save))
         .route("/send", post(send))
         .route("/result", post(receive_result))
         .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {

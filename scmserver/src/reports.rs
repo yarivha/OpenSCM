@@ -1,4 +1,4 @@
-use axum::response::Html;
+use axum::response::{Html, IntoResponse, Redirect};
 use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
 use http_body_util::Full;
@@ -19,6 +19,15 @@ pub async fn reports(auth: AuthSession, pool: Extension<SqlitePool>, tera: Exten
     -> Result<Html<String>, StatusCode> {
     let context = Context::new();
     render_template(&tera,Some(&pool), "reports.html", context, Some(auth)).await
+}
+
+
+
+// reports_save
+pub async fn reports_save(auth: AuthSession,Path(id): Path<i32>,pool: Extension<SqlitePool>) -> Redirect {
+
+
+    Redirect::to("/policies?success_message=Report+was+saved")
 }
 
 

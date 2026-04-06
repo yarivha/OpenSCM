@@ -798,7 +798,7 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 }
 
 
-pub async fn policies_report_save(
+pub async fn policies_report_download(
     Path(id): Path<i64>,
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
@@ -829,6 +829,39 @@ pub async fn policies_report_save(
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_margins(15);
     doc.set_page_decorator(decorator);
+
+    // Cover Page
+    
+    let mut title_table = elements::TableLayout::new(vec![1, 4, 1]); // Left, Middle, Right weights
+    title_table.set_cell_decorator(elements::FrameCellDecorator::new(false, false, false)); // No borders
+
+    title_table.push_row(vec![
+        Box::new(elements::Text::new("")), // Empty spacer
+        Box::new(elements::Paragraph::new("OpenSCM Compliance Audit")
+            .styled(style::Style::new()
+            .with_color(style::Color::Rgb(0, 0, 128))
+            .with_font_size(24)
+            .bold())),
+        Box::new(elements::Text::new("")), // Empty spacer
+    ]);
+    doc.push(title_table);
+
+    doc.push(elements::Break::new(1.5));
+
+    // --- 2. CENTER THE BANNER LINE ---
+    let mut banner_table = elements::TableLayout::new(vec![1, 8, 1]);
+    banner_table.set_cell_decorator(elements::FrameCellDecorator::new(false, false, false));
+
+    banner_table.push_row(vec![
+        Box::new(elements::Text::new("")),
+        Box::new(elements::Text::new("__________________________________________________________")
+            .styled(style::Style::new().with_color(style::Color::Rgb(200, 200, 200)))),
+        Box::new(elements::Text::new("")),
+    ]);
+    doc.push(banner_table);
+
+
+
 
     // --- 3. BUILDING THE PDF CONTENT ---
 
@@ -874,30 +907,6 @@ pub async fn policies_report_save(
     let mut buffer = Vec::new();
     if let Err(e) = doc.render(&mut buffer) {
         return (StatusCode::INTERNAL_SERVER_ERROR, "PDF Render Error").into_response();
-    }
-
-    // --- NEW: SAVE TO SERVER LOGIC ---
-    
-    // 1. Define the storage path
-    let storage_dir = "./storage/reports";
-    let timestamp = Local::now().format("%Y-%m-%d_%H-%M-%S").to_string();
-    let file_path = format!("{}/report_{}_{}.pdf", storage_dir, id, timestamp);
-
-    // 2. Create the directory if it doesn't exist
-    if let Err(e) = fs::create_dir_all(storage_dir) {
-        tracing::error!("Failed to create storage directory: {}", e);
-        // We continue anyway so the user still gets their download
-    } else {
-        // 3. Write the buffer to the server's disk asynchronously
-        if let Err(e) = fs::write(&file_path, &buffer) {
-            tracing::error!("Failed to save report to server: {}", e);
-        } else {
-            println!("Report saved successfully to: {}", file_path);
-            
-            // OPTIONAL: Update your DB to record the file path
-            // let _ = sqlx::query("UPDATE policies SET last_report_path = ? WHERE id = ?")
-            //     .bind(&file_path).bind(id).execute(&pool).await;
-        }
     }
 
     // --- RETURN TO BROWSER ---

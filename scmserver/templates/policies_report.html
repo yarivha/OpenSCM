@@ -104,12 +104,17 @@
       {% endfor %}
 
     </div>
-    <form action="/policies/report/{{ report.policy_id }}" method="POST">
-        <div class="form-group mt-3">
-          <button type="submit" class="btn btn-success">Save Report</button>
-          <a href="/policies" class="btn btn-secondary">Cancel</a>
-        </div>
-      </form>
+    <div class="text-right">
+      <a class="btn btn-info btn-sm" href="/reports/save/{{ report.policy_id }}">
+        <i class="fas fa-save"></i> Save Report
+      </a>
+      <a class="btn btn-danger btn-sm" href="/policies/download/{{ report.policy_id}}">
+        <i class="fas fa-download"></i> Dowload Report
+      </a>
+      <a class="btn btn-sm btn-primary" href="/policies" >
+        <i class="fas fa-ban"></i> Cancel
+      </a>
+    </div>
   </section>
 </div>
 
