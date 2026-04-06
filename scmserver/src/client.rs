@@ -66,17 +66,20 @@ pub async fn send(
         Ok(val) => val,
         Err(_) => return (StatusCode::BAD_REQUEST, Json(serde_json::json!({"error": "Invalid ID format"}))).into_response()
     };
-
     // 1. REGISTRATION (ID 0)
     if id == 0 {
         info!("Processing NEW agent registration for: {}", payload.hostname);
         
         let res = sqlx::query(
-            r#"INSERT INTO systems (key, name, ver, os, ip, arch, created_date, last_seen, status) 
-               VALUES (?, ?, ?, ?, ?, ?, ?, ?, 'pending')"#
+            r#"INSERT INTO systems (key, name, ver, os, ip, arch, status) 
+               VALUES (?, ?, ?, ?, ?, ?, 'pending')"#
         )
-        .bind(&payload.public_key).bind(&payload.hostname).bind(&payload.ver).bind(&payload.os)
-        .bind(&payload.ip).bind(&payload.arch).bind(&now).bind(&now)
+        .bind(&payload.public_key)
+        .bind(&payload.hostname)
+        .bind(&payload.ver)
+        .bind(&payload.os)
+        .bind(&payload.ip)
+        .bind(&payload.arch)
         .execute(&pool).await;
 
         match res {
@@ -138,8 +141,8 @@ pub async fn send(
         match status.as_deref().unwrap_or("pending") {
             "approved" | "active" => {
                 let mut tx = pool.begin().await.unwrap();
-                let _ = sqlx::query("UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, last_seen=?, status='active' WHERE id=?")
-                    .bind(&payload.hostname).bind(&payload.ver).bind(&payload.os).bind(&payload.ip).bind(&payload.arch).bind(&now).bind(id)
+                let _ = sqlx::query("UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, status='active', last_seen = CURRENT_TIMESTAMP  WHERE id=?")
+                    .bind(&payload.hostname).bind(&payload.ver).bind(&payload.os).bind(&payload.ip).bind(&payload.arch).bind(id)
                     .execute(&mut *tx).await;
 
                 let tests: Vec<Test> = sqlx::query_as::<_, Test>(
@@ -167,8 +170,13 @@ pub async fn send(
                 response_data = serde_json::json!({ "status": "denied", "command": "NONE" });
             },
             _ => { // "pending"
-                let _ = sqlx::query("UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, last_seen=? WHERE id=?")
-                    .bind(&payload.hostname).bind(&payload.ver).bind(&payload.os).bind(&payload.ip).bind(&payload.arch).bind(&now).bind(id)
+                let _ = sqlx::query("UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, last_seen = CURRENT_TIMESTAMP  WHERE id=?")
+                    .bind(&payload.hostname)
+                    .bind(&payload.ver)
+                    .bind(&payload.os)
+                    .bind(&payload.ip)
+                    .bind(&payload.arch)
+                    .bind(id)
                     .execute(&pool).await;
 
                 response_data = serde_json::json!({ "status": "pending", "command": "NONE" });
