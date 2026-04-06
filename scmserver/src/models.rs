@@ -242,3 +242,15 @@ pub struct IndividualResult {
     pub status: bool, // true = Pass, false = Fail
 }
 
+
+#[derive(Serialize)]
+pub struct Report {
+    pub id: i32,
+    pub report_date: DateTime<Utc>,
+    pub policy_name: Option<String>,
+    pub policy_version: Option<String>,
+    pub description: Option<String>,
+    pub publisher_name: Option<String>,
+    pub tests_metadata_json: Option<String>,
+    pub report_results_json: Option<String>,
+}

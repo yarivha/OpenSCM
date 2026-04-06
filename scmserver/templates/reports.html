@@ -54,28 +54,32 @@
                     <th>ID</th>
                     <th>Policy Name</th>
 		    <th>Policy Version</th>
+		    <th>Publisher</th>
 		    <th>Date</th>
                     <th>Actions</th>
                   </tr>
                   </thead>
     		  <tbody>
+		  {% for report in reports %}
 		      <td></td>
-		      <td>1</td>
-		      <td>CIS</td>
-    		      <td>1.0</td>
-		      <td>31-3-2026 10:00</td>
+		      <td>{{ report.id }}</td>
+		      <td>{{ report.policy_name }}</td>
+		      <td>{{ report.policy_version }}</td>
+		      <td>{{ report.publisher_name }}</td>
+		      <td>{{ report.report_date }}</td>
     		      <td class="text-right">
-			<a class="btn btn-primary btn-sm" href="/reports_view/1">
+			      <a class="btn btn-primary btn-sm" href="/reports/view/{{ report.id }}">
                           <i class="fas fa-pencil-alt"></i> View
                         </a>
-        		<a class="btn btn-secondary btn-sm" href="#">
-          		  <i class="fas fa-pencil-alt"></i> Export
+        		<a class="btn btn-secondary btn-sm" href="/reports/download/{{ report.id }}">
+          		  <i class="fas fa-pencil-alt"></i> Download
         		</a>
-        		<a class="btn btn-danger btn-sm" onclick="return confirm('Delete Report?')" href="#">
+        		<a class="btn btn-danger btn-sm" onclick="return confirm('Delete Report?')" href="/reports/delete/{{ report.id }}">
           		  <i class="fas fa-trash"></i> Delete
         		</a>
     		     </td>
   	 	  </tr>
+		  {% endfor %}
 		  </tbody>
                 </table>
               </div>

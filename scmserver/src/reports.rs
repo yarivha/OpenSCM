@@ -16,19 +16,48 @@ use crate::models::ReportData;
 use crate::models::TestMeta;
 use crate::models::SystemReport;
 use crate::models::IndividualResult;
-
+use crate::models::Report;
+use crate::models::ErrorQuery;
 
 //////////////////// Reports /////////////////////////
 // reports
-pub async fn reports(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
-    -> Result<Html<String>, StatusCode> {
-    let context = Context::new();
-    render_template(&tera,Some(&pool), "reports.html", context, Some(auth)).await
+pub async fn reports(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
+            -> Result<Html<String>, StatusCode> {
+    let rows = sqlx::query("
+        SELECT
+                id, report_date, policy_name, policy_version, publisher_name from reports")
+        .fetch_all(&*pool)
+        .await
+        .unwrap();
+
+    let reports: Vec<Report> = rows.into_iter().map(|row| {
+        Report {
+            id: row.get("id"),
+            report_date: row.get("report_date"),
+            policy_name: row.get("policy_name"),
+            policy_version: row.get("policy_version"),
+            description: None, 
+            publisher_name: row.get("publisher_name"),
+            tests_metadata_json: None,
+            report_results_json: None,
+        }
+    }).collect();
+
+    // Prepare handler-specific context
+    let mut context = Context::new();
+    
+    if let Some(error_message) = query.error_message {
+        context.insert("error_message", &error_message);
+    }
+    context.insert("reports", &reports);
+
+    // Use the generic render function to render the template with global data
+    render_template(&tera, Some(&pool), "reports.html", context, Some(auth)).await
 }
 
 
 
-
+// reports_save
 pub async fn reports_save(
     auth: AuthSession,
     Path(id): Path<i64>,
