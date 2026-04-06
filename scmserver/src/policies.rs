@@ -817,7 +817,7 @@ pub async fn policies_report_download(
         };
 
     // --- 2. PDF INITIALIZATION ---
-    let font_dir = "./static/dist/fonts";
+    let font_dir = "static/dist/fonts";
     let font_family = match genpdf::fonts::from_files(font_dir, "LiberationSans", None) {
         Ok(f) => f,
         Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Font files missing in /dist/fonts").into_response(),
