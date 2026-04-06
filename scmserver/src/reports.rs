@@ -166,3 +166,40 @@ pub async fn reports_save(
 }
 
 
+// reports_delete
+pub async fn reports_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) -> Redirect {
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            let error_message = format!("Database error: {}", e);
+            let encoded_message = urlencoding::encode(&error_message);
+            return Redirect::to(&format!("/reports?error_message={}", encoded_message));
+        }
+    };
+
+
+    let delete_report_result = sqlx::query(
+        "DELETE FROM reports WHERE id=?"
+    )
+    .bind(&id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = delete_report_result {
+        let error_message = format!("Error deleting report: {}", e);
+        let encoded_message = urlencoding::encode(&error_message);
+        tx.rollback().await.ok(); // Ensure the transaction is rolled back
+        return Redirect::to(&format!("/reports?error_message={}", encoded_message));
+    }
+
+    // Commit the transaction if all queries were successful
+    if let Err(e) = tx.commit().await {
+        let error_message = format!("Error committing transaction: {}", e);
+        let encoded_message = urlencoding::encode(&error_message);
+        return Redirect::to(&format!("/reports?error_message={}", encoded_message));
+    }
+
+    Redirect::to("/reports")
+}
+
+
