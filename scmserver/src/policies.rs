@@ -9,11 +9,13 @@ use sqlx::Row;
 use std::sync::Arc;
 use std::error::Error;
 use std::fs;
+use std::env;
+use std::path::PathBuf;
 use urlencoding;
 use std::collections::BTreeMap;
 use tracing::error;
 use chrono::Local;
-use genpdf::{elements, style, Element};
+use genpdf::{fonts, elements, style, Element};
 
 
 use crate::models::ErrorQuery;
@@ -897,18 +899,29 @@ pub async fn policies_report_download(
         system_reports,
     };
 
-    // 2. PDF GENERATION
-    let mut exe_path = env::current_exe().expect("Failed to get current exe path");
-    exe_path.pop(); // Remove the binary name from the path to get the folder
-    // Join with your fonts directory
-    let font_dir = exe_path.join("static/dist/fonts");
-    let logo_path = "static/dist/img/Logo_report.jpg";
-    let font_family = match genpdf::fonts::from_files(font_dir, "LiberationSans", None) {
-        Ok(f) => f,
-        Err(_) => return (StatusCode::INTERNAL_SERVER_ERROR, "Font files missing").into_response(),
+    // PDF GENERATION - load fonts
+    const FONT_REGULAR: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
+    const FONT_BOLD: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
+    const FONT_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
+    const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
+    const LOGO_BYTES: &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
+
+    // Load Fonts
+    let font_family = fonts::FontFamily {
+        regular: fonts::FontData::new(FONT_REGULAR.to_vec(), None)
+            .expect("Failed to load regular font"),
+        bold: fonts::FontData::new(FONT_BOLD.to_vec(), None)
+            .expect("Failed to load bold font"),
+        italic: fonts::FontData::new(FONT_ITALIC.to_vec(), None)
+            .expect("Failed to load italic font"),
+        bold_italic: fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None)
+            .expect("Failed to load bold-italic font"),
     };
 
     let mut doc = genpdf::Document::new(font_family);
+    let cursor = std::io::Cursor::new(LOGO_BYTES);
+    let mut logo = elements::Image::from_reader(cursor).expect("Failed to load logo");
+
     doc.set_title(format!("OpenSCM Compliance Report - {}", report_data.policy_name));
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_margins(15);
@@ -925,24 +938,10 @@ pub async fn policies_report_download(
     doc.push(elements::Break::new(0.5));
    
     // Put logo to openscm
-    if std::path::Path::new(logo_path).exists() {
-    match elements::Image::from_path(logo_path) {
-        Ok(mut logo) => {
-            // Force a specific width (e.g., 40mm) to ensure it's not
-            // rendering at 0.1px or 1000px and disappearing
-            logo.set_dpi(40.0);
-            logo.set_alignment(genpdf::Alignment::Center);
-
-            // Let's try pushing it directly to the doc first (no table)
-            // This is safer to test if the image works at all
-            doc.push(logo);
-            doc.push(elements::Break::new(1.0));
-        }
-        Err(e) => {
-            error!("IMAGE DECODE ERROR: The file exists, but genpdf couldn't read it: {}", e);
-        }
-    }
-    } 
+    logo.set_dpi(40.0);
+    logo.set_alignment(genpdf::Alignment::Center);
+    doc.push(logo);
+    doc.push(elements::Break::new(1.0));
 
 
     // policy information
