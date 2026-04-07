@@ -898,7 +898,10 @@ pub async fn policies_report_download(
     };
 
     // 2. PDF GENERATION
-    let font_dir = "static/dist/fonts";
+    let mut exe_path = env::current_exe().expect("Failed to get current exe path");
+    exe_path.pop(); // Remove the binary name from the path to get the folder
+    // Join with your fonts directory
+    let font_dir = exe_path.join("static/dist/fonts");
     let logo_path = "static/dist/img/Logo_report.jpg";
     let font_family = match genpdf::fonts::from_files(font_dir, "LiberationSans", None) {
         Ok(f) => f,
