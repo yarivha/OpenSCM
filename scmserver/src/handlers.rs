@@ -10,6 +10,7 @@ use urlencoding::decode;
 use tracing::error;
 
 use crate::models::Notification;
+use crate::auth::UserRole;
 use crate::auth::AuthSession;
 
 
@@ -24,9 +25,9 @@ pub async fn render_template(
 ) -> Result<Html<String>, StatusCode> {
     // Add common context values
     context.insert("version", env!("CARGO_PKG_VERSION"));
-    if let Some(auth) = auth {
-        context.insert("username", &auth.username);
-        context.insert("role", &auth.role);
+    if let Some(session) = &auth {
+        context.insert("username", &session.username);
+        context.insert("role", &session.role);
     }
 
     if let Some(pool) = pool {
@@ -71,6 +72,32 @@ pub async fn render_template(
         let pending_count: i64 = pending_row.get("count");
         context.insert("pending_count", &pending_count);
     }
+   
+    // Add authorization functions
+    if let Some(session) = &auth {
+        // 2. Now 'session' is the actual AuthSession, so we can access .role
+        let role_enum = UserRole::from(session.role.as_str());
+
+        // 3. Insert the specific strings for the template
+        context.insert("username", &session.username);
+        context.insert("role", &session.role);
+
+        // 4. Calculate permissions based on your hierarchy
+        context.insert("is_admin", &(role_enum >= UserRole::Admin));
+        context.insert("is_editor", &(role_enum >= UserRole::Editor));
+        context.insert("is_runner", &(role_enum >= UserRole::Runner));
+    
+        // Explicit check for the Viewer role for your 'disabled' buttons
+        context.insert("is_viewer", &(role_enum == UserRole::Viewer));
+    } else {
+        // Optional: Logic for when NO user is logged in (Guest mode)
+        context.insert("is_admin", &false);
+        context.insert("is_editor", &false);
+        context.insert("is_runner", &false);
+        context.insert("is_viewer", &false);
+    }
+
+
     // Render template
     let rendered = tera.render(template_name, &context).map_err(|e| {
         error!("Template render error ({}): {}", template_name, e);
