@@ -68,15 +68,28 @@
 		      <td>{{ report.submitter_name }}</td>
 		      <td>{{ report.submission_date }}</td>
     		      <td class="text-right">
-			      <a class="btn btn-primary btn-sm" href="/reports/view/{{ report.id }}">
-                          <i class="fas fa-eye"></i> View
-                        </a>
-        		<a class="btn btn-secondary btn-sm" href="/reports/download/{{ report.id }}">
-          		  <i class="fas fa-pencil-alt"></i> Download
-        		</a>
-        		<a class="btn btn-danger btn-sm" onclick="return confirm('Delete Report?')" href="/reports/delete/{{ report.id }}">
-          		  <i class="fas fa-trash"></i> Delete
-        		</a>
+		        <a class="btn btn-primary btn-sm {% if not is_viewer %}disabled{% endif %}" 
+   			   href="{% if is_viewer %}/reports/view/{{ report.id }}{% else %}#{% endif %}"
+   			   {% if not is_viewer %} aria-disabled="true" style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+    			   <i class="fas fa-eye"></i> View
+			</a>
+
+			<a class="btn btn-secondary btn-sm {% if not is_viewer %}disabled{% endif %}" 
+   			   href="{% if is_runner %}/reports/download/{{ report.id }}{% else %}#{% endif %}"
+           		   {% if not is_viewer %} aria-disabled="true" style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+    			   <i class="fas {% if is_runner %}fa-download{% else %}fa-lock{% endif %}"></i> Download
+			</a>
+
+			<a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
+   			   onclick="{% if is_editor %}return confirm('Delete Report?'){% else %}return false;{% endif %}"
+   			   href="{% if is_editor %}/reports/delete/{{ report.id }}{% else %}#{% endif %}"
+   			   {% if not is_editor %}
+       			   aria-disabled="true" 
+       			   role="button"
+       			   style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
+   			   {% endif %}>
+    			   <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i> Delete
+			</a>	   
     		     </td>
   	 	  </tr>
 		  {% endfor %}
