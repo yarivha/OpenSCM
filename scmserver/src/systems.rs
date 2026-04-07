@@ -28,6 +28,12 @@ pub async fn systems(
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
     let filter = params.get("filter").map(|s| s.to_lowercase());
 
     let rows = match filter.as_deref() {
@@ -123,7 +129,7 @@ pub async fn systems(
         context.insert("error_message", error_message);
     }
     context.insert("systems", &systems);
-    render_template(&tera, Some(&pool), "systems.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "systems.html", context, Some(auth)).await.into_response()
 }
 
 // systems_approve
@@ -385,6 +391,11 @@ pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Exte
 
 // systems_pending
 pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) -> impl IntoResponse {
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
     let rows = sqlx::query("
         SELECT
             s.id AS system_id,
@@ -436,7 +447,7 @@ pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>,
         context.insert("error_message", &error_message);
     }
     context.insert("systems", &systems);
-    render_template(&tera,Some(&pool), "systems.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool), "systems.html", context, Some(auth)).await.into_response()
 }
 
 
@@ -446,6 +457,12 @@ pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>,
 
 // system_groups
 pub async fn system_groups(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
     let rows = sqlx::query("
          SELECT
                 sg.id AS group_id,
@@ -479,13 +496,19 @@ pub async fn system_groups(auth: AuthSession, Query(query): Query<ErrorQuery>, p
         context.insert("error_message", &error_message);
     }
     context.insert("system_groups", &system_groups);
-    render_template(&tera,Some(&pool), "system_groups.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool), "system_groups.html", context, Some(auth)).await.into_response()
 }
 
 
 // system_groups_add
 pub async fn system_groups_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
-    -> Result<Html<String>, StatusCode> {
+    -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
     let rows = sqlx::query("
         SELECT id,name,status from systems where status='active'")
         .fetch_all(&*pool)
@@ -513,17 +536,24 @@ pub async fn system_groups_add(auth: AuthSession, pool: Extension<SqlitePool>, t
 
     let mut context = Context::new();
     context.insert("systems", &systems);
-    render_template(&tera,Some(&pool), "system_groups_add.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool), "system_groups_add.html", context, Some(auth)).await.into_response()
 }
 
 //system_groups_add_save
-pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePool>, raw_form: RawForm) -> Redirect {
+pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePool>, raw_form: RawForm) 
+    -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -533,7 +563,7 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -549,7 +579,7 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
     if name.is_none() || description.is_none() {
         let error_message = "Missing 'name' or 'description' in form data.";
         let encoded_message = urlencoding::encode(error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
     let result = sqlx::query(
@@ -565,7 +595,7 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -582,12 +612,12 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
                 {
                     let error_message = format!("Database error: {}", e);
                     let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+                    return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
                 }
             } else {
                 let error_message = format!("Invalid system ID: {}", system_id_str);
                 let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+                return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
             }
         }
     }
@@ -596,21 +626,29 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
     if let Err(e) = tx.commit().await {
         let error_message = format!("Database error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/system_groups")
+    Redirect::to("/system_groups").into_response()
 }
 
 
 // system_groups_delete
-pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) -> Redirect {
+pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) 
+    -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -626,7 +664,7 @@ pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: 
         let error_message = format!("Error deleting relationship: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
     // Now delete the system_group
@@ -641,22 +679,27 @@ pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: 
         let error_message = format!("Error deleting system group: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response().into_response();
     }
 
     // Commit the transaction if all queries were successful
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error committing transaction: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/system_groups")
+    Redirect::to("/system_groups").into_response()
 }
 
 
 // system_group_edit
 pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
+
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
 
     // capture system
     let row_result = sqlx::query("
@@ -736,13 +779,21 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
 
 
 // system_groups_edit_save
-pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> Redirect {
+    pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) 
+        -> impl IntoResponse {
+    
+
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -752,7 +803,7 @@ pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -778,7 +829,7 @@ pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); 
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
     // Remove all related groups
@@ -794,7 +845,7 @@ pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok();
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
 
@@ -812,7 +863,7 @@ pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool
                 {
                     let error_message = format!("Error updating system: {}", e);
                     let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+                    return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
                 }
             }
         }
@@ -823,10 +874,10 @@ pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message));
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/system_groups")
+    Redirect::to("/system_groups").into_response()
 }
 
 
