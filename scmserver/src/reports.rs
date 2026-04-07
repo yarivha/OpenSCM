@@ -219,7 +219,7 @@ pub async fn reports_view(
     let mut context = Context::new();
     context.insert("report", &report_data);
     
-    render_template(&tera, Some(&pool), "policies_report.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth)).await
 }
 
 
