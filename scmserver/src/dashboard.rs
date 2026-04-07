@@ -1,12 +1,13 @@
-use axum::response::Html;
+use axum::response::{Html, IntoResponse};
 use axum::http::StatusCode;
-use axum::extract::Extension;
+use axum::extract::{Extension, Query};
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
 use tracing::error;
 
+use crate::models::ErrorQuery;
 use crate::models::SystemCompliance;
 use crate::models::PolicyCompliance;
 use crate::auth::AuthSession;
@@ -17,8 +18,8 @@ use crate::handlers::render_template;
 /////////////////////////////////// Handlers Functions /////////////////////////////////
 
 // dashboard
-pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
-    -> Result<Html<String>, StatusCode> {
+pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
+    -> impl IntoResponse {
 
     let mut context = Context::new();
     
@@ -93,8 +94,6 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
             failed_tests: row.get::<i64, _>("failed_tests"),
         }
     }).collect();
-
-
   
 
     // Get Top failed policies
@@ -147,9 +146,10 @@ pub async fn dashboard(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
             failed_systems: Some(row.get::<i64, _>("failed_systems")),
         }
     }).collect();
-
-
-
+    
+    if let Some(msg) = &params.error_message {
+        context.insert("error_message", msg);
+    }
     context.insert("systems_count", &systems_count.to_string());
     context.insert("policies_count", &policies_count.to_string());
     context.insert("reports_count", &reports_count.to_string());

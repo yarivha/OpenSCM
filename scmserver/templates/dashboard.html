@@ -17,6 +17,14 @@
     </div>
   </div>
 
+  {% if error_message %}
+  <div class="alert alert-danger alert-dismissible">
+    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+    <h5><i class="icon fas fa-ban"></i> Error</h5>
+    {{error_message}}
+  </div>
+  {% endif %}
+
   <!-- Main content -->
   <section class="content">
     <div class="container-fluid">

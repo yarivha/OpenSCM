@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
 use chrono::{DateTime, Utc};
 
+
+
 #[derive(Deserialize)]
 pub struct ErrorQuery {
     pub error_message: Option<String>,
@@ -248,3 +250,25 @@ pub struct Report {
     pub tests_metadata: Option<String>,
     pub report_results: Option<String>,
 }
+
+
+#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
+pub enum UserRole {
+    Viewer = 0,
+    Runner = 1,
+    Editor = 2,
+    Admin = 3,
+}
+
+
+impl From<&str> for UserRole {
+    fn from(s: &str) -> Self {
+        match s.to_lowercase().as_str() {
+            "admin" => UserRole::Admin,
+            "editor" => UserRole::Editor,
+            "runner" => UserRole::Runner,
+            _ => UserRole::Viewer,
+        }
+    }
+}
+

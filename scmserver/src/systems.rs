@@ -15,7 +15,7 @@ use crate::models::ErrorQuery;
 use crate::models::System;
 use crate::models::SystemGroup;
 use crate::models::SystemInsideGroup;
-use crate::auth::AuthSession;
+use crate::auth::{self, UserRole, AuthSession};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 
@@ -131,7 +131,13 @@ pub async fn systems_approve(
     auth: AuthSession,
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
-) -> Redirect {
+) -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
     // Attempt to update the system status
     if let Err(e) = sqlx::query("UPDATE systems SET status = 'active' WHERE id = ?")
         .bind(id)
@@ -140,11 +146,11 @@ pub async fn systems_approve(
     {
         let error_message = format!("Error approving system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
     }
 
     // Success: redirect back to systems page
-    Redirect::to("/systems")
+    Redirect::to("/systems").into_response()
 }
 
 
@@ -154,7 +160,14 @@ pub async fn systems_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
-) -> Redirect {
+) -> impl IntoResponse {
+
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+
     // Attempt to delete the system
     if let Err(e) = sqlx::query("DELETE FROM systems WHERE id = ?")
         .bind(id)
@@ -163,16 +176,22 @@ pub async fn systems_delete(
     {
         let error_message = format!("Error deleting system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
     }
 
     // Success: redirect back to systems page
-    Redirect::to("/systems")
+    Redirect::to("/systems").into_response()
 }
 
 
 // systems_edit
 pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
+
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
 
     // capture system
     let row_result = sqlx::query("
@@ -260,13 +279,20 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
 }
 
 // system_edit_save
-pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> Redirect {
+pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+            return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -276,7 +302,7 @@ pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Exte
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+            return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -306,7 +332,7 @@ pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Exte
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); 
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
     }
 
     // Remove all related groups
@@ -322,7 +348,7 @@ pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Exte
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok();
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
     }
 
 
@@ -340,7 +366,7 @@ pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Exte
                 {
                     let error_message = format!("Error updating system: {}", e);
                     let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+                    return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
                 }
             }   
         }
@@ -350,10 +376,10 @@ pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Exte
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message));
+        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/systems")
+    Redirect::to("/systems").into_response()
 }
 
 
