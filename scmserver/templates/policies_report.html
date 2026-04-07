@@ -105,8 +105,15 @@
 
     </div>
     <div class="text-right">
-      <a class="btn btn-info btn-sm" href="/reports/save/{{ report.policy_id }}">
-        <i class="fas fa-save"></i> Save Report
+      <a class="btn btn-info btn-sm {% if not is_runner %}disabled{% endif %}" 
+         href="{% if is_runner %}/reports/save/{{ report.policy_id }}{% else %}#{% endif %}"
+         {% if not is_runner %}
+         aria-disabled="true" 
+         role="button"
+         style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
+         {% endif %}>
+         <i class="fas {% if is_runner %}fa-save{% else %}fa-lock{% endif %}"></i> 
+          Save Report
       </a>
       <a class="btn btn-primary btn-sm" href="/policies/download/{{ report.policy_id}}">
         <i class="fas fa-download"></i> Dowload Report
