@@ -1,10 +1,10 @@
 use axum::{
     extract::Extension,
     http::StatusCode,
-    response::{IntoResponse, Response},
+    response::IntoResponse,
     Json,
 };
-use sqlx::{Row, SqlitePool, sqlite::SqliteQueryResult};
+use sqlx::{Row, SqlitePool};
 use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
@@ -58,7 +58,6 @@ pub async fn send(
 ) -> impl IntoResponse {
     let payload = &signed_req.payload;
     let mut response_data = serde_json::json!({});
-    let now = chrono::Utc::now().to_string();
 
     info!("Connection received from agent: {} (IP: {})", payload.hostname, payload.ip);
 

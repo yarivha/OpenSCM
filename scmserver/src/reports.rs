@@ -1,7 +1,6 @@
 use axum::response::{Html, IntoResponse, Redirect};
-use axum::http::{StatusCode, header};
-use axum::extract::{RawForm, Extension, Query, Path};
-use http_body_util::Full;
+use axum::http::StatusCode;
+use axum::extract::{Extension, Query, Path};
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;

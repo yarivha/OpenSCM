@@ -1,16 +1,11 @@
 use axum::response::{Html, Response, IntoResponse, Redirect};
 use axum::http::{StatusCode,header} ;
 use axum::extract::{RawForm, Extension, Query, Path};
-use axum::Form; 
-use http_body_util::Full;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
-use std::error::Error;
 use std::fs;
-use std::env;
-use std::path::PathBuf;
 use urlencoding;
 use std::collections::BTreeMap;
 use tracing::error;
@@ -32,7 +27,6 @@ use crate::models::IndividualResult;
 use crate::auth::AuthSession;
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
-use crate::handlers::not_found;
 
 
 

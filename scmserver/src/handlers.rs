@@ -1,26 +1,15 @@
-use axum::response::{Html, Response, IntoResponse, Redirect};
+use axum::response::{Html, Response, IntoResponse};
 use axum::http::{StatusCode, header};
-use axum::extract::{RawForm, Extension, Query, Path};
 use http_body_util::Full;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
-use std::sync::Arc;
 use urlencoding;
 use std::collections::HashMap;
 use urlencoding::decode;
 use tracing::error;
-use bytes::Bytes;
 
-use crate::models::ErrorQuery;
 use crate::models::Notification;
-use crate::models::System;
-use crate::models::SystemGroup;
-use crate::models::SystemInsideGroup;
-use crate::models::Test;
-use crate::models::Element;
-use crate::models::SElement;
-use crate::models::Condition;
 use crate::auth::AuthSession;
 
 
