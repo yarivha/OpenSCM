@@ -121,7 +121,7 @@ pub async fn reports_save(
         let status_str: String = row.get("status_text");
         
         // Match your agent's pass/fail string (assuming "Pass")
-        let t_status: bool = status_str.to_lowercase() == "pass";
+        let t_status: bool = status_str.to_lowercase() == "true";
 
         let entry = reports_map.entry(s_name.clone()).or_insert(SystemReport {
             system_name: s_name,
