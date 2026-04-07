@@ -49,7 +49,18 @@
        <h3 class="card-title">Policies List</h3>
        <div class="card-tools">
          <ul class="pagination pagination-sm float-right">
-           <li class="page-item"><a class="page-link" href="/policies/add">New Policy</a></li>
+           <li class="page-item {% if not is_editor %}disabled{% endif %}">
+             <a class="page-link" 
+                href="{% if is_editor %}/policies/add{% else %}#{% endif %}"
+                {% if not is_editor %} 
+                tabindex="-1" 
+                aria-disabled="true" 
+                style="cursor: not-allowed;" 
+                {% endif %}>
+                <i class="fas {% if is_editor %}fa-shield-alt{% else %}fa-lock{% endif %} mr-1"></i>
+                New Policy
+             </a>
+           </li>
          </ul>
        </div>
      </div>
@@ -103,17 +114,29 @@
                 </div>
                 <div class="card-footer">
                   <div class="text-right">
-		    <a class="btn btn-info btn-sm" href="/policies/edit/{{ policy.policy_id }}">
-                      <i class="fas fa-pencil-alt"></i> Edit
+		    <a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
+   		       href="{% if is_editor %}/policies/edit/{{ policy.policy_id }}{% else %}#{% endif %}"
+                       {% if not is_editor %} aria-disabled="true" style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+                       <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i> Edit
                     </a>
-		    <a href="/policies/run/{{ policy.policy_id }}" class="btn btn-sm btn-primary">
-                      <i class="fas fa-rocket"></i> Run Policy
+
+		    <a class="btn btn-primary btn-sm {% if not is_runner %}disabled{% endif %}" 
+                       href="{% if is_runner %}/policies/run/{{ policy.policy_id }}{% else %}#{% endif %}"
+                       {% if not is_runner %} aria-disabled="true" style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+                       <i class="fas {% if is_runner %}fa-rocket{% else %}fa-lock{% endif %}"></i> Run Policy
                     </a>
-		    <a href="/policies/report/{{ policy.policy_id }}" class="btn btn-sm btn-warning">
-                      <i class="fas fa-file-text"></i> View Report
+
+                    <a class="btn btn-warning btn-sm {% if not is_viewer %}disabled{% endif %}" 
+                       href="{% if is_viewer %}/policies/report/{{ policy.policy_id }}{% else %}#{% endif %}"
+                       {% if not is_viewer %} aria-disabled="true" style="cursor: not-allowed; opacity: 0.5;" {% endif %}>
+                       <i class="fas fa-file-text"></i> View Report
                     </a>
-		    <a class="btn btn-danger btn-sm" onclick="return confirm('Delete Policy?')" href="/policies/delete/{{ policy.policy_id}}">
-                      <i class="fas fa-trash"></i> Delete
+
+                    <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
+                       onclick="{% if is_editor %}return confirm('Delete Policy?'){% else %}return false;{% endif %}"
+                       href="{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}"
+                       {% if not is_editor %} aria-disabled="true" style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);" {% endif %}>
+                       <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i> Delete
                     </a>
                   </div>
                 </div>

@@ -46,7 +46,18 @@
                 <h3 class="card-title">Tests List</h3>
 		<div class="card-tools">
 	          <ul class="pagination pagination-sm float-right">
-                    <li class="page-item"><a class="page-link" href="/tests/add">New Test</a></li>
+		    <li class="page-item {% if not is_editor %}disabled{% endif %}">
+    		      <a class="page-link" 
+       		      href="{% if is_editor %}/tests/add{% else %}#{% endif %}"
+       		      {% if not is_editor %} 
+           	      tabindex="-1" 
+           	      aria-disabled="true" 
+           	      style="cursor: not-allowed;" 
+       		      {% endif %}>
+        	      <i class="fas {% if is_editor %}fa-vial{% else %}fa-lock{% endif %} mr-1"></i>
+        	      New Test
+    		      </a>
+		    </li>
 		  </ul>
                 </div>
               </div>
@@ -75,16 +86,27 @@
                               </i>
                               View
                           </a>
-			  <a class="btn btn-info btn-sm" href="/tests/edit/{{ test.id }}">
-                              <i class="fas fa-pencil-alt">
-                              </i>
-                              Edit
-                          </a>
-                          <a class="btn btn-danger btn-sm" onclick="return confirm('Delete Test?')" href="/tests/delete/{{ test.id}}">
-                              <i class="fas fa-trash">
-                              </i>
-                              Delete
-                          </a>
+                          <a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
+   			     href="{% if is_editor %}/tests/edit/{{ test.id }}{% else %}#{% endif %}"
+   			     {% if not is_editor %}
+       			     aria-disabled="true" 
+       			     role="button"
+       			     style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
+   			     {% endif %}>
+    			     <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
+    			     Edit
+			  </a>
+			  <a class="btn btn-danger btn-sm {% if not is_admin %}disabled{% endif %}"
+   			     onclick="{% if is_admin %}return confirm('Delete Test?'){% else %}return false;{% endif %}"
+   			     href="{% if is_admin %}/tests/delete/{{ test.id }}{% else %}#{% endif %}"
+   			     {% if not is_admin %}
+       			     aria-disabled="true"
+       			     role="button"
+       			     style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
+   			     {% endif %}>
+    			     <i class="fas {% if is_admin %}fa-trash{% else %}fa-lock{% endif %}"></i>
+    			     Delete
+			  </a>
                       </td>
                     </tr>
                   {% endfor %}
