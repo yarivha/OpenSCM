@@ -86,9 +86,8 @@ pub async fn render_template(
         context.insert("is_admin", &(role_enum >= UserRole::Admin));
         context.insert("is_editor", &(role_enum >= UserRole::Editor));
         context.insert("is_runner", &(role_enum >= UserRole::Runner));
-    
-        // Explicit check for the Viewer role for your 'disabled' buttons
-        context.insert("is_viewer", &(role_enum == UserRole::Viewer));
+        context.insert("is_viewer", &(role_enum >= UserRole::Viewer));
+
     } else {
         // Optional: Logic for when NO user is logged in (Guest mode)
         context.insert("is_admin", &false);
