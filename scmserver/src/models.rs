@@ -201,7 +201,7 @@ pub struct Condition {
 }
 
 
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct ReportData {
     // Page 1: Policy Header Info
     pub policy_id: i32,
@@ -210,16 +210,12 @@ pub struct ReportData {
     pub description: String,
     pub submission_date: String,
     pub submitter_name: String,
-
-    // Page 2: Global Test Definitions (Rationale/Remediation)
     pub tests_metadata: Vec<TestMeta>,
-
-    // Page 3+: System-specific Results
     pub system_reports: Vec<SystemReport>,
 }
 
 /// Details for the "Policy Specification" page
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct TestMeta {
     pub name: String,
     pub description: String,
@@ -227,16 +223,14 @@ pub struct TestMeta {
     pub remediation: String,
 }
 
-/// A single page in the PDF for a specific server/system
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct SystemReport {
     pub system_name: String,
     pub results: Vec<IndividualResult>,
     pub is_passed: bool,
 }
 
-/// The pass/fail status for a specific test on a specific system
-#[derive(Serialize)]
+#[derive(Serialize, Deserialize)]
 pub struct IndividualResult {
     pub test_name: String,
     pub status: bool, // true = Pass, false = Fail
@@ -246,11 +240,11 @@ pub struct IndividualResult {
 #[derive(Serialize)]
 pub struct Report {
     pub id: i32,
-    pub report_date: DateTime<Utc>,
+    pub submission_date: DateTime<Utc>,
     pub policy_name: Option<String>,
     pub policy_version: Option<String>,
-    pub description: Option<String>,
-    pub publisher_name: Option<String>,
-    pub tests_metadata_json: Option<String>,
-    pub report_results_json: Option<String>,
+    pub policy_description: Option<String>,
+    pub submitter_name: Option<String>,
+    pub tests_metadata: Option<String>,
+    pub report_results: Option<String>,
 }

@@ -145,6 +145,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/policies/download/{id}",get(policies_report_download))
         .route("/reports", get(reports))
         .route("/reports/save/{id}",get(reports_save))
+        .route("/reports/view/{id}",get(reports_view))
         .route("/reports/delete/{id}",get(reports_delete))
         .route("/send", post(send))
         .route("/result", post(receive_result))

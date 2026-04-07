@@ -198,15 +198,13 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            report_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            submission_date DATETIME DEFAULT CURRENT_TIMESTAMP,
             policy_name TEXT NOT NULL,
             policy_version TEXT,
-            description TEXT,
-            publisher_name TEXT,
-            -- Store your TestMetadata structs here
-            tests_metadata_json TEXT NOT NULL, 
-            -- Store your SystemReports (including TestResults) here
-            report_results_json TEXT NOT NULL
+            policy_description TEXT,
+            submitter_name TEXT,
+            tests_metadata TEXT NOT NULL, 
+            report_results TEXT NOT NULL
         )",
     )
     .execute(pool)

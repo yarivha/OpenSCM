@@ -25,7 +25,7 @@ pub async fn reports(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Ex
             -> Result<Html<String>, StatusCode> {
     let rows = sqlx::query("
         SELECT
-                id, report_date, policy_name, policy_version, publisher_name from reports")
+                id, submission_date, policy_name, policy_version, submitter_name from reports")
         .fetch_all(&*pool)
         .await
         .unwrap();
@@ -33,13 +33,13 @@ pub async fn reports(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Ex
     let reports: Vec<Report> = rows.into_iter().map(|row| {
         Report {
             id: row.get("id"),
-            report_date: row.get("report_date"),
+            submission_date: row.get("submission_date"),
             policy_name: row.get("policy_name"),
             policy_version: row.get("policy_version"),
-            description: None, 
-            publisher_name: row.get("publisher_name"),
-            tests_metadata_json: None,
-            report_results_json: None,
+            policy_description: None, 
+            submitter_name: row.get("submitter_name"),
+            tests_metadata: None,
+            report_results: None,
         }
     }).collect();
 
@@ -143,7 +143,7 @@ pub async fn reports_save(
     let insert_result = sqlx::query(
         r#"
         INSERT INTO reports 
-        (policy_name, policy_version, description, publisher_name, tests_metadata_json, report_results_json) 
+        (policy_name, policy_version, policy_description, submitter_name, tests_metadata, report_results) 
         VALUES (?, ?, ?, ?, ?, ?)
         "#
     )
@@ -164,6 +164,64 @@ pub async fn reports_save(
         }
     }
 }
+
+
+
+// reports_view
+pub async fn reports_view(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> Result<Html<String>, StatusCode> {
+
+    // 1. Fetch the single report row
+    let row = sqlx::query(
+        "SELECT id, submission_date, policy_name, policy_version, policy_description, submitter_name, tests_metadata, report_results 
+         FROM reports WHERE id = ?"
+    )
+    .bind(id)
+    .fetch_one(&*pool)
+    .await
+    .map_err(|e| {
+        eprintln!("Database Error (Report View): {}", e);
+        StatusCode::NOT_FOUND
+    })?;
+
+    // 2. Deserialize the JSON columns
+    // SQLite returns these as Strings, so we parse them into our Rust Vecs
+    let tests_metadata_raw: String = row.get("tests_metadata");
+    let system_reports_raw: String = row.get("report_results");
+
+    let tests_metadata: Vec<TestMeta> = serde_json::from_str(&tests_metadata_raw).map_err(|e| {
+        eprintln!("JSON Deserialization Error (Tests): {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    let system_reports: Vec<SystemReport> = serde_json::from_str(&system_reports_raw).map_err(|e| {
+        eprintln!("JSON Deserialization Error (Systems): {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
+    })?;
+
+    // 3. Reconstruct the ReportData for the template
+    let report_data = ReportData {
+        policy_id: row.get("id"), // Or keep as 0 if the original policy ID isn't in this table
+        policy_name: row.get("policy_name"),
+        version: row.get("policy_version"),
+        description: row.get::<Option<String>, _>("policy_description").unwrap_or_default(),
+        submission_date: row.get("submission_date"),
+        submitter_name: row.get("submitter_name"),
+        tests_metadata,
+        system_reports,
+    };
+
+    // 4. Render using the same template
+    let mut context = Context::new();
+    context.insert("report", &report_data);
+    
+    render_template(&tera, Some(&pool), "policies_report.html", context, Some(auth)).await
+}
+
 
 
 // reports_delete
