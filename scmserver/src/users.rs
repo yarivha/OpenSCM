@@ -59,22 +59,37 @@ pub async fn users(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Ext
 
 // users_add
 pub async fn users_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
-    -> Result<Html<String>, StatusCode> {
+    -> impl IntoResponse { 
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
+        return redir;
+    }
+
+
     let context = Context::new();
-    render_template(&tera,Some(&pool), "users_add.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool), "users_add.html", context, Some(auth)).await.into_response()
 }
 
 
 
 // users_add_save
-pub async fn users_add_save(auth: AuthSession, pool: Extension<SqlitePool>, raw_form: RawForm) -> Redirect {
+pub async fn users_add_save(auth: AuthSession, pool: Extension<SqlitePool>, raw_form: RawForm) 
+    -> impl IntoResponse {
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
+        return redir;
+    }
+
+
     // Start transaction
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/users?error_message={}", encoded_message));
+            return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -85,7 +100,7 @@ pub async fn users_add_save(auth: AuthSession, pool: Extension<SqlitePool>, raw_
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/users?error_message={}", encoded_message));
+            return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -107,7 +122,7 @@ pub async fn users_add_save(auth: AuthSession, pool: Extension<SqlitePool>, raw_
         Err(e) => {
             let error_message = format!("Failed to hash password: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/users?error_message={}", encoded_message));
+            return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -128,29 +143,37 @@ pub async fn users_add_save(auth: AuthSession, pool: Extension<SqlitePool>, raw_
     if let Err(e) = result {
         let error_message = format!("Database insert error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/users?error_message={}", encoded_message));
+        return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
     }
 
     // Commit transaction
     if let Err(e) = tx.commit().await {
         let error_message = format!("Database error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/users?error_message={}", encoded_message));
+        return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/users")
+    Redirect::to("/users").into_response()
 }
 
 
 
 // users_delete
-pub async fn users_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) -> Redirect {
+pub async fn users_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) 
+    -> impl IntoResponse {
+        
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
+        return redir;
+    }
+
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/users?error_message={}", encoded_message));
+            return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -166,17 +189,17 @@ pub async fn users_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extensio
         let error_message = format!("Error deleting user: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/users?error_message={}", encoded_message));
+        return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
     }
 
     // Commit the transaction if all queries were successful
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error committing transaction: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/users?error_message={}", encoded_message));
+        return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
     }
     
-    Redirect::to("/users") 
+    Redirect::to("/users").into_response() 
 }   
 
 
