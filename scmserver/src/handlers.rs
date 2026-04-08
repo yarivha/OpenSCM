@@ -27,6 +27,7 @@ pub async fn render_template(
     context.insert("version", env!("CARGO_PKG_VERSION"));
     if let Some(session) = &auth {
         context.insert("username", &session.username);
+         context.insert("userid", &session.userid);
         context.insert("role", &session.role);
     }
 

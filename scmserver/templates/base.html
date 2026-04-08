@@ -86,8 +86,10 @@
           <i class="fa fa-user fa-fw"></i> {{ username }}
         </a>
         <div class="dropdown-menu dropdown-menu-right">
-          <a href="#" class="dropdown-item"><i class="fa fa-user fa-fw"></i> Profile</a>
+	  <a href="/users/edit/{{ userid }}" class="dropdown-item"><i class="fa fa-user fa-fw"></i> Profile</a>
+	  {% if is_admin %}
           <a href="#" class="dropdown-item"><i class="fa fa-cog fa-fw"></i> Settings</a>
+	  {% endif %}
           <div class="dropdown-divider"></div>
           <a href="/logout" class="dropdown-item text-danger">
             <i class="fa fa-sign-out-alt fa-fw"></i> Logout

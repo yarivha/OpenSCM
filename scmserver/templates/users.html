@@ -73,18 +73,16 @@
 		      <td>{{ user.email }}</td>
 		      <td>{{ user.role }}</td>
 		      <td class="text-right">
-                          <a class="btn btn-info btn-sm" href="#">
-                              <i class="fas fa-pencil-alt">
-                              </i>
-                              Edit
-                          </a>
-			  {% if user.id != 1 %}
-                          <a class="btn btn-danger btn-sm" onclick="return confirm('Delete User?')" href="/users/delete/{{ user.id}}">
-                              <i class="fas fa-trash">
-                              </i>
-                              Delete
-                          </a>
-			  {% endif %}
+		        <a class="btn btn-info btn-sm" href="/users/edit/{{ user.id }}">
+                          <i class="fas fa-pencil-alt"></i>
+                             Edit
+                        </a>
+			{% if user.id != 1 %}
+                        <a class="btn btn-danger btn-sm" onclick="return confirm('Delete User?')" href="/users/delete/{{ user.id}}">
+                           <i class="fas fa-trash"></i>
+                             Delete
+                        </a>
+			{% endif %}
                       </td>
                     </tr>
                   {% endfor %}

@@ -57,6 +57,7 @@ pub fn authorize(current_role: &str, required: UserRole) -> Option<Response> {
 
 pub struct AuthSession {
     pub username: String,
+    pub userid: i32,
     pub role: String,
 }
 
@@ -75,12 +76,14 @@ where
 
             if let Some(cookie) = jar.get("session") {
                 if let Ok(session_json) = serde_json::from_str::<Value>(cookie.value()) {
-                    if let (Some(username), Some(role)) = (
+                    if let (Some(username), Some(userid), Some(role)) = (
                         session_json.get("username").and_then(|v| v.as_str()),
+                        session_json.get("userid").and_then(|v| v.as_str()),
                         session_json.get("role").and_then(|v| v.as_str()),
                     ) {
                         return Ok(AuthSession {
                             username: username.to_string(),
+                            userid: userid.parse::<i32>().unwrap_or(0),
                             role: role.to_string(),
                         });
                     }
@@ -112,7 +115,7 @@ pub async fn login_submit(
     Extension(pool): Extension<SqlitePool>,
     Form(form): Form<LoginForm>,
 ) -> (CookieJar, Redirect) {
-    let row = sqlx::query("SELECT password, username, role FROM users WHERE username = ?")
+    let row = sqlx::query("SELECT password, username, id, role FROM users WHERE username = ?")
         .bind(&form.username)
         .fetch_optional(&pool)
         .await;
@@ -120,10 +123,12 @@ pub async fn login_submit(
     if let Ok(Some(row)) = row {
         let password_hash: String = row.get("password");
         let username: String = row.get("username");
+        let userid_raw: i32 = row.get("id");
+        let userid =  userid_raw.to_string();
         let role: String = row.get("role");
 
         if verify(&form.password, &password_hash).unwrap_or(false) {
-            let session_data = json!({ "username": username, "role": role }).to_string();
+            let session_data = json!({ "username": username, "userid": userid,  "role": role }).to_string();
             let mut cookie = Cookie::new("session", session_data);
             cookie.set_path("/");
             cookie.set_http_only(true);

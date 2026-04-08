@@ -9,6 +9,7 @@ mod systems;
 mod tests;
 mod policies;
 mod reports;
+mod users;
 mod settings;
 
 use tera::Tera;
@@ -28,7 +29,9 @@ use crate::systems::*;
 use crate::tests::*;
 use crate::policies::*;
 use crate::reports::*;
+use crate::users::*;
 use crate::settings::*;
+
 
 // Embedded templates/static files
 static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");
@@ -123,6 +126,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/users", get(users))
         .route("/users/add", get(users_add).post(users_add_save))
         .route("/users/delete/{id}", get(users_delete))
+        .route("/users/edit/{id}", get(users_edit))
         .route("/systems", get(systems))
         .route("/systems/delete/{id}", get(systems_delete))
         .route("/systems/edit/{id}", get(systems_edit).post(systems_edit_save))
