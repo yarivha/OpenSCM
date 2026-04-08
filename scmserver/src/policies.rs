@@ -24,7 +24,7 @@ use crate::models::ReportData;
 use crate::models::TestMeta;
 use crate::models::SystemReport;
 use crate::models::IndividualResult;
-use crate::auth::AuthSession;
+use crate::auth::{self, UserRole, AuthSession};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 
@@ -32,50 +32,57 @@ use crate::handlers::parse_form_data;
 
 // policies
 pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
--> Result<Html<String>, StatusCode> {
+-> impl IntoResponse  {
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+       return redir;
+    }
 
-    let rows = sqlx::query(r#"
-        SELECT 
-            p.id AS policy_id,
-            p.name AS policy_name,
-            p.version AS policy_version,
-            p.description AS policy_description,
-            -- If there are no systems, ROUND returns NULL; COALESCE turns that NULL into -1
-            CAST(
-                COALESCE(
-                    ROUND(
-                        SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) * 100.0 
-                        / NULLIF(COUNT(system_results.system_id), 0), 
-                        2
-                    ), 
-                    -1.0
-                ) AS REAL
-            ) AS compliance
-        FROM policies p
-        LEFT JOIN (
-            -- Subquery: Determines status for systems that actually HAVE results
+    
+    let rows = match sqlx::query(r#"
             SELECT 
-                tip.policy_id, 
-                r.system_id,
-                CASE 
-                    WHEN SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END) > 0 
-                        THEN 'failed' 
-                    ELSE 'passed' 
-                END AS system_status
-            FROM tests_in_policy tip
-            JOIN results r ON r.test_id = tip.test_id
-            GROUP BY tip.policy_id, r.system_id
-        ) AS system_results ON p.id = system_results.policy_id
-        GROUP BY p.id, p.name, p.version, p.description
-        ORDER BY p.id ASC
+                p.id AS policy_id,
+                p.name AS policy_name,
+                p.version AS policy_version,
+                p.description AS policy_description,
+                CAST(
+                    COALESCE(
+                        ROUND(
+                            SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) * 100.0 
+                            / NULLIF(COUNT(system_results.system_id), 0), 
+                            2
+                        ), 
+                        -1.0
+                    ) AS REAL
+                ) AS compliance
+            FROM policies p
+            LEFT JOIN (
+                SELECT 
+                    tip.policy_id, 
+                    r.system_id,
+                    CASE 
+                        WHEN SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END) > 0 
+                            THEN 'failed' 
+                        ELSE 'passed' 
+                    END AS system_status
+                FROM tests_in_policy tip
+                JOIN results r ON r.test_id = tip.test_id
+                GROUP BY tip.policy_id, r.system_id
+            ) AS system_results ON p.id = system_results.policy_id
+            GROUP BY p.id, p.name, p.version, p.description
+            ORDER BY p.id ASC
+        "#)
+        .fetch_all(&*pool)
+        .await 
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!(error = ?e, "Database query failed: Unable to calculate policy compliance list");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
-    "#)
-    .fetch_all(&*pool)
-    .await
-    .map_err(|e| {
-        error!("Database query failed: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
     let policies: Vec<PolicyCompliance> = rows.into_iter().map(|row| {
         PolicyCompliance {
@@ -104,7 +111,7 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
         context.insert("success_message", &success_message);
     }
     context.insert("policies", &policies);
-    render_template(&tera, Some(&pool), "policies.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "policies.html", context, Some(auth)).await.into_response()
 }
 
 
@@ -112,7 +119,14 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
 
 // policies_add
 pub async fn policies_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
-    -> Result<Html<String>, StatusCode> {
+    -> impl IntoResponse {
+
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+    
+
     let rows = sqlx::query("
         SELECT id,name from tests")
         .fetch_all(&*pool)
@@ -173,19 +187,26 @@ pub async fn policies_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: 
     let mut context = Context::new();
     context.insert("tests", &tests);
     context.insert("system_groups",&system_groups);
-    render_template(&tera,Some(&pool), "policies_add.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool), "policies_add.html", context, Some(auth)).await.into_response()
 }
 
 
 
 //policies_add_save
-pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<SqlitePool>, RawForm(raw_form): RawForm) -> Redirect {
+pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<SqlitePool>, RawForm(raw_form): RawForm) 
+        -> impl IntoResponse {
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -194,7 +215,7 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -204,12 +225,12 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
     // Required fields
     let name = match form_data.get("name").and_then(|v| v.first()) {
         Some(v) if !v.trim().is_empty() => v.to_string(),
-        _ => return Redirect::to("/policies?error_message=Name is required"),
+        _ => return Redirect::to("/policies?error_message=Name is required").into_response(),
     };
 
     let version = match form_data.get("version").and_then(|v| v.first()) {
         Some(v) if !v.trim().is_empty() => v.to_string(),
-        _ => return Redirect::to("/policies?error_message=Version is required"),
+        _ => return Redirect::to("/policies?error_message=Version is required").into_response(),
     };
 
     let description: Option<String> = form_data
@@ -247,7 +268,7 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -264,12 +285,12 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
                 {
                     let error_message = format!("Database error: {}", e);
                     let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
                 }
             } else {
                 let error_message = format!("Invalid test ID: {}", test_id_str);
                 let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
             }
         }
 
@@ -286,12 +307,12 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
                 {
                     let error_message = format!("Database error: {}", e);
                     let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
                 }
             } else {
                 let error_message = format!("Invalid group ID: {}", group_id_str);
                 let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
             }
         }
 
@@ -299,16 +320,21 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
     if let Err(e) = tx.commit().await {
         let error_message = format!("Database error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/policies")
+    Redirect::to("/policies").into_response()
 }
 
 //policies_edit
 pub async fn policies_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
 
-let row_result = sqlx::query("
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
+    let row_result = sqlx::query("
                 SELECT id,name,version,description from policies where id=?")
     .bind(id)
     .fetch_optional(&*pool)
@@ -437,13 +463,20 @@ let row_result = sqlx::query("
 
 
 //policies_edit_save
-pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extension(pool): Extension<SqlitePool>, RawForm(raw_form): RawForm) -> Redirect {
+pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extension(pool): Extension<SqlitePool>, RawForm(raw_form): RawForm) ->      impl IntoResponse {
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -452,7 +485,7 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -462,12 +495,12 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
     // Required fields
     let name = match form_data.get("name").and_then(|v| v.first()) {
         Some(v) if !v.trim().is_empty() => v.to_string(),
-        _ => return Redirect::to("/policies?error_message=Name is required"),
+        _ => return Redirect::to("/policies?error_message=Name is required").into_response(),
     };
 
     let version = match form_data.get("version").and_then(|v| v.first()) {
         Some(v) if !v.trim().is_empty() => v.to_string(),
-        _ => return Redirect::to("/policies?error_message=Version is required"),
+        _ => return Redirect::to("/policies?error_message=Version is required").into_response(),
     };
 
     let description: Option<String> = form_data
@@ -503,7 +536,7 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
         let error_message = format!("Error updating policy: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); 
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
     // Remove all related groups
@@ -519,7 +552,7 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
         let error_message = format!("Error updating policy: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok();
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
     
 
@@ -536,7 +569,7 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
         let error_message = format!("Error updating policy: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok();
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
 
@@ -553,12 +586,12 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
                 {
                     let error_message = format!("Database error: {}", e);
                     let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
                 }
             } else {
                 let error_message = format!("Invalid test ID: {}", test_id_str);
                 let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
             }
         }
 
@@ -575,12 +608,12 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
                 {
                     let error_message = format!("Database error: {}", e);
                     let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
                 }
             } else {
                 let error_message = format!("Invalid group ID: {}", group_id_str);
                 let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
             }
         }
 
@@ -588,22 +621,29 @@ pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extensio
     if let Err(e) = tx.commit().await {
         let error_message = format!("Database error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/policies")
+    Redirect::to("/policies").into_response()
 }
 
 
 
 // policies_delete
-pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) -> Redirect {
+pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) ->  impl IntoResponse{
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -619,17 +659,17 @@ pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Exten
         let error_message = format!("Error deleting system group: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
     // Commit the transaction if all queries were successful
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error committing transaction: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/policies")
+    Redirect::to("/policies").into_response()
 }
 
 // policies_run
@@ -637,13 +677,21 @@ pub async fn policies_run(
     auth: AuthSession,
     Path(id): Path<i32>,
     pool: Extension<SqlitePool>
-) -> Redirect {
+) -> impl IntoResponse {
+    
+
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
+       return redir;
+    }
+
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -665,51 +713,64 @@ pub async fn policies_run(
         let error_message = format!("Error running policy: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok();
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
     // Commit transaction
     if let Err(e) = tx.commit().await {
         let error_message = format!("Database commit error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message));
+        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/policies?success_message=Policy run successfully")
+    Redirect::to("/policies?success_message=Policy run successfully").into_response()
 }
 
 
 // policies_report
 pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
-    -> Result<Html<String>, StatusCode> {
+    -> impl IntoResponse {
 
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+       return redir;
+    }
 
     // Safely get the username
     let submitter_name = auth.username.clone();
 
-    // 1. Fetch Policy
-    let policy_row = sqlx::query("SELECT id, name, version, description FROM policies WHERE id = ?")
-        .bind(id)
-        .fetch_one(&*pool)
-        .await
-        .map_err(|e| {
-            eprintln!("Database Error (Policy): {}", e);
-            StatusCode::NOT_FOUND 
-        })?;
+    // Fetch Policy
+    let policy_row = match sqlx::query("SELECT id, name, version, description FROM policies WHERE id = ?")
+            .bind(id)
+            .fetch_one(&*pool)
+            .await 
+    {
+        Ok(row) => row,
+        Err(e) => {
+            // Log the specific error and the ID that failed
+            error!(error = ?e, policy_id = %id, "Database Error: Failed to fetch policy details");
+            return StatusCode::NOT_FOUND.into_response();
+        }
+    };
 
-    // 2. Fetch Tests
-    let test_rows = sqlx::query(r#"
-        SELECT t.name, t.description, t.rational, t.remediation 
-        FROM tests t
-        JOIN tests_in_policy tip ON t.id = tip.test_id
-        WHERE tip.policy_id = ?"#)
-        .bind(id)
-        .fetch_all(&*pool)
-        .await
-        .map_err(|e| {
-            eprintln!("Database Error (Tests): {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR 
-        })?;
+
+    //  Fetch Tests
+    let test_rows = match sqlx::query(r#"
+            SELECT t.name, t.description, t.rational, t.remediation
+            FROM tests t
+            JOIN tests_in_policy tip ON t.id = tip.test_id
+            WHERE tip.policy_id = ?"#)
+            .bind(id)
+            .fetch_all(&*pool)
+            .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!(error = ?e, policy_id = %id, "Database Error: Failed to fetch tests for policy");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
 
     let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| {
         TestMeta {
@@ -720,30 +781,35 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
         }
     }).collect();
 
-    // 3. Fetch Results
-    let result_rows = sqlx::query(r#"
-        SELECT DISTINCT
-            s.name as system_name,
-            t.name as test_name,
-            r.result as status
-        FROM results r
-        JOIN systems s ON r.system_id = s.id
-        JOIN tests t ON r.test_id = t.id
-        JOIN systems_in_groups sig ON s.id = sig.system_id
-        JOIN systems_in_policy sip ON sig.group_id = sip.group_id
-        JOIN tests_in_policy tip ON t.id = tip.test_id
-        WHERE sip.policy_id = ?
-          AND tip.policy_id = ?"#)
-        .bind(id)
-        .bind(id)
-        .fetch_all(&*pool)
-        .await
-        .map_err(|e| {
-            eprintln!("Database Error (Results): {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR
-        })?;
+    // Fetch Results
+    let result_rows = match sqlx::query(r#"
+            SELECT DISTINCT
+                s.name as system_name,
+                t.name as test_name,
+                r.result as status
+            FROM results r
+            JOIN systems s ON r.system_id = s.id
+            JOIN tests t ON r.test_id = t.id
+            JOIN systems_in_groups sig ON s.id = sig.system_id
+            JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+            JOIN tests_in_policy tip ON t.id = tip.test_id
+            WHERE sip.policy_id = ?
+            AND tip.policy_id = ?"#)
+            .bind(id)
+            .bind(id)
+            .fetch_all(&*pool)
+            .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            // Structured logging allows you to add context easily
+            error!(error = ?e, policy_id = %id, "Failed to fetch policy results from database");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
-    // 4. Group results by System Name
+
+    // Group results by System Name
     let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
     for row in result_rows {
         // Use Option to handle cases where a system name might be NULL
@@ -790,7 +856,7 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
 
     let mut context = Context::new();
     context.insert("report", &report_data);
-    render_template(&tera,Some(&pool),"policies_report.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool),"policies_report.html", context, Some(auth)).await.into_response()
 }
 
 
@@ -800,6 +866,13 @@ pub async fn policies_report_download(
     Path(id): Path<i64>,
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
+
+
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+       return redir;
+    }
+
     // 1. DATA ACQUISITION
     let submitter_name = auth.username.clone();
 
