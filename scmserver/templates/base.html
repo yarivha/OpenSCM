@@ -104,6 +104,17 @@
     </a>
 
     <div class="sidebar">
+      <!-- SidebarSearch Form -->
+      <div class="form-inline">
+        <div class="input-group" data-widget="sidebar-search">
+          <input class="form-control form-control-sidebar" type="search" placeholder="Search" aria-label="Search">
+          <div class="input-group-append">
+            <button class="btn btn-sidebar">
+              <i class="fas fa-search fa-fw"></i>
+            </button>
+          </div>
+        </div>
+      </div>
       <nav class="mt-2">
         <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
           <li class="nav-item">
@@ -169,8 +180,23 @@
           </li>
 
           {% if is_admin %}
-          <li class="nav-header">ADMINISTRATION</li>
-          <li class="nav-item"><a href="/users" class="nav-link"><i class="fas fa-users-cog nav-icon"></i><p>User Management</p></a></li>
+          <li class="nav-item has-treeview">
+            <a href="#" class="nav-link">
+              <i class="fas fa-users-cog nav-icon"></i>
+              <p>
+                Settings
+                <i class="fas fa-angle-left right"></i>
+              </p>
+            </a>
+            <ul class="nav nav-treeview">
+              <li class="nav-item">
+                <a href="/users" class="nav-link" style="padding-left: 30px;">
+                  <i class="far fa-user nav-icon"></i>
+                  <p>Users</p>
+          	</a>
+              </li>
+      	    </ul>
+    	  </li>
           {% endif %}
         </ul>
       </nav>
