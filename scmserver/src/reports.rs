@@ -9,7 +9,7 @@ use tracing::error;
 use serde_json;
 use std::collections::HashMap;
 
-use crate::auth::AuthSession;
+use crate::auth::{self, UserRole, AuthSession};
 use crate::handlers::render_template;
 use crate::models::ReportData;
 use crate::models::TestMeta;
@@ -21,7 +21,13 @@ use crate::models::ErrorQuery;
 //////////////////// Reports /////////////////////////
 // reports
 pub async fn reports(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
-            -> Result<Html<String>, StatusCode> {
+            -> impl IntoResponse {
+        
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+       return redir;
+    }
+
     let rows = sqlx::query("
         SELECT
                 id, submission_date, policy_name, policy_version, submitter_name from reports")
@@ -51,7 +57,7 @@ pub async fn reports(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Ex
     context.insert("reports", &reports);
 
     // Use the generic render function to render the template with global data
-    render_template(&tera, Some(&pool), "reports.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "reports.html", context, Some(auth)).await.into_response()
 }
 
 
@@ -62,6 +68,11 @@ pub async fn reports_save(
     Path(id): Path<i64>,
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
+
+      // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
+       return redir;
+    }
 
     // 1. Fetch Policy Header
     let policy_row = match sqlx::query("SELECT name, version, description FROM policies WHERE id = ?")
@@ -172,35 +183,58 @@ pub async fn reports_view(
     Path(id): Path<i32>,
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
-) -> Result<Html<String>, StatusCode> {
+) -> impl IntoResponse {
 
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+       return redir;
+    }    
+    
     // 1. Fetch the single report row
-    let row = sqlx::query(
-        "SELECT id, submission_date, policy_name, policy_version, policy_description, submitter_name, tests_metadata, report_results 
-         FROM reports WHERE id = ?"
-    )
+    let row = match sqlx::query(
+            "SELECT id, submission_date, policy_name, policy_version, policy_description, submitter_name, tests_metadata, report_results 
+            FROM reports WHERE id = ?"
+    )   
     .bind(id)
     .fetch_one(&*pool)
-    .await
-    .map_err(|e| {
-        eprintln!("Database Error (Report View): {}", e);
-        StatusCode::NOT_FOUND
-    })?;
+    .await 
+    {
+        Ok(r) => r,
+        Err(e) => {
+            // Use structured logging to track which report failed
+            error!(error = ?e, report_id = %id, "Database Error: Failed to retrieve report for viewing");
+            return StatusCode::NOT_FOUND.into_response();
+        }
+    };
 
     // 2. Deserialize the JSON columns
     // SQLite returns these as Strings, so we parse them into our Rust Vecs
     let tests_metadata_raw: String = row.get("tests_metadata");
     let system_reports_raw: String = row.get("report_results");
 
-    let tests_metadata: Vec<TestMeta> = serde_json::from_str(&tests_metadata_raw).map_err(|e| {
-        eprintln!("JSON Deserialization Error (Tests): {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let tests_metadata: Vec<TestMeta> = match serde_json::from_str(&tests_metadata_raw) {
+        Ok(metadata) => metadata,
+        Err(e) => {
+            // Log the JSON error and the raw string (if safe) to help debug the mismatch
+            error!(error = ?e, "JSON Deserialization Error: Failed to parse TestMeta from database string");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
 
-    let system_reports: Vec<SystemReport> = serde_json::from_str(&system_reports_raw).map_err(|e| {
-        eprintln!("JSON Deserialization Error (Systems): {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    let system_reports: Vec<SystemReport> = match serde_json::from_str(&system_reports_raw) {
+        Ok(reports) => reports,
+        Err(e) => {
+            // Log the failure with tracing::error
+            error!(
+                error = ?e, 
+                "JSON Deserialization Error: Failed to parse system_reports_raw into Vec<SystemReport>"
+            );
+        
+            // Stop execution and return a 500 to the browser
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
 
     // 3. Reconstruct the ReportData for the template
     let report_data = ReportData {
@@ -218,19 +252,26 @@ pub async fn reports_view(
     let mut context = Context::new();
     context.insert("report", &report_data);
     
-    render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth)).await.into_response()
 }
 
 
 
 // reports_delete
-pub async fn reports_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) -> Redirect {
+pub async fn reports_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) 
+    -> impl IntoResponse {
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/reports?error_message={}", encoded_message));
+            return Redirect::to(&format!("/reports?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -246,17 +287,17 @@ pub async fn reports_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extens
         let error_message = format!("Error deleting report: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/reports?error_message={}", encoded_message));
+        return Redirect::to(&format!("/reports?error_message={}", encoded_message)).into_response();
     }
 
     // Commit the transaction if all queries were successful
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error committing transaction: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/reports?error_message={}", encoded_message));
+        return Redirect::to(&format!("/reports?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/reports")
+    Redirect::to("/reports").into_response()
 }
 
 
