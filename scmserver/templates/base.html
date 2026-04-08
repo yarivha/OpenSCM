@@ -138,6 +138,31 @@
               <li class="nav-item"><a href="/policies" class="nav-link ml-3"><i class="fas fa-certificate nav-icon"></i><p>Policies</p></a></li>
             </ul>
           </li>
+	  {% if is_runner %}
+	  <li class="nav-item has-treeview">
+      	    <a href="#" class="nav-link">
+              <i class="nav-icon fas fa-calendar"></i>
+              <p>
+                Scheduler
+                <i class="fas fa-angle-left right"></i>
+              </p>
+            </a>
+            <ul class="nav nav-treeview">
+              <li class="nav-item">
+                <a href="/schedule_policies" class="nav-link" style="padding-left: 30px;">
+                  <i class="nav-icon fas fa-clock"></i>
+                  <p>Schedule Policies</p>
+                </a>
+              </li>
+              <li class="nav-item">
+                <a href="/schedule_reports" class="nav-link" style="padding-left: 30px;">
+                  <i class="nav-icon fas fa-chart-line"></i>
+                  <p>Schedule Reports</p>
+                </a>
+              </li>
+            </ul>
+          </li>
+	  {% endif %}
 
           <li class="nav-item">
             <a href="/reports" class="nav-link"><i class="nav-icon fas fa-file-contract"></i><p>Reports</p></a>
