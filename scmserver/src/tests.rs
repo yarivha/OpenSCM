@@ -14,7 +14,7 @@ use crate::models::Test;
 use crate::models::Element;
 use crate::models::SElement;
 use crate::models::Condition;
-use crate::auth::AuthSession;
+use crate::auth::{self, UserRole, AuthSession};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 
@@ -22,7 +22,14 @@ use crate::handlers::parse_form_data;
 
 // tests
 pub async fn tests(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
-            -> Result<Html<String>, StatusCode> {
+            -> impl IntoResponse {
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+       return redir;
+    }
+
+
     let rows = sqlx::query("
         SELECT
                 t.id,
@@ -83,15 +90,18 @@ pub async fn tests(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Exte
     context.insert("tests", &tests);
 
     // Use the generic render function to render the template with global data
-    render_template(&tera, Some(&pool), "tests.html", context, Some(auth)).await
+    render_template(&tera, Some(&pool), "tests.html", context, Some(auth)).await.into_response()
 }
 
 
 // tests_add
 pub async fn tests_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
-    -> Result<Html<String>, StatusCode> {
+     -> impl IntoResponse {
    
-
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
      
     let rows = sqlx::query("
         SELECT id,name from elements")
@@ -143,7 +153,7 @@ pub async fn tests_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Ext
     context.insert("elements", &elements);
     context.insert("selements", &selements);
     context.insert("conditions", &conditions);
-    render_template(&tera,Some(&pool), "tests_add.html", context, Some(auth)).await
+    render_template(&tera,Some(&pool), "tests_add.html", context, Some(auth)).await.into_response()
 }
 
 
@@ -152,14 +162,22 @@ pub async fn tests_add_save(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
     raw_form: RawForm,
-) -> Redirect {
+)  -> impl IntoResponse { 
+
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
+
+
     // Start transaction
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+            return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -170,7 +188,7 @@ pub async fn tests_add_save(
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+            return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -182,7 +200,7 @@ pub async fn tests_add_save(
     let name        = form_data.get("name").and_then(|v| v.first()).map(|s| s.to_string());
     if name.is_none() {
         let encoded_message = urlencoding::encode("Missing 'name' in form data.");
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
     // For optional fields, default to empty string if not provided
@@ -236,7 +254,7 @@ pub async fn tests_add_save(
     if name.is_none() {
         let error_message = "Missing 'name' in form data.";
         let encoded_message = urlencoding::encode(error_message);
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
     // -----------------------
@@ -288,28 +306,36 @@ pub async fn tests_add_save(
     if let Err(e) = result {
         let error_message = format!("Database insert error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
     if let Err(e) = tx.commit().await {
         let error_message = format!("Database commit error: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/tests")
+    Redirect::to("/tests").into_response()
 }
 
 
 
 // tests_delete
-pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) -> Redirect {
+pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) 
+    -> impl IntoResponse  {
+
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
+        
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+            return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -325,21 +351,27 @@ pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extensio
         let error_message = format!("Error deleting test: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }        
 
     // Commit the transaction if all queries were successful
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error committing transaction: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/tests")
+    Redirect::to("/tests").into_response()
 }
 
 // tests_edit
 pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
 
     // capture system
     let row_result = sqlx::query("
@@ -462,13 +494,22 @@ pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<S
 
 
 // tests_edit_save
-pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> Redirect {
+pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) 
+    -> impl IntoResponse {
+    
+     // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+       return redir;
+    }
+
+
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
             let error_message = format!("Database error: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+            return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -478,7 +519,7 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
         Err(e) => {
             let error_message = format!("Error converting bytes to string: {}", e);
             let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+            return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
         }
     };
 
@@ -491,7 +532,7 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
     let name        = form_data.get("name").and_then(|v| v.first()).map(|s| s.to_string());
     if name.is_none() {
         let encoded_message = urlencoding::encode("Missing 'name' in form data.");
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
     
     // For optional fields, default to empty string if not provided
@@ -545,7 +586,7 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
     if name.is_none() {
         let error_message = "Missing 'name' in form data.";
         let encoded_message = urlencoding::encode(error_message);
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
 
@@ -600,17 +641,17 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         tx.rollback().await.ok();
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
     // Commit the transaction
     if let Err(e) = tx.commit().await {
         let error_message = format!("Error updating system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/tests?error_message={}", encoded_message));
+        return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/tests")
+    Redirect::to("/tests").into_response()
 }
 
 
