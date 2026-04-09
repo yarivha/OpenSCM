@@ -1,4 +1,5 @@
 use sys_info;
+use os_info;
 use tracing::{info, warn, error, debug};
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer, Verifier, Signature};
 use std::fs;
@@ -122,9 +123,12 @@ pub async fn send_system_info(
     let public_base64 = fs::read_to_string(&pub_path)?.trim().to_string();
 
     // 4. COLLECT SYSTEM METADATA
+    
+    let osinfo = os_info::get();
+
     let my_local_ip = local_ip_address::local_ip()?.to_string();
     let my_hostname = gethostname::gethostname().to_string_lossy().into_owned();
-    let my_os = format!("{} {}", sys_info::os_type()?, sys_info::os_release()?);
+    let my_os = format!("{} {}", osinfo.os_type(), osinfo.version());
     let my_arch = std::env::consts::ARCH.to_string();
     let my_ver = env!("CARGO_PKG_VERSION").to_string();
 
