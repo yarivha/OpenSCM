@@ -1,110 +1,161 @@
 {% extends "base.html" %}
+
+{% block styles %}
+<style>
+  /* Dark Mode support */
+  .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
+  .dark-mode .form-control:disabled, .dark-mode .form-control[readonly] {
+    background-color: #2b3035 !important;
+    border-color: #4b545c;
+    color: #adb5bd;
+  }
+</style>
+{% endblock %}
+
 {% block content %}
-
-
-<!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <section class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1>Edit System</h1>
-          </div>
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              <li class="breadcrumb-item"><a href="/">Home</a></li>
-	      <li class="breadcrumb-item"><a href="/systems">Systems</a></li>
-              <li class="breadcrumb-item active">System Edit</li>
-            </ol>
-          </div>
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1><i class="fas fa-server mr-2 text-primary"></i>System Configuration</h1>
         </div>
-      </div><!-- /.container-fluid -->
-    </section>
-
-    <!-- Main content -->
-    <section class="content">
-      <div class="row">
-        <div class="col-md-8">
-          <div class="card card-primary">
-            <div class="card-header">
-              <h3 class="card-title">{{ system.name }}</h3>
-            </div>
-	    <form method="post">
-            <div class="card-body"> 
-	      <div class="form-group">
-                <label for="inputid">System ID</label>
-                <input type="text" name="id" placeholder="{{ system.id }}" class="form-control" disabled>
-              </div>
-              <div class="form-group">
-                <label for="inputName">System Name</label>
-                <input type="text" name="name" value="{{ system.name }}" class="form-control" required>
-              </div>
-	      <div class="form-group">
-                <label for="inputVer">Agent Version</label>
-                <input type="text" name="ver" value="{{ system.ver }}" class="form-control" disabled>
-              </div>
-              <div class="form-group">
-                <label for="inputIP">IP</label>
-                <input type="text" name="ip" value="{{ system.ip }}" class="form-control">
-              </div>
-	      <div class="form-group">
-                <label for="inputOS">Operating System</label>
-                <input type="text" name="os" value="{{ system.os }}" class="form-control">
-              </div>
-	      <div class="form-group">
-                <label for="inputARCH">Architecture</label>
-                <input type="text" name="arch" value="{{ system.arch }}" class="form-control">
-              </div>
-	      <div class="form-group">
-                  <label>System Groups</label>
-		  <select class="select2bs4" name="groups" multiple="multiple" data-placeholder="Select a Group" style="width: 100%;">
-  		  {% for group in groups %}
-    		    <option value="{{ group.id }}" id="group-option-{{ group.id }}" 
-		      {% for connection in systems_in_groups %}
-			{% if group.id == connection.group_id %}selected="selected"{% endif %}
-		      {% endfor %}>
-      		      {{ group.name }}
-    		    </option>
-  		  {% endfor %}
-		</select>
-                  </div>
-                </div>
-	      </div>
-	      <div class="text-right">
-	        <div class="form-group">
-                  <button type="submit" class="btn btn-success">Save System</button>
-                  <a href="/systems" class="btn btn-secondary">Cancel</a>
-                </div>
-	      </div>	
-	    </form>
-          </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/systems">Systems</a></li>
+            <li class="breadcrumb-item active">Edit Assignment</li>
+          </ol>
         </div>
       </div>
-    </section>
-  </div>
+    </div>
+  </section>
 
+  <section class="content">
+    <div class="container-fluid">
+      
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Attention</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Done</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
+      <form method="post">
+        <div class="row">
+          
+          <div class="col-md-5">
+            <div class="card card-secondary card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-robot mr-1"></i> Agent Inventory</h3>
+                <div class="card-tools">
+                   <span class="badge badge-light">ID: {{ system.id }}</span>
+                </div>
+              </div>
+              <div class="card-body">
+                <div class="form-group">
+                  <label>System Name</label>
+                  <input type="text" value="{{ system.name }}" class="form-control" readonly>
+                </div>
+                <div class="row">
+                  <div class="col-6">
+                    <div class="form-group">
+                      <label>IP Address</label>
+                      <input type="text" value="{{ system.ip }}" class="form-control" readonly>
+                    </div>
+                  </div>
+                  <div class="col-6">
+                    <div class="form-group">
+                      <label>Agent Version</label>
+                      <input type="text" value="{{ system.ver }}" class="form-control" readonly>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label>Operating System</label>
+                  <input type="text" value="{{ system.os }}" class="form-control" readonly>
+                </div>
+                <div class="form-group">
+                  <label>Architecture</label>
+                  <input type="text" value="{{ system.arch }}" class="form-control" readonly>
+                </div>
+                <p class="text-xs text-muted italic mt-3">
+                  <i class="fas fa-info-circle mr-1"></i> These fields are managed by the OpenSCM agent and cannot be modified manually.
+                </p>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-7">
+            <div class="card card-primary card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-layer-group mr-1"></i> Policy Group Assignment</h3>
+              </div>
+              <div class="card-body" style="min-height: 345px;">
+                <div class="form-group">
+                  <label>Assigned System Groups</label>
+                  <select class="select2bs4" name="groups" multiple="multiple" data-placeholder="Select groups to apply policies..." style="width: 100%;">
+                    {% for group in groups %}
+                      <option value="{{ group.id }}" 
+                        {% for connection in systems_in_groups %}
+                          {% if group.id == connection.group_id %}selected="selected"{% endif %}
+                        {% endfor %}>
+                        {{ group.name }}
+                      </option>
+                    {% endfor %}
+                  </select>
+                  <div class="mt-4 p-3 bg-light-alt rounded border">
+                    <h6 class="text-sm font-weight-bold mb-2">Note on Groups:</h6>
+                    <p class="text-xs text-muted mb-0">
+                      Adding this system to a group will automatically link it to all security policies associated with that group. Removing it will stop future compliance scans for those policies.
+                    </p>
+                  </div>
+                </div>
+              </div>
+              <div class="card-footer text-right">
+                <a href="/systems" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-success px-4 ml-2">
+                  <i class="fas fa-save mr-1"></i> Save Changes
+                </button>
+              </div>
+            </div>
+          </div>
+
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
+  $(function () {
+    // Initialize Select2 Elements
+    $('.select2bs4').select2({
+      theme: 'bootstrap4'
+    });
+  });
+
   document.addEventListener('DOMContentLoaded', function() {
-    // Find all elements with the 'datetime' class and convert to local timezone
     const datetimeElements = document.querySelectorAll('.datetime');
-    
     datetimeElements.forEach(function(element) {
       const utcDateStr = element.getAttribute('data-utc');
       if (utcDateStr) {
         const utcDate = new Date(utcDateStr);
         if (!isNaN(utcDate.getTime())) {
-          // Format the date in local timezone
           const options = { 
-            year: 'numeric', 
-            month: '2-digit', 
-            day: '2-digit',
-            hour: '2-digit', 
-            minute: '2-digit', 
-            second: '2-digit',
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
             hour12: false
           };
           element.textContent = utcDate.toLocaleDateString(navigator.language, options);

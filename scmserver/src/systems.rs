@@ -284,108 +284,74 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
     render_template(&tera, Some(&pool), "systems_edit.html",context, Some(auth)).await.into_response()
 }
 
-// system_edit_save
-pub async fn systems_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> impl IntoResponse {
-    
-    // check authorization
+// scmserver/src/systems.rs
+pub async fn systems_edit_save(
+    auth: AuthSession, 
+    Path(id): Path<i32>,
+    pool: Extension<SqlitePool>, 
+    raw_form: RawForm
+) -> impl IntoResponse {
+
+    // 1. Auth check
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
-            let error_message = format!("Database error: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
+            let error_message = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+            return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
         }
     };
 
+    // 2. Parse the form
     let bytes: Bytes = raw_form.0;
-    let raw_string = match String::from_utf8(bytes.to_vec()) {
-        Ok(s) => s,
-        Err(e) => {
-            let error_message = format!("Error converting bytes to string: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
-        }
-    };
-
-    // Parse the URL-encoded string
+    let raw_string = String::from_utf8_lossy(&bytes); // Using lossy for extra safety
     let form_data = parse_form_data(&raw_string);
 
-    // Extract name and description (with error handling)
-    let name = form_data.get("name").and_then(|v| v.first()).map(|s| s.to_string());
-    let ip = form_data.get("ip").and_then(|v| v.first()).map(|s| s.to_string());
-    let os = form_data.get("os").and_then(|v| v.first()).map(|s| s.to_string());
-    let arch = form_data.get("arch").and_then(|v| v.first()).map(|s| s.to_string());
-    let groups: Option<Vec<String>> = form_data.get("groups").cloned();
+    // 3. Extract ONLY the group assignments
+    // Note: 'groups' comes as a Vec<String> from the multi-select
+    let selected_groups = form_data.get("groups").cloned(); 
 
-    // Update system
-    let update_system_result = sqlx::query(
-        "UPDATE systems SET name=?, ip=?, os=?, arch=?  WHERE id=?"
-    )
-    .bind(name.as_ref().unwrap()) // Unwrap after checking for None
-    .bind(ip.as_ref().unwrap()) // Unwrap after checking for None
-    .bind(os.as_ref().unwrap())
-    .bind(arch.as_ref().unwrap())
-    .bind(id)
-    .execute(&mut *tx)
-    .await;
+    // --- NO MORE UPDATE systems SET ... ---
+    // We are trusting the agent for those fields.
 
-    if let Err(e) = update_system_result { 
-        let error_message = format!("Error updating system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok(); 
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
-    }
+    // 4. Update Group Assignments (Delete then Re-insert)
+    if let Err(e) = sqlx::query("DELETE FROM systems_in_groups WHERE system_id=?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await {
+            let error_message = urlencoding::encode(&format!("Failed to clear old groups: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
+        }
 
-    // Remove all related groups
-    let remove_related_groups = sqlx::query(
-        "DELETE FROM systems_in_groups WHERE system_id=?"
-    )
-    .bind(id) 
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = remove_related_groups
-    {
-        let error_message = format!("Error updating system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok();
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
-    }
-
-
-    // Assign selected group
-    if let Some(groups) = groups {
-        for group_id_str in groups {
-            if let Ok(group_id) = group_id_str.parse::<i32>() {
+    if let Some(group_ids) = selected_groups {
+        for g_id_str in group_ids {
+            if let Ok(g_id) = g_id_str.parse::<i32>() {
                 if let Err(e) = sqlx::query(
                     "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)"
                 )
                 .bind(id)
-                .bind(group_id)
+                .bind(g_id)
                 .execute(&mut *tx)
-                .await
-                {
-                    let error_message = format!("Error updating system: {}", e);
-                    let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
+                .await {
+                    let error_message = urlencoding::encode(&format!("Failed to link group {}: {}", g_id, e)).to_string();
+                    tx.rollback().await.ok();
+                    return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
                 }
-            }   
+            }
         }
     }
 
-    // Commit the transaction
+    // 5. Commit
     if let Err(e) = tx.commit().await {
-        let error_message = format!("Error updating system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
+        let error_message = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
+        return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
     }
 
-    Redirect::to("/systems").into_response()
+    Redirect::to("/systems?success_message=System+groups+updated+successfully").into_response()
 }
 
 
