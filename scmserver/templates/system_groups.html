@@ -30,11 +30,11 @@
       </div>
       {% endif %}
 
-      {% if query.message %}
+      {% if query.message or success_message %}
       <div class="alert alert-success alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
-        {{ query.message }}
+        {{ query.message }}{{ success_message }}
       </div>
       {% endif %}
 
@@ -44,7 +44,7 @@
             <div class="card-header">
               <h3 class="card-title">Group Definitions</h3>
               <div class="card-tools">
-                {# Role-aware New Group Button #}
+                {# New Group Button - Editor Guarded #}
                 <a href="{% if is_editor %}/system_groups/add{% else %}#{% endif %}" 
                    class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}"
                    {% if not is_editor %}style="opacity: 0.6; cursor: not-allowed;" title="Editor permissions required"{% endif %}>
@@ -63,7 +63,7 @@
                     <th style="width: 10px">ID</th>
                     <th>Group Name</th>
                     <th>Description</th>
-                    <th class="text-center" style="width: 170px">Actions</th>
+                    <th class="text-center" style="width: 180px">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -71,29 +71,35 @@
                   <tr>
                     <td>{{ group.id }}</td>
                     <td><strong>{{ group.name }}</strong></td>
-                    <td>{{ group.description }}</td>
+                    <td>{{ group.description | truncate(length=65) }}</td>
                     <td class="text-right">
-                      {# Space added between buttons by removing btn-group and using ml-1 #}
                       
-                      {# 1. View Members #}
-                      <a class="btn btn-primary btn-sm" href="/system_groups/view/{{ group.id }}" title="View Members">
-                        <i class="fas fa-eye"></i>
-                      </a>
+                      {# Primary Action: View Modal #}
+                      <button type="button" 
+                              class="btn btn-primary btn-sm view-group-btn" 
+                              data-id="{{ group.id }}" 
+                              data-name="{{ group.name }}"
+                              data-description="{{ group.description }}"
+                              data-systems="{{ group.systems }}"
+                              title="Quick View">
+                        <i class="fas fa-eye mr-1"></i> View
+                      </button>
 
-                      {# 2. Edit Group (Editor-only) #}
+                      {# Secondary Action: Edit #}
                       <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
                          href="{% if is_editor %}/system_groups/edit/{{ group.id }}{% else %}#{% endif %}"
                          {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
                         <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                       </a>
 
-                      {# 3. Delete Group (Editor-only) #}
+                      {# Secondary Action: Delete #}
                       <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-                         onclick="{% if is_editor %}return confirm('Delete group {{ group.name }}? Systems will be unassigned but not deleted.'){% else %}return false;{% endif %}" 
+                         onclick="{% if is_editor %}return confirm('Delete group {{ group.name }}? Systems will be unassigned.'){% else %}return false;{% endif %}" 
                          href="{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}"
                          {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
                         <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                       </a>
+
                     </td>
                   </tr>
                   {% endfor %}
@@ -107,21 +113,82 @@
   </section>
 </div>
 
+<div class="modal fade" id="groupDetailsModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-md" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-primary">
+        <h5 class="modal-title" id="modalGroupName">
+          <i class="fas fa-layer-group mr-2"></i> Group Details
+        </h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true" style="color: white;">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+            <p class="mb-1"><strong>Group ID:</strong> <span id="mg-id"></span></p>
+            <p class="mb-1"><strong>Description:</strong></p>
+            <div class="p-2 bg-light border rounded text-sm" id="mg-description" style="min-height: 40px;"></div>
+        </div>
+        
+        <hr>
+        
+        <h6><i class="fas fa-network-wired mr-1 text-primary"></i> Member Systems (<span id="mg-count">0</span>)</h6>
+        <div id="mg-systems-container" class="mt-2 d-flex flex-wrap" style="gap: 6px; max-height: 250px; overflow-y: auto;">
+            </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
   $(function () {
-    const table = $("#system_groups_table").DataTable({
+    // 1. Quick View Logic
+    $(document).on('click', '.view-group-btn', function() {
+        const btn = $(this);
+        const name = btn.data('name');
+        const systemsStr = btn.data('systems') || ""; // Handles Option<String> None
+        const systemsArray = systemsStr ? systemsStr.split(',') : [];
+
+        // Set Title & Basic Info
+        $('#modalGroupName').html('<i class="fas fa-layer-group mr-2"></i>' + name);
+        $('#mg-id').text(btn.data('id'));
+        $('#mg-description').text(btn.data('description') || "No description provided.");
+        
+        // Render System Badges
+        const container = $('#mg-systems-container');
+        container.empty();
+        $('#mg-count').text(systemsArray.length);
+
+        if (systemsArray.length > 0) {
+            systemsArray.forEach(function(sName) {
+                container.append(
+                  '<span class="badge badge-info shadow-sm">' +
+                  '<i class="fas fa-server fa-xs mr-1"></i>' + sName.trim() + 
+                  '</span>'
+                );
+            });
+        } else {
+            container.html('<span class="text-muted italic text-sm">No systems assigned to this group.</span>');
+        }
+
+        $('#groupDetailsModal').modal('show');
+    });
+
+    // 2. DataTables Initialization
+    $("#system_groups_table").DataTable({
       "responsive": true,
       "lengthChange": true,
       "autoWidth": false,
-      "order": [[1, "asc"]], // Default sort by Group Name
+      "order": [[1, "asc"]],
       "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
-    });
-    
-    // Position export buttons
-    table.buttons().container().appendTo('#system_groups_table_wrapper .col-md-6:eq(0)');
+    }).buttons().container().appendTo('#system_groups_table_wrapper .col-md-6:eq(0)');
   });
 </script>
 {% endblock %}
