@@ -1,135 +1,126 @@
 {% extends "base.html" %}
 {% block content %}
 
-<!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <div class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1 class="m-0">System Groups</h1>
-          </div><!-- /.col -->
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              <li class="breadcrumb-item"><a href="/">Home</a></li>
-              <li class="breadcrumb-item active">System Groups</li>
-            </ol>
-          </div><!-- /.col -->
-        </div><!-- /.row -->
-      </div><!-- /.container-fluid -->
-    </div>
-    <!-- /.content-header -->
-
-
-
-{% if error_message %}
-
-
-<div class="alert alert-danger alert-dismissible">
- <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
- <h5><i class="icon fas fa-ban"></i> Error</h5>
- {{error_message}}
-</div>
-
-{% endif %}
-
-
-
-<!-- Main content -->
-    <section class="content">
-      <div class="container-fluid">
-        <div class="row">
-          <div class="col-12">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">System Groups List</h3>
-        	<div class="card-tools">
-	          <ul class="pagination pagination-sm float-right">
-		    <a class="page-link {% if not is_editor %}disabled{% endif %}" 
-                       href="{% if is_editor %}/system_groups/add{% else %}#{% endif %}"
-                       {% if not is_editor %} 
-                       aria-disabled="true" 
-                       role="button" 
-                       style="cursor: not-allowed; color: #6c757d;"
-                       {% endif %}>
-                       <i class="fas {% if is_editor %}fa-plus{% else %}fa-lock{% endif %} mr-1"></i> 
-                       New Group
-                    </a>
-		  </ul>
-                </div>
-             </div>
-              <!-- /.card-header -->
-              <div class="card-body">
-	        <table id="system_groups_table" class="table table-bordered table-striped">
-                  <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Group Name</th>
-                    <th>Group Description</th>
-		    <th>Actions</th>
-                  </tr>
-                  </thead>
-                  <tbody>
-                   {% for group in system_groups %}
-                  <tr>
-                    <td>{{ group.id }}</td>
-                    <td>{{ group.name }}</td>
-                    <td>{{ group.description }}</td>
-		    <td class="text-right">
-                        <a class="btn btn-primary btn-sm" href="#">
-                              <i class="fas fa-eye">
-                              </i>
-                              View
-                        </a>
-                          <a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
-   			   href="{% if is_editor %}/system_groups/edit/{{ group.id }}{% else %}#{% endif %}"
-   			   {% if not is_editor %}
-       			   aria-disabled="true" 
-       			   role="button"
-       			   style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
-   			   {% endif %}>
-    			   <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
-    			   Edit
-			</a>
-        		<a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
-   			   onclick="{% if is_editor %}return confirm('Delete Test?'){% else %}return false;{% endif %}" 
-   			   href="{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}"
-   			   {% if not is_editor %}
-       			   aria-disabled="true" 
-       			   role="button"
-       			   style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
-   			   {% endif %}>
-    			   <i class="fas {% if is_admin %}fa-trash{% else %}fa-lock{% endif %}"></i>
-    			   Delete
-			</a>
-                      </td>
-                  </tr>
-                   {% endfor %}
-                </table>
-              </div>
-              <!-- /.card-body -->
-            </div>
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1>System Groups</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">System Groups</li>
+          </ol>
         </div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+      
+      {# Alerts Section #}
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if query.message %}
+      <div class="alert alert-success alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>
+        {{ query.message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card card-outline card-primary">
+            <div class="card-header">
+              <h3 class="card-title">Group Definitions</h3>
+              <div class="card-tools">
+                {# Role-aware New Group Button #}
+                <a href="{% if is_editor %}/system_groups/add{% else %}#{% endif %}" 
+                   class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}"
+                   {% if not is_editor %}style="opacity: 0.6; cursor: not-allowed;" title="Editor permissions required"{% endif %}>
+                  <i class="fas {% if is_editor %}fa-plus{% else %}fa-lock{% endif %} mr-1"></i> New Group
+                </a>
+                <button type="button" class="btn btn-tool" onclick="window.location.reload();">
+                  <i class="fas fa-sync-alt"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <table id="system_groups_table" class="table table-bordered table-striped table-hover">
+                <thead>
+                  <tr>
+                    <th style="width: 10px">ID</th>
+                    <th>Group Name</th>
+                    <th>Description</th>
+                    <th class="text-center" style="width: 150px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for group in system_groups %}
+                  <tr>
+                    <td>{{ group.id }}</td>
+                    <td><strong>{{ group.name }}</strong></td>
+                    <td>{{ group.description }}</td>
+                    <td class="text-right">
+                      <div class="btn-group">
+                        <a class="btn btn-primary btn-sm" href="/system_groups/view/{{ group.id }}" title="View Members">
+                          <i class="fas fa-eye"></i>
+                        </a>
+
+                        {# Editor-only: Edit #}
+                        <a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
+                           href="{% if is_editor %}/system_groups/edit/{{ group.id }}{% else %}#{% endif %}"
+                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                          <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
+                        </a>
+
+                        {# Editor-only: Delete #}
+                        <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
+                           onclick="{% if is_editor %}return confirm('Delete group {{ group.name }}? Systems will be unassigned but not deleted.'){% else %}return false;{% endif %}" 
+                           href="{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}"
+                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                          <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                        </a>
+                      </div>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
   $(function () {
-    $('#system_groups_table').DataTable({
-      "paging": true,
-      "lengthChange": false,
-      "searching": true,
-      "ordering": true,
-      "info": true,
-      "autoWidth": false,
+    const table = $("#system_groups_table").DataTable({
       "responsive": true,
+      "lengthChange": true,
+      "autoWidth": false,
+      "order": [[1, "asc"]], // Default sort by Group Name
+      "buttons": ["copy", "csv", "excel", "pdf", "print"]
     });
+    
+    // Position export buttons
+    table.buttons().container().appendTo('#system_groups_table_wrapper .col-md-6:eq(0)');
   });
 </script>
-
 {% endblock %}

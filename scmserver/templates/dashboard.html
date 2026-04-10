@@ -25,6 +25,14 @@
   </div>
   {% endif %}
 
+  {% if success_message %}
+  <div class="alert alert-success alert-dismissible">
+    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+    <h5><i class="icon fas fa-check"></i> Success</h5>
+    {{success_message}}
+  </div>
+  {% endif %}
+
   <!-- Main content -->
   <section class="content">
     <div class="container-fluid">
