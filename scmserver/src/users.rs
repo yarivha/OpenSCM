@@ -344,7 +344,7 @@ pub async fn users_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
         "/"
     };
 
-    let redirect_path = format!("{}?message=Settings+saved+successfully", target_url);
+    let redirect_path = format!("{}?success_message=Settings+saved+successfully", target_url);
     Redirect::to(&redirect_path).into_response()
 }
 
