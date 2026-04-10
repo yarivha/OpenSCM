@@ -63,7 +63,7 @@
                     <th style="width: 10px">ID</th>
                     <th>Group Name</th>
                     <th>Description</th>
-                    <th class="text-center" style="width: 150px">Actions</th>
+                    <th class="text-center" style="width: 170px">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -73,26 +73,27 @@
                     <td><strong>{{ group.name }}</strong></td>
                     <td>{{ group.description }}</td>
                     <td class="text-right">
-                      <div class="btn-group">
-                        <a class="btn btn-primary btn-sm" href="/system_groups/view/{{ group.id }}" title="View Members">
-                          <i class="fas fa-eye"></i>
-                        </a>
+                      {# Space added between buttons by removing btn-group and using ml-1 #}
+                      
+                      {# 1. View Members #}
+                      <a class="btn btn-primary btn-sm" href="/system_groups/view/{{ group.id }}" title="View Members">
+                        <i class="fas fa-eye"></i>
+                      </a>
 
-                        {# Editor-only: Edit #}
-                        <a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
-                           href="{% if is_editor %}/system_groups/edit/{{ group.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
-                          <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
-                        </a>
+                      {# 2. Edit Group (Editor-only) #}
+                      <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                         href="{% if is_editor %}/system_groups/edit/{{ group.id }}{% else %}#{% endif %}"
+                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                        <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
+                      </a>
 
-                        {# Editor-only: Delete #}
-                        <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
-                           onclick="{% if is_editor %}return confirm('Delete group {{ group.name }}? Systems will be unassigned but not deleted.'){% else %}return false;{% endif %}" 
-                           href="{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
-                          <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
-                        </a>
-                      </div>
+                      {# 3. Delete Group (Editor-only) #}
+                      <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                         onclick="{% if is_editor %}return confirm('Delete group {{ group.name }}? Systems will be unassigned but not deleted.'){% else %}return false;{% endif %}" 
+                         href="{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}"
+                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                        <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                      </a>
                     </td>
                   </tr>
                   {% endfor %}
@@ -116,7 +117,7 @@
       "lengthChange": true,
       "autoWidth": false,
       "order": [[1, "asc"]], // Default sort by Group Name
-      "buttons": ["copy", "csv", "excel", "pdf", "print"]
+      "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
     });
     
     // Position export buttons

@@ -24,7 +24,7 @@
       {# Alerts Section #}
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&button;
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
         <h5><i class="icon fas fa-ban"></i> Error</h5>
         {{ error_message }}
       </div>
@@ -60,7 +60,7 @@
                     <th>Test Name</th>
                     <th>Description</th>
                     <th style="width: 100px">Severity</th>
-                    <th class="text-center" style="width: 150px">Actions</th>
+                    <th class="text-center" style="width: 170px">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -81,26 +81,27 @@
                       </span>
                     </td>
                     <td class="text-right">
-                      <div class="btn-group">
-                        <a class="btn btn-primary btn-sm" href="/tests/view/{{ test.id }}" title="View Definition">
-                          <i class="fas fa-eye"></i>
-                        </a>
+                      {# Space added between buttons by removing btn-group and using ml-1 #}
+                      
+                      {# 1. View Test #}
+                      <a class="btn btn-primary btn-sm" href="/tests/view/{{ test.id }}" title="View Definition">
+                        <i class="fas fa-eye"></i>
+                      </a>
 
-                        {# Editor-only: Edit #}
-                        <a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
-                           href="{% if is_editor %}/tests/edit/{{ test.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
-                          <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
-                        </a>
+                      {# 2. Edit Test (Editor-only) #}
+                      <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                         href="{% if is_editor %}/tests/edit/{{ test.id }}{% else %}#{% endif %}"
+                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                        <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
+                      </a>
 
-                        {# Updated: Editors can now delete as well #}
-                        <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
-                           onclick="{% if is_editor %}return confirm('Permanently delete test: {{ test.name }}?'){% else %}return false;{% endif %}" 
-                           href="{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
-                          <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
-                        </a>
-                      </div>
+                      {# 3. Delete Test (Editor-only) #}
+                      <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                         onclick="{% if is_editor %}return confirm('Permanently delete test: {{ test.name }}?'){% else %}return false;{% endif %}" 
+                         href="{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}"
+                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                        <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                      </a>
                     </td>
                   </tr>
                   {% endfor %}
