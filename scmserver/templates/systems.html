@@ -85,29 +85,39 @@
                     <td class="datetime" data-utc="{{ system.last_seen }}">{{ system.last_seen }}</td>
                     
                     <td class="text-right">
-                      {# Space added between these by removing btn-group and using ml-1 #}
                       {% if system.status == "pending" %}
-                        <a class="btn btn-success btn-sm" onclick="return confirm('Approve this system?')" href="/systems/approve/{{ system.id }}" title="Approve">
-                          <i class="fas fa-check"></i>
+                        <a class="btn btn-success btn-sm" onclick="return confirm('Approve this system?')" href="/systems/approve/{{ system.id }}">
+                          <i class="fas fa-check mr-1"></i> Approve
                         </a>
-                        <a class="btn btn-danger btn-sm ml-1" onclick="return confirm('Reject and Delete system?')" href="/systems/delete/{{ system.id }}" title="Delete">
+                        <a class="btn btn-danger btn-sm ml-1" onclick="return confirm('Reject system?')" href="/systems/delete/{{ system.id }}">
                           <i class="fas fa-trash"></i>
                         </a>
                       {% else %}
-                        <a class="btn btn-primary btn-sm" href="/systems/view/{{ system.id }}" title="View Details">
-                          <i class="fas fa-eye"></i>
-                        </a>
+                        <button type="button" 
+                                class="btn btn-primary btn-sm view-system-btn" 
+                                data-id="{{ system.id }}" 
+                                data-name="{{ system.name }}"
+                                data-os="{{ system.os }}"
+                                data-arch="{{ system.arch }}"
+                                data-ip="{{ system.ip }}"
+                                data-ver="{{ system.ver }}"
+                                data-groups="{{ system.groups }}"
+                                data-seen="{{ system.last_seen }}"
+                                data-created="{{ system.created_date }}"
+                                title="Quick View">
+                          <i class="fas fa-eye mr-1"></i> View
+                        </button>
                         
                         <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
                            href="{% if is_editor %}/systems/edit/{{ system.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Edit Required"{% endif %}>
                           <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                         </a>
 
                         <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-                           onclick="{% if is_editor %}return confirm('Delete system? All historical data will be lost.'){% else %}return false;{% endif %}" 
+                           onclick="{% if is_editor %}return confirm('Delete system?'){% else %}return false;{% endif %}" 
                            href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
                           <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                         </a>
                       {% endif %}
@@ -124,35 +134,86 @@
   </section>
 </div>
 
+<div class="modal fade" id="systemDetailsModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-primary">
+        <h5 class="modal-title" id="modalSystemName">System Details</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true" style="color: white;">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <div class="col-md-6 border-right">
+            <p><strong>System ID:</strong> <span id="m-id"></span></p>
+            <p><strong>Operating System:</strong> <span id="m-os"></span></p>
+            <p><strong>Architecture:</strong> <span id="m-arch"></span></p>
+            <p><strong>IP Address:</strong> <code id="m-ip"></code></p>
+          </div>
+          <div class="col-md-6">
+            <p><strong>Agent Version:</strong> <span id="m-ver"></span></p>
+            <p><strong>Assigned Groups:</strong> <span id="m-groups"></span></p>
+            <p><strong>Last Communication:</strong> <span id="m-seen"></span></p>
+            <p><strong>Enrollment Date:</strong> <span id="m-created"></span></p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
 <script>
   $(function () {
-    // 1. Timezone Conversion
-    $('.datetime').each(function() {
-      const utcDateStr = $(this).data('utc');
-      if (utcDateStr) {
-        const date = new Date(utcDateStr);
-        if (!isNaN(date.getTime())) {
-          $(this).text(date.toLocaleString(undefined, {
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-            hour12: false
-          }));
-        }
-      }
+    // Helper function for Date formatting
+    function formatLocalTime(utcString) {
+      if (!utcString) return "N/A";
+      const date = new Date(utcString);
+      if (isNaN(date.getTime())) return utcString;
+      return date.toLocaleString(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+      });
+    }
+
+    // 1. Modal Logic
+    $(document).on('click', '.view-system-btn', function() {
+        const btn = $(this);
+        
+        $('#modalSystemName').html('<i class="fas fa-server mr-2"></i>' + btn.data('name'));
+        $('#m-id').text(btn.data('id'));
+        $('#m-os').text(btn.data('os'));
+        $('#m-arch').text(btn.data('arch'));
+        $('#m-ip').text(btn.data('ip'));
+        $('#m-ver').text(btn.data('ver'));
+        $('#m-groups').text(btn.data('groups'));
+        
+        // Convert dates to local time for the modal
+        $('#m-seen').text(formatLocalTime(btn.data('seen')));
+        $('#m-created').text(formatLocalTime(btn.data('created')));
+
+        $('#systemDetailsModal').modal('show');
     });
 
-    // 2. DataTables Initialization
+    // 2. Initial table datetime conversion
+    $('.datetime').each(function() {
+      $(this).text(formatLocalTime($(this).data('utc')));
+    });
+
+    // 3. DataTables
     const table = $("#systems_table").DataTable({
       "responsive": true,
       "lengthChange": true,
       "autoWidth": false,
       "order": [[0, "asc"], [2, "asc"]],
-      "columnDefs": [
-        { "targets": 0, "visible": false }
-      ],
+      "columnDefs": [{ "targets": 0, "visible": false }],
       "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
     });
     
