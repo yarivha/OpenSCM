@@ -1,20 +1,35 @@
 {% extends "base.html" %}
-{% block content %}
 
+{% block styles %}
+<style>
+  /* Dark Mode support for cards */
+  .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
+  .dark-mode .card-header { border-bottom: 1px solid #4b545c; }
+  .dark-mode .card-footer { background-color: rgba(0,0,0,.1) !important; border-top: 1px solid #4b545c; }
+  
+  /* Styling for read-only/disabled fields in dark mode */
+  .dark-mode .form-control:disabled { background-color: #2b3035 !important; color: #adb5bd; border-color: #4b545c; }
+  
+  .input-group-text { background-color: rgba(0,0,0,0.03); }
+  .dark-mode .input-group-text { background-color: rgba(255,255,255,0.05); color: #adb5bd; border-color: #4b545c; }
+</style>
+{% endblock %}
+
+{% block content %}
 <div class="content-wrapper">
   <section class="content-header">
     <div class="container-fluid">
       <div class="row mb-2">
         <div class="col-sm-6">
-          <h1>Edit User Settings</h1>
+          <h1><i class="fas fa-user-cog mr-2 text-primary"></i>My Account Settings</h1>
         </div>
         <div class="col-sm-6">
           <ol class="breadcrumb float-sm-right">
             <li class="breadcrumb-item"><a href="/">Home</a></li>
             {% if is_admin %}
-            <li class="breadcrumb-item"><a href="/users">Users</a></li>
+              <li class="breadcrumb-item"><a href="/users">Users</a></li>
             {% endif %}
-            <li class="breadcrumb-item active">Edit User</li>
+            <li class="breadcrumb-item active">Edit Profile</li>
           </ol>
         </div>
       </div>
@@ -23,79 +38,128 @@
 
   <section class="content">
     <div class="container-fluid">
+      
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Attention</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Done</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
       <div class="row">
-        <div class="col-md-8">
+        <div class="col-md-8 mx-auto">
           
-          <div class="card card-primary">
+          <div class="card card-primary card-outline shadow-sm mb-4">
             <div class="card-header">
-              <h3 class="card-title">Profile Details: <strong>{{ user.username }}</strong></h3>
+              <h3 class="card-title"><i class="fas fa-id-card mr-1"></i> Profile Details: <strong>{{ user.username }}</strong></h3>
             </div>
             
             <form method="post" action="/users/edit/{{ user.id }}">
               <div class="card-body"> 
-                <div class="form-group">
-                  <label for="user_id">User ID</label>
-                  <input type="text" id="user_id" placeholder="{{ user.id }}" class="form-control" disabled>
-                </div>
-
-                <div class="form-group">
-                  <label for="username">Username</label>
-                  <input type="text" id="username" placeholder="{{ user.username }}" class="form-control" disabled>
+                <div class="row">
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label>User ID</label>
+                      <input type="text" value="{{ user.id }}" class="form-control" disabled>
+                    </div>
+                  </div>
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label>Login Username</label>
+                      <input type="text" value="{{ user.username }}" class="form-control" disabled>
+                    </div>
+                  </div>
                 </div>
 
                 <div class="form-group">
                   <label for="name">Full Name</label>
-                  <input type="text" name="name" id="name" value="{{ user.name }}" class="form-control" required>
+                  <div class="input-group">
+                    <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-signature"></i></span></div>
+                    <input type="text" name="name" id="name" value="{{ user.name }}" class="form-control" required>
+                  </div>
                 </div>
 
                 <div class="form-group">
                   <label for="email">Email Address</label>
-                  <input type="email" name="email" id="email" value="{{ user.email }}" class="form-control" required>
+                  <div class="input-group">
+                    <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-envelope"></i></span></div>
+                    <input type="email" name="email" id="email" value="{{ user.email }}" class="form-control" required>
+                  </div>
                 </div>
 
                 <div class="form-group">
-                  <label for="role">User Role</label>
-                  <select name="role" id="role" class="form-control" style="width: auto; display: inline-block; margin-left: 0.5rem;" 
-                    {% if not is_admin %} disabled {% endif %}>
-                    <option value="admin"  {% if user.role | trim | lower == "admin"  %}selected{% endif %}>Administrator</option>
-                    <option value="editor" {% if user.role | trim | lower == "editor" %}selected{% endif %}>Editor</option>
-                    <option value="runner" {% if user.role | trim | lower == "runner" %}selected{% endif %}>Runner</option>
-                    <option value="viewer" {% if user.role | trim | lower == "viewer" %}selected{% endif %}>Viewer</option>
-                  </select>
-
-                  {# Browsers don't send disabled fields. This hidden input ensures the role is preserved for non-admins. #}
-                  {% if not is_admin %}
-                    <input type="hidden" name="role" value="{{ user.role | trim | lower }}">
-                  {% endif %}
+                  <label for="role">Assigned Access Role</label>
+                  <div class="d-flex align-items-center">
+                    <select name="role" id="role" class="form-control" style="max-width: 250px;" {% if not is_admin %} disabled {% endif %}>
+                      <option value="admin"  {% if user.role | trim | lower == "admin" %}selected{% endif %}>Administrator</option>
+                      <option value="editor" {% if user.role | trim | lower == "editor" %}selected{% endif %}>Editor</option>
+                      <option value="runner" {% if user.role | trim | lower == "runner" %}selected{% endif %}>Runner</option>
+                      <option value="viewer" {% if user.role | trim | lower == "viewer" %}selected{% endif %}>Viewer</option>
+                    </select>
+                    {% if is_admin %}
+                      <small class="text-info ml-3"><i class="fas fa-shield-alt mr-1"></i> Admin permissions active.</small>
+                    {% else %}
+                      <small class="text-muted ml-3"><i class="fas fa-lock mr-1"></i> Only admins can change roles.</small>
+                      <input type="hidden" name="role" value="{{ user.role | trim | lower }}">
+                    {% endif %}
+                  </div>
                 </div>
               </div>
 
               <div class="card-footer text-right">
-                <button type="submit" class="btn btn-success">Save Profile</button>
-                <a href="/users" class="btn btn-secondary">Cancel</a>
+                <a href="/" class="btn btn-secondary">Cancel</a>
+                <button type="submit" class="btn btn-success px-4 ml-2 shadow-sm">
+                  <i class="fas fa-save mr-1"></i> Save Changes
+                </button>
               </div>
             </form>
           </div>
 
-          <div class="card card-warning">
+          <div class="card card-warning card-outline shadow-sm">
             <div class="card-header">
-              <h3 class="card-title">Security: Change Password</h3>
+              <h3 class="card-title text-dark"><i class="fas fa-shield-alt mr-1"></i> Security: Change Password</h3>
             </div>
             
             <form method="post" action="/users/changepassword/{{ user.id }}">
               <div class="card-body">
-                <div class="form-group">
-                  <label for="password1">New Password</label>
-                  <input type="password" name="password1" id="password1" class="form-control" required>
+                <div class="row">
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label for="password1">New Password</label>
+                      <div class="input-group">
+                        <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-key"></i></span></div>
+                        <input type="password" name="password1" id="password1" class="form-control" placeholder="Enter new password" required>
+                      </div>
+                    </div>
+                  </div>
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label for="password2">Confirm Password</label>
+                      <div class="input-group">
+                        <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-redo"></i></span></div>
+                        <input type="password" name="password2" id="password2" class="form-control" placeholder="Repeat new password" required>
+                      </div>
+                    </div>
+                  </div>
                 </div>
-                <div class="form-group">
-                  <label for="password2">Confirm New Password</label>
-                  <input type="password" name="password2" id="password2" class="form-control" required>
+                <div class="alert alert-info py-2 px-3 mt-2 mb-0" style="font-size: 0.8rem;">
+                  <i class="fas fa-info-circle mr-1"></i> Ensure your password is at least 8 characters long and contains mixed symbols.
                 </div>
               </div>
               
               <div class="card-footer text-right">
-                <button type="submit" class="btn btn-warning">Update Password</button>
+                <button type="submit" class="btn btn-warning shadow-sm">
+                  <i class="fas fa-sync-alt mr-1"></i> Update Security Credentials
+                </button>
               </div>
             </form>
           </div>
@@ -105,5 +169,4 @@
     </div>
   </section>
 </div>
-
 {% endblock %}
