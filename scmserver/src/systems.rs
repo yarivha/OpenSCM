@@ -463,32 +463,34 @@ pub async fn system_groups(auth: AuthSession, Query(query): Query<ErrorQuery>, p
         return redir;
     }
 
-    let rows = sqlx::query("
-         SELECT
-                sg.id AS group_id,
-                sg.name AS group_name,
-                sg.description AS group_description,
-                COALESCE(GROUP_CONCAT(s.name), 'none') AS system_names
-            FROM
-                system_groups AS sg
-            LEFT JOIN
-                systems_in_groups AS sig ON sg.id = sig.group_id
-            LEFT JOIN
-                systems AS s ON sig.system_id = s.id
-            GROUP BY
-                sg.id, sg.name, sg.description")
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
+   let rows = sqlx::query("
+        SELECT
+            sg.id,
+            sg.name,
+            sg.description,
+            GROUP_CONCAT(s.name) AS systems -- Returns NULL if no systems, perfect for Option<String>
+        FROM
+            system_groups AS sg
+        LEFT JOIN
+            systems_in_groups AS sig ON sg.id = sig.group_id
+        LEFT JOIN
+            systems AS s ON sig.system_id = s.id
+        GROUP BY
+            sg.id, sg.name, sg.description
+    ")
+    .fetch_all(&*pool)
+    .await
+    .unwrap();
 
     let system_groups: Vec<SystemGroup> = rows.into_iter().map(|row| {
         SystemGroup {
-            id: row.get("group_id"),
-            name: row.get("group_name"),
-            description: row.get("group_description"),
-            systems: row.get("system_names"),
+            id: Some(row.get("id")),
+            name: row.get("name"),
+            description: row.get("description"), // sqlx handles NULL -> None automatically
+            systems: row.get("systems"),         // sqlx handles NULL -> None automatically
         }
     }).collect();
+
 
     // Prepare handler-specific context
     let mut context = Context::new();
