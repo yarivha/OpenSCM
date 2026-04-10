@@ -2,12 +2,12 @@
 
 {% block styles %}
 <style>
-  /* Dark Mode support for cards */
+  /* Dark Mode support */
   .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
   .dark-mode .card-footer { background-color: rgba(0,0,0,.2) !important; border-top: 1px solid #4b545c; }
   .dark-mode .text-muted { color: #adb5bd !important; }
 
-  /* List View Adjustments */
+  /* Grid/List Toggle Logic */
   .list-view .policy-card-item { flex: 0 0 100% !important; max-width: 100% !important; }
   .list-view .policy-card-content { flex-direction: row !important; }
   .list-view .cert-icon-col { border-left: 1px solid #dee2e6; margin-left: 15px; }
@@ -22,7 +22,9 @@
   <section class="content-header">
     <div class="container-fluid">
       <div class="row mb-2">
-        <div class="col-sm-6"><h1>Security Policies</h1></div>
+        <div class="col-sm-6">
+          <h1>Security Policies</h1>
+        </div>
         <div class="col-sm-6 text-right">
           <div class="btn-group">
             <button type="button" id="grid-view-btn" class="btn btn-default btn-sm active" title="Grid View"><i class="fas fa-th"></i></button>
@@ -34,13 +36,33 @@
   </section>
 
   <section class="content">
-    <div class="container-fluid">
+   <div class="container-fluid">
+  
+     {% if error_message %}
+     <div class="alert alert-danger alert-dismissible shadow-sm">
+       <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+       <h5><i class="icon fas fa-ban"></i> Attention</h5>
+       {{ error_message }}
+     </div>
+     {% endif %}
+
+     {% if success_message %}
+     <div class="alert alert-success alert-dismissible shadow-sm">
+       <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+       <h5><i class="icon fas fa-check"></i> Done</h5>
+       {{ success_message }}
+     </div>
+     {% endif %}
+
+   </div>
+
       <div class="card card-solid card-outline card-primary shadow-sm">
         <div class="card-header">
           <h3 class="card-title">Policy Overview</h3>
           <div class="card-tools">
             <a href="{% if is_editor %}/policies/add{% else %}#{% endif %}" 
-               class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}">
+               class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}"
+               {% if not is_editor %}title="Editor permissions required"{% endif %}>
               <i class="fas {% if is_editor %}fa-shield-alt{% else %}fa-lock{% endif %} mr-1"></i> New Policy
             </a>
           </div>
@@ -121,14 +143,12 @@
     const container = $('#policy-container');
     const items = container.find('.policy-card-item');
 
-    // Switch to List View
     $('#list-view-btn').on('click', function() {
       $(this).addClass('active').siblings().removeClass('active');
       container.addClass('list-view');
       items.removeClass('col-md-4 col-sm-6').addClass('col-12');
     });
 
-    // Switch to Grid View
     $('#grid-view-btn').on('click', function() {
       $(this).addClass('active').siblings().removeClass('active');
       container.removeClass('list-view');
