@@ -1,86 +1,93 @@
 {% extends "base.html" %}
 
-{% block content %}
+{% block styles %}
+<style>
+  /* Ensure the chart background is readable in dark mode */
+  .dark-mode .card { background-color: #343a40 !important; }
+  .dark-mode .table-head-fixed thead tr:nth-child(1) th { background-color: #3f474e !important; }
+  
+  /* Status Color Helpers */
+  .text-xs-caps { font-size: 0.7rem; text-transform: uppercase; font-weight: bold; color: #adb5bd; }
+  .table-valign-middle td { vertical-align: middle !important; }
+</style>
+{% endblock %}
 
+{% block content %}
 <div class="content-wrapper">
-  <!-- Content Header -->
   <div class="content-header">
     <div class="container-fluid">
       <div class="row mb-2">
-        <div class="col-sm-6"><h1 class="m-0">Compliance Dashboard</h1></div>
+        <div class="col-sm-6">
+          <h1 class="m-0"><i class="fas fa-tachometer-alt mr-2 text-primary"></i>Compliance Dashboard</h1>
+        </div>
         <div class="col-sm-6">
           <ol class="breadcrumb float-sm-right">
-            <li class="breadcrumb-item active">Home</li>
+            <li class="breadcrumb-item active">Home / Dashboard</li>
           </ol>
         </div>
       </div>
     </div>
   </div>
 
-  {% if error_message %}
-  <div class="alert alert-danger alert-dismissible">
-    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
-    <h5><i class="icon fas fa-ban"></i> Error</h5>
-    {{error_message}}
-  </div>
-  {% endif %}
-
-  {% if success_message %}
-  <div class="alert alert-success alert-dismissible">
-    <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
-    <h5><i class="icon fas fa-check"></i> Success</h5>
-    {{success_message}}
-  </div>
-  {% endif %}
-
-  <!-- Main content -->
   <section class="content">
     <div class="container-fluid">
       
-      <!-- ROW 1: STAT BOXES -->
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> System Alert</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
       <div class="row">
         <div class="col-lg-3 col-6">
-          <div class="small-box bg-info">
-            <div class="inner"><h3>{{ systems_count }}</h3><p>Active Systems</p></div>
+          <div class="small-box bg-info shadow-sm">
+            <div class="inner"><h3>{{ systems_count }}</h3><p>Active Inventory</p></div>
             <div class="icon"><i class="fas fa-server"></i></div>
-            <a href="/systems?filter=active" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+            <a href="/systems" class="small-box-footer">View Systems <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
         <div class="col-lg-3 col-6">
-          <div class="small-box {% if pending_count > 0 %}bg-danger{% else %}bg-success{% endif %}">
-            <div class="inner"><h3>{{ pending_count }}</h3><p>Pending Registrations</p></div>
-            <div class="icon"><i class="fas fa-clock"></i></div>
-            <a href="/systems?filter=pending" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+          <div class="small-box {% if pending_count > 0 %}bg-danger{% else %}bg-success{% endif %} shadow-sm">
+            <div class="inner"><h3>{{ pending_count }}</h3><p>Pending Enrollment</p></div>
+            <div class="icon"><i class="fas fa-user-plus"></i></div>
+            <a href="/systems?filter=pending" class="small-box-footer">Review Queue <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
         <div class="col-lg-3 col-6">
-          <div class="small-box bg-warning">
-            <div class="inner"><h3>{{ policies_count }}</h3><p>Policies</p></div>
-            <div class="icon"><i class="fas fa-shield-alt"></i></div>
-            <a href="/policies" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+          <div class="small-box bg-warning shadow-sm">
+            <div class="inner"><h3>{{ policies_count }}</h3><p>Active Policies</p></div>
+            <div class="icon"><i class="fas fa-shield-check"></i></div>
+            <a href="/policies" class="small-box-footer">Manage Policies <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
         <div class="col-lg-3 col-6">
-          <div class="small-box bg-primary">
-	   <div class="inner"><h3>{{ reports_count }}</h3><p>Reports</p></div>
-            <div class="icon"><i class="fas fa-chart-pie"></i></div>
-            <a href="/reports" class="small-box-footer">More info <i class="fas fa-arrow-circle-right"></i></a>
+          <div class="small-box bg-primary shadow-sm">
+            <div class="inner"><h3>{{ reports_count }}</h3><p>Scan Reports</p></div>
+            <div class="icon"><i class="fas fa-file-contract"></i></div>
+            <a href="/reports" class="small-box-footer">View History <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
       </div>
 
-      <!-- ROW 2: COMPLIANCE TREND -->
       <div class="row">
         <div class="col-md-12">
-          <div class="card card-outline card-primary">
+          <div class="card card-outline card-primary shadow-sm">
             <div class="card-header">
-              <h3 class="card-title"><i class="fas fa-chart-line mr-1"></i> Compliance Trend</h3>
-	      <div class="card-tools">
-                  <button type="button" class="btn btn-tool" data-card-widget="collapse">
-                    <i class="fas fa-minus"></i>
-                  </button>
+              <h3 class="card-title font-weight-bold"><i class="fas fa-chart-line mr-2"></i>Infrastructure Compliance Trend</h3>
+              <div class="card-tools">
+                <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
               </div>
-	    </div>
+            </div>
             <div class="card-body">
               <div class="chart">
                 <canvas id="complianceTrendChart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
@@ -90,189 +97,132 @@
         </div>
       </div>
 
-      <!-- ROW 3: TOP FAILURES -->
       <div class="row">
-        <!-- Top Failed Tests -->
         <div class="col-md-6">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title text-danger"><i class="fas fa-certificate mr-1"></i> Top Failed Policies</h3>
-	      <div class="card-tools">
-                  <button type="button" class="btn btn-tool" data-card-widget="collapse">
-                    <i class="fas fa-minus"></i>
-                  </button>
-              </div>
-	    </div>
+          <div class="card card-danger card-outline shadow-sm">
+            <div class="card-header border-0">
+              <h3 class="card-title font-weight-bold text-danger"><i class="fas fa-exclamation-triangle mr-2"></i> Critical Policy Failures</h3>
+            </div>
             <div class="card-body table-responsive p-0" style="height: 300px;">
-              <table class="table table-hover table-head-fixed text-nowrap">
+              <table class="table table-hover table-head-fixed table-valign-middle">
                 <thead>
-                  <tr>
-                    <th>Policy Name</th>
-                    <th>Version</th>
-                    <th>Compliance</th>
-		    <th>Passed Systems</th>
-		    <th>Failed Systems</th>
+                  <tr class="text-xs-caps">
+                    <th>Policy</th>
+                    <th class="text-center">Score</th>
+                    <th class="text-center">Pass/Fail</th>
                   </tr>
                 </thead>
                 <tbody>
-		{% if top_failed_policies | length == 0 %}
-                  <tr>
-                    <td colspan="5" class="text-center">No data available</td>
-                 </tr>
-                 {% else %}
-                 {% for pol in top_failed_policies %}
-                 <tr>
-                    <td>{{ pol.policy_name }}</td>
-                    <td>{{ pol.policy_version }}</td>
-
-                    {# Color highlighting based on compliance #}
-                    {% if pol.compliance < 50.0 %}
-                        <td>
-                          <div class="progress progress-xs">
-                            <div class="progress-bar bg-danger" style="width: {{ pol.compliance }}%"></div>
-                          </div>
-                          <span class="badge bg-danger">{{ pol.compliance }}%</span>
-                        </td>
-                    {% elif pol.compliance < 80.0 %}
-                        <td>
-                          <div class="progress progress-xs">
-                            <div class="progress-bar bg-warning" style="width: {{ pol.compliance }}%"></div>
-                          </div>
-                          <span class="badge bg-warning">{{ pol.compliance }}%</span>
-                        </td>
-                    {% else %}
-                        <td>
-                          <div class="progress progress-xs">
-                            <div class="progress-bar bg-success" style="width: {{ pol.compliance }}%"></div>
-                          </div>
-                          <span class="badge bg-success">{{ pol.compliance }}%</span>
-                        </td>
-                    {% endif %}
-		    	<td>{{ pol.passed_systems }}</td>
-                    	<td>{{ pol.failed_systems }}</td>
-                     </tr>
-                {% endfor %}
-                {% endif %}
+                  {% if top_failed_policies | length == 0 %}
+                    <tr><td colspan="3" class="text-center py-5 text-muted">Environment is currently compliant.</td></tr>
+                  {% else %}
+                    {% for pol in top_failed_policies %}
+                    <tr>
+                      <td>
+                        <span class="font-weight-bold">{{ pol.policy_name }}</span><br>
+                        <small class="text-muted">Version: {{ pol.policy_version }}</small>
+                      </td>
+                      <td class="text-center">
+                        <span class="badge {% if pol.compliance < 50 %}bg-danger{% else %}bg-warning{% endif %} px-2 py-1">
+                          {{ pol.compliance }}%
+                        </span>
+                      </td>
+                      <td class="text-center">
+                         <span class="text-success">{{ pol.passed_systems }} <i class="fas fa-check-circle"></i></span>
+                         <span class="text-muted mx-1">/</span>
+                         <span class="text-danger">{{ pol.failed_systems }} <i class="fas fa-times-circle"></i></span>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  {% endif %}
                 </tbody>
               </table>
             </div>
           </div>
         </div>
 
-        <!-- Top Failed Systems -->
         <div class="col-md-6">
-          <div class="card">
-            <div class="card-header">
-              <h3 class="card-title text-danger"><i class="fas fa-computer mr-1"></i> Top Failed Systems</h3>
-	      <div class="card-tools">
-                  <button type="button" class="btn btn-tool" data-card-widget="collapse">
-                    <i class="fas fa-minus"></i>
-                  </button>
-              </div>
-	    </div>
+          <div class="card card-danger card-outline shadow-sm">
+            <div class="card-header border-0">
+              <h3 class="card-title font-weight-bold text-danger"><i class="fas fa-microchip mr-2"></i> Highest Risk Assets</h3>
+            </div>
             <div class="card-body table-responsive p-0" style="height: 300px;">
-              <table class="table table-hover table-head-fixed text-nowrap">
+              <table class="table table-hover table-head-fixed table-valign-middle">
                 <thead>
-                  <tr>
-                    <th>System Name</th>
-                    <th>OS</th>
-                    <th>Compliance</th>
-		    <th>Passed Tests</th>
-		    <th>Failed Tests</th>
+                  <tr class="text-xs-caps">
+                    <th>Asset Name</th>
+                    <th class="text-center">Risk</th>
+                    <th class="text-center">Checks</th>
                   </tr>
                 </thead>
-		<tbody>
-       		 {% if top_failed_systems | length == 0 %}
-            	  <tr>
-                    <td colspan="5" class="text-center">No data available</td>
-            	 </tr>
-        	 {% else %}
-            	 {% for sys in top_failed_systems %}
-                 <tr>
-                    <td>{{ sys.system_name }}</td>
-                    <td>{{ sys.os }}</td>
-		    
-                    {# Color highlighting based on compliance #}
-                    {% if sys.compliance < 50.0 %}
-                        <td>
-		 	  <div class="progress progress-xs">
-                            <div class="progress-bar bg-danger" style="width: {{ sys.compliance }}%"></div>
-                          </div>
-                          <span class="badge bg-danger">{{ sys.compliance }}%</span>
-                        </td>
-                    {% elif sys.compliance < 80.0 %}
-                        <td>
-			  <div class="progress progress-xs">
-                            <div class="progress-bar bg-warning" style="width: {{ sys.compliance }}%"></div>
-                          </div>
-                          <span class="badge bg-warning">{{ sys.compliance }}%</span>
-                        </td>
-                    {% else %}
-		        <td>
-			  <div class="progress progress-xs">
-                            <div class="progress-bar bg-success" style="width: {{ sys.compliance }}%"></div>
-                          </div>
-                          <span class="badge bg-success">{{ sys.compliance }}%</span>
-                        </td>
-                    {% endif %}
-
-                    <td>{{ sys.passed_tests }}</td>
-                    <td>{{ sys.failed_tests }}</td>
-                </tr>
-            	{% endfor %}
-        	{% endif %}
+                <tbody>
+                  {% if top_failed_systems | length == 0 %}
+                    <tr><td colspan="3" class="text-center py-5 text-muted">All systems meeting compliance targets.</td></tr>
+                  {% else %}
+                    {% for sys in top_failed_systems %}
+                    <tr>
+                      <td>
+                        <span class="font-weight-bold">{{ sys.system_name }}</span><br>
+                        <small class="text-muted">{{ sys.os }}</small>
+                      </td>
+                      <td class="text-center">
+                        <div class="progress progress-xxs mt-1 mb-1" style="width: 60px; margin: 0 auto;">
+                          <div class="progress-bar {% if sys.compliance < 50 %}bg-danger{% else %}bg-warning{% endif %}" style="width: {{ sys.compliance }}%"></div>
+                        </div>
+                        <small class="font-weight-bold">{{ sys.compliance }}%</small>
+                      </td>
+                      <td class="text-center">
+                        <small class="text-success font-weight-bold">{{ sys.passed_tests }} OK</small> / 
+                        <small class="text-danger font-weight-bold">{{ sys.failed_tests }} FAIL</small>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  {% endif %}
                 </tbody>
               </table>
             </div>
           </div>
         </div>
-      </div> <!-- End Row 3 -->
-
-    </div><!-- /.container-fluid -->
+      </div>
+    </div>
   </section>
-</div><!-- /.content-wrapper -->
-
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-	// Compliance Trend Chart
-    var complianceTrendCanvas = document.getElementById('complianceTrendChart').getContext('2d');
-    var complianceTrendData = {
+  // Trend Chart logic stays same, but we make sure colors match AdminLTE Primary
+  var complianceTrendCanvas = document.getElementById('complianceTrendChart').getContext('2d');
+  
+  new Chart(complianceTrendCanvas, {
+    type: 'line',
+    data: {
       labels: ['January', 'February', 'March', 'April', 'May', 'June', 'July'],
-      datasets: [
-        {
-          label: 'Overall Compliance',
-          backgroundColor: 'rgba(60,141,188,0.2)',
-          borderColor: 'rgba(60,141,188,1)',
-          pointRadius: 3,
-          pointColor: '#3b8bba',
-          pointStrokeColor: 'rgba(60,141,188,1)',
-          pointHighlightFill: '#fff',
-          pointHighlightStroke: 'rgba(60,141,188,1)',
-          data: [65, 68, 75, 81, 78, 82, 85]
-        }
-      ]
-    };
-
-    var complianceTrendOptions = {
+      datasets: [{
+        label: 'Infrastructure Compliance (%)',
+        backgroundColor: 'rgba(0, 123, 255, 0.1)',
+        borderColor: '#007bff',
+        pointBackgroundColor: '#007bff',
+        pointBorderColor: '#fff',
+        data: [65, 68, 75, 81, 78, 82, 85],
+        fill: true,
+        tension: 0.3
+      }]
+    },
+    options: {
       maintainAspectRatio: false,
       responsive: true,
+      plugins: {
+        legend: { display: false }
+      },
       scales: {
         y: {
-          beginAtZero: false,
-          min: 50,
-          max: 100
+          min: 0,
+          max: 100,
+          ticks: { callback: function(value) { return value + "%"; } }
         }
       }
-    };
-
-    new Chart(complianceTrendCanvas, {
-      type: 'line',
-      data: complianceTrendData,
-      options: complianceTrendOptions
-    });
-
-
+    }
+  });
 </script>
 {% endblock %}
