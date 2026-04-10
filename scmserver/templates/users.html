@@ -1,115 +1,116 @@
-
 {% extends "base.html" %}
 {% block content %}
 
-<!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <div class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1 class="m-0">Users</h1>
-          </div><!-- /.col -->
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              <li class="breadcrumb-item"><a href="/">Home</a></li>
-              <li class="breadcrumb-item active">Users</li>
-            </ol>
-          </div><!-- /.col -->
-        </div><!-- /.row -->
-      </div><!-- /.container-fluid -->
-    </div>
-    <!-- /.content-header -->
-
-
-
-{% if error_message %}
-
-
-<div class="alert alert-danger alert-dismissible">
- <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
- <h5><i class="icon fas fa-ban"></i> Error</h5>
- {{ error_message }}
-</div>
-
-{% endif %}
-
-
-
-<!-- Main content -->
-    <section class="content">
-      <div class="container-fluid">
-        <div class="row">
-          <div class="col-12">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Users List</h3>
-		<div class="card-tools">
-	          <ul class="pagination pagination-sm float-right">
-                    <li class="page-item"><a class="page-link" href="/users/add">New User</a></li>
-		  </ul>
-                </div>
-              </div>
-              <!-- /.card-header -->
-              <div class="card-body">
-	        <table id="users_table" class="table table-bordered table-striped">
-                  <thead>
-                  <tr>
-                    <th>ID</th>
-                    <th>Username</th>
-                    <th>Name</th>
-		    <th>Email</th>
-		    <th>Role</th>
-                    <th>Actions</th>
-                  </tr>
-                  </thead>
-                  <tbody>
-		  {% for user in users %}
-                    <tr>
-                      <td>{{ user.id }}</td>
-                      <td>{{ user.username }}</td>
-                      <td>{{ user.name }}</td>
-		      <td>{{ user.email }}</td>
-		      <td>{{ user.role }}</td>
-		      <td class="text-right">
-		        <a class="btn btn-info btn-sm" href="/users/edit/{{ user.id }}">
-                          <i class="fas fa-pencil-alt"></i>
-                             Edit
-                        </a>
-			{% if user.id != 1 %}
-                        <a class="btn btn-danger btn-sm" onclick="return confirm('Delete User?')" href="/users/delete/{{ user.id}}">
-                           <i class="fas fa-trash"></i>
-                             Delete
-                        </a>
-			{% endif %}
-                      </td>
-                    </tr>
-                  {% endfor %}
-	          </tbody>
-                </table>
-              </div>
-              <!-- /.card-body -->
-            </div>
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1>User Management</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">Users</li>
+          </ol>
         </div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Access Denied</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if query.message %}
+      <div class="alert alert-success alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>
+        {{ query.message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card card-outline card-primary">
+            <div class="card-header">
+              <h3 class="card-title">Authorized System Users</h3>
+              <div class="card-tools">
+                <a href="/users/add" class="btn btn-primary btn-sm">
+                  <i class="fas fa-user-plus"></i> New User
+                </a>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <table id="users_table" class="table table-bordered table-striped table-hover">
+                <thead>
+                  <tr>
+                    <th style="width: 10px">ID</th>
+                    <th>Username</th>
+                    <th>Full Name</th>
+                    <th>Email</th>
+                    <th>Role</th>
+                    <th class="text-center" style="width: 150px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for user in users %}
+                  <tr>
+                    <td>{{ user.id }}</td>
+                    <td><strong>{{ user.username }}</strong></td>
+                    <td>{{ user.name }}</td>
+                    <td>{{ user.email }}</td>
+                    <td>
+                      <span class="badge {% if user.role | lower == 'admin' %}badge-danger{% else %}badge-info{% endif %}">
+                        {{ user.role | capitalize }}
+                      </span>
+                    </td>
+                    <td class="text-right">
+                      <div class="btn-group">
+                        <a class="btn btn-info btn-sm" href="/users/edit/{{ user.id }}" title="Edit User">
+                          <i class="fas fa-pencil-alt"></i>
+                        </a>
+                        {% if user.id != 1 %}
+                        <a class="btn btn-danger btn-sm" 
+                           onclick="return confirm('Are you sure you want to delete {{ user.username }}? This cannot be undone.')" 
+                           href="/users/delete/{{ user.id }}" 
+                           title="Delete User">
+                          <i class="fas fa-trash"></i>
+                        </a>
+                        {% endif %}
+                      </div>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
-  $(document).ready(function () {
-    $('#users_table').DataTable({
+  $(function () {
+    $("#users_table").DataTable({
       "responsive": true,
       "lengthChange": true,
       "autoWidth": false,
-      "searching": true, // this is the default, but you can make sure
-      "paging": true,
-      "info": true
-    });
+      "buttons": ["copy", "csv", "excel", "pdf", "print"],
+      "order": [[0, "asc"]] // Sort by ID by default
+    }).buttons().container().appendTo('#users_table_wrapper .col-md-6:eq(0)');
   });
 </script>
-
 {% endblock %}
