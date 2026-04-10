@@ -1,12 +1,66 @@
 {% extends "base.html" %}
-{% block content %}
 
+{% block styles %}
+<style>
+  /* Risk Bar Styles */
+  .risk-spectrum {
+    height: 14px;
+    background-color: #e9ecef;
+    border-radius: 10px;
+    position: relative;
+    overflow: visible;
+  }
+  .risk-pointer {
+    position: absolute;
+    top: -20px;
+    transition: left 0.5s ease;
+    font-size: 22px;
+  }
+
+  /* Logic Flow Nodes */
+  .logic-step-row {
+    background: #ffffff;
+    border-left: 4px solid #007bff;
+    margin-bottom: 12px;
+  }
+  .node-circle {
+    width: 45px;
+    height: 45px;
+    line-height: 45px;
+    color: #fff;
+    font-size: 18px;
+    border-radius: 50%;
+    margin: 0 auto;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+  }
+  .node-condition {
+    border-radius: 20% 50% 20% 50% !important;
+    transform: rotate(45deg);
+  }
+  .node-condition i { transform: rotate(-45deg); }
+  
+  .remediation-box {
+    background: #272b30;
+    color: #f8f9fa;
+    padding: 12px;
+    font-family: 'Courier New', monospace;
+    border-radius: 4px;
+    font-size: 0.85rem;
+    max-height: 150px;
+    overflow-y: auto;
+  }
+</style>
+{% endblock %}
+
+{% block content %}
 <div class="content-wrapper">
   <section class="content-header">
     <div class="container-fluid">
       <div class="row mb-2">
         <div class="col-sm-6">
-          <h1>Security Tests</h1>
+          <h1>Security Test Library</h1>
         </div>
         <div class="col-sm-6">
           <ol class="breadcrumb float-sm-right">
@@ -21,32 +75,23 @@
   <section class="content">
     <div class="container-fluid">
       
-      {# Alerts Section #}
-      {% if error_message %}
-      <div class="alert alert-danger alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
-        <h5><i class="icon fas fa-ban"></i> Error</h5>
-        {{ error_message }}
-      </div>
-      {% endif %}
-
-      {% if query.message %}
+      {% if query.message or success_message %}
       <div class="alert alert-success alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
-        {{ query.message }}
+        {{ query.message }}{{ success_message }}
       </div>
       {% endif %}
 
       <div class="row">
         <div class="col-12">
-          <div class="card card-outline card-primary">
+          <div class="card card-outline card-primary shadow">
             <div class="card-header">
-              <h3 class="card-title">Compliance Test Library</h3>
+              <h3 class="card-title">Compliance Definitions</h3>
               <div class="card-tools">
                 <a href="{% if is_editor %}/tests/add{% else %}#{% endif %}" 
                    class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}"
-                   {% if not is_editor %}style="opacity: 0.6; cursor: not-allowed;" title="Editor permissions required"{% endif %}>
+                   {% if not is_editor %}style="opacity: 0.6; cursor: not-allowed;" title="Editor Permissions Required"{% endif %}>
                   <i class="fas {% if is_editor %}fa-vial{% else %}fa-lock{% endif %} mr-1"></i> New Test
                 </a>
               </div>
@@ -60,7 +105,7 @@
                     <th>Test Name</th>
                     <th>Description</th>
                     <th style="width: 100px">Severity</th>
-                    <th class="text-center" style="width: 170px">Actions</th>
+                    <th class="text-center" style="width: 180px">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -69,7 +114,7 @@
                   <tr>
                     <td>{{ test.id }}</td>
                     <td><strong>{{ test.name }}</strong></td>
-                    <td>{{ test.description }}</td>
+                    <td>{{ test.description | truncate(length=65) }}</td>
                     <td class="text-center">
                       <span class="badge 
                         {% if sev == 'critical' or sev == 'high' %}badge-danger
@@ -81,25 +126,31 @@
                       </span>
                     </td>
                     <td class="text-right">
-                      {# Space added between buttons by removing btn-group and using ml-1 #}
-                      
-                      {# 1. View Test #}
-                      <a class="btn btn-primary btn-sm" href="/tests/view/{{ test.id }}" title="View Definition">
-                        <i class="fas fa-eye"></i>
-                      </a>
+                      {# Primary Action: View #}
+                      <button type="button" 
+                              class="btn btn-primary btn-sm view-test-btn" 
+                              data-id="{{ test.id }}" data-name="{{ test.name }}"
+                              data-desc="{{ test.description }}" data-sev="{{ test.severity }}"
+                              data-rat="{{ test.rational }}" data-rem="{{ test.remediation }}"
+                              data-e1="{{ test.element_1 }}" data-c1="{{ test.condition_1 }}" data-s1="{{ test.sinput_1 }}"
+                              data-e2="{{ test.element_2 }}" data-c2="{{ test.condition_2 }}" data-s2="{{ test.sinput_2 }}"
+                              data-e3="{{ test.element_3 }}" data-c3="{{ test.condition_3 }}" data-s3="{{ test.sinput_3 }}"
+                              data-e4="{{ test.element_4 }}" data-c4="{{ test.condition_4 }}" data-s4="{{ test.sinput_4 }}"
+                              data-e5="{{ test.element_5 }}" data-c5="{{ test.condition_5 }}" data-s5="{{ test.sinput_5 }}"
+                              title="Quick View">
+                        <i class="fas fa-eye mr-1"></i> View
+                      </button>
 
-                      {# 2. Edit Test (Editor-only) #}
                       <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
                          href="{% if is_editor %}/tests/edit/{{ test.id }}{% else %}#{% endif %}"
-                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Edit Locked"{% endif %}>
                         <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                       </a>
 
-                      {# 3. Delete Test (Editor-only) #}
                       <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-                         onclick="{% if is_editor %}return confirm('Permanently delete test: {{ test.name }}?'){% else %}return false;{% endif %}" 
+                         onclick="{% if is_editor %}return confirm('Delete this test?'){% else %}return false;{% endif %}" 
                          href="{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}"
-                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Locked"{% endif %}>
                         <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                       </a>
                     </td>
@@ -115,19 +166,139 @@
   </section>
 </div>
 
+<div class="modal fade" id="testDetailsModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-primary">
+        <h5 class="modal-title" id="m-title-head"><i class="fas fa-microscope mr-2"></i> Test Details</h5>
+        <button type="button" class="close" data-dismiss="modal">
+          <span aria-hidden="true" style="color: white;">&times;</span>
+        </button>
+      </div>
+      
+      <div class="modal-body bg-light">
+        <div class="card card-body shadow-sm mb-4">
+          <div class="row">
+            <div class="col-md-12">
+              <label class="text-primary text-sm mb-1"><i class="fas fa-info-circle mr-1"></i> Description</label>
+              <p id="m-desc" class="text-muted text-sm"></p>
+            </div>
+            <div class="col-md-6 border-right">
+              <label class="text-warning text-sm mb-1"><i class="fas fa-lightbulb mr-1"></i> Rationale</label>
+              <p id="m-rat" class="text-xs text-muted font-italic"></p>
+            </div>
+            <div class="col-md-6">
+              <label class="text-success text-sm mb-1"><i class="fas fa-tools mr-1"></i> Remediation</label>
+              <div id="m-rem" class="remediation-box"></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="px-3 mb-4">
+          <div class="d-flex justify-content-between align-items-end mb-1">
+            <small class="text-uppercase text-muted font-weight-bold">Risk Severity Spectrum</small>
+            <span id="m-risk-text" class="badge p-1 px-2"></span>
+          </div>
+          <div class="risk-spectrum d-flex shadow-sm">
+            <div class="bg-info" style="width:25%; border-radius: 10px 0 0 10px;"></div>
+            <div class="bg-warning" style="width:25%;"></div>
+            <div class="bg-danger" style="width:25%;"></div>
+            <div style="width:25%; background: #8B0000; border-radius: 0 10px 10px 0;"></div>
+            <i id="m-risk-pointer" class="fas fa-caret-down text-dark risk-pointer"></i>
+          </div>
+        </div>
+
+        <hr>
+
+        <h6 class="px-2 mb-3"><i class="fas fa-project-diagram mr-2 text-primary"></i> Step-by-Step Logic Flow</h6>
+        <div id="logic-steps-container">
+            </div>
+      </div>
+      <div class="modal-footer">
+        <div class="mr-auto text-muted small">System Test ID: <span id="m-id"></span></div>
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
 {% endblock %}
 
 {% block scripts %}
 <script>
-  $(function () {
-    const table = $("#tests_table").DataTable({
-      "responsive": true,
-      "lengthChange": true,
-      "autoWidth": false,
-      "order": [[0, "desc"]], 
-      "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
-    });
-    table.buttons().container().appendTo('#tests_table_wrapper .col-md-6:eq(0)');
+$(function () {
+  $(document).on('click', '.view-test-btn', function() {
+    const b = $(this);
+    
+    // Fill text fields
+    $('#m-title-head').html('<i class="fas fa-microscope mr-2"></i>' + b.data('name'));
+    $('#m-id').text(b.data('id'));
+    $('#m-desc').text(b.data('desc'));
+    $('#m-rat').text(b.data('rat') || "No rationale provided.");
+    $('#m-rem').text(b.data('rem') || "Manual validation required.");
+
+    // Risk Bar & Explicit Text
+    const sev = (b.data('sev') || "").toLowerCase();
+    const ptr = $('#m-risk-pointer');
+    const txt = $('#m-risk-text');
+    
+    txt.removeClass('badge-info badge-warning badge-danger');
+    
+    if(sev === "critical") {
+        ptr.css('left', '87%');
+        txt.addClass('badge-danger').css('background','#8B0000').css('color','white').text('CRITICAL RISK');
+    } else if(sev === "high") {
+        ptr.css('left', '62%');
+        txt.addClass('badge-danger').text('HIGH RISK');
+    } else if(sev === "medium") {
+        ptr.css('left', '37%');
+        txt.addClass('badge-warning').text('MEDIUM RISK');
+    } else {
+        ptr.css('left', '12%');
+        txt.addClass('badge-info').text('LOW RISK');
+    }
+
+    // Clear and build the 5-step logic
+    const container = $('#logic-steps-container');
+    container.empty();
+
+    for (let i = 1; i <= 5; i++) {
+        let el = b.data('e' + i);
+        let co = b.data('c' + i);
+        let ex = b.data('s' + i);
+
+        if (el && el !== "None" && el !== "") {
+            container.append(`
+              <div class="logic-step-row p-3 shadow-sm d-flex align-items-center justify-content-around rounded bg-white">
+                <div class="text-center" style="width: 30%">
+                  <div class="node-circle bg-info shadow-sm"><i class="fas fa-file-code"></i></div>
+                  <small class="d-block mt-1 text-xs text-uppercase font-weight-bold">Subject ${i}</small>
+                  <span class="badge badge-light border text-truncate d-block">${el}</span>
+                </div>
+                <div class="text-muted"><i class="fas fa-chevron-right fa-lg"></i></div>
+                <div class="text-center" style="width: 30%">
+                  <div class="node-circle node-condition bg-warning shadow-sm"><i class="fas fa-equals"></i></div>
+                  <small class="d-block mt-1 text-xs text-uppercase font-weight-bold">Logic</small>
+                  <span class="badge badge-light border text-truncate d-block">${co}</span>
+                </div>
+                <div class="text-muted"><i class="fas fa-chevron-right fa-lg"></i></div>
+                <div class="text-center" style="width: 30%">
+                  <div class="node-circle bg-success shadow-sm"><i class="fas fa-shield-check"></i></div>
+                  <small class="d-block mt-1 text-xs text-uppercase font-weight-bold">Expected</small>
+                  <span class="badge badge-light border text-truncate d-block">${ex}</span>
+                </div>
+              </div>
+            `);
+        }
+    }
+
+    $('#testDetailsModal').modal('show');
   });
+
+  $("#tests_table").DataTable({
+    "responsive": true, "lengthChange": true, "autoWidth": false,
+    "order": [[1, "asc"]],
+    "buttons": ["copy", "csv", "excel", "pdf", "print"]
+  }).buttons().container().appendTo('#tests_table_wrapper .col-md-6:eq(0)');
+});
 </script>
 {% endblock %}
