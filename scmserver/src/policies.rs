@@ -361,7 +361,7 @@ pub async fn policies_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extensio
 
     // get tests
     let rows = sqlx::query("
-        SELECT id,name from tests")
+        SELECT id,name,severity from tests")
         .fetch_all(&*pool)
         .await
         .unwrap(); 
@@ -373,7 +373,7 @@ pub async fn policies_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extensio
             description: None,
             rational: None,
             remediation: None,
-            severity: None,
+            severity: row.get("severity"),
             filter: None,
             element_1: None,
             input_1: None,
