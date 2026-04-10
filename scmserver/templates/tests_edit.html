@@ -1,330 +1,306 @@
 {% extends "base.html" %}
+
+{% block styles %}
+<style>
+  /* Dark Mode support */
+  .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
+  .dark-mode .card-header { border-bottom: 1px solid #4b545c; }
+  .dark-mode .form-control:disabled { background-color: #2b3035 !important; color: #adb5bd; }
+  
+  /* Styling the Logic Section */
+  .logic-container {
+    background: rgba(0,0,0,0.02);
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .dark-mode .logic-container {
+    background: rgba(255,255,255,0.02);
+    border-color: #4b545c;
+  }
+
+  .condition-row {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    padding: 15px 10px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  .dark-mode .condition-row {
+    background: #3f474e;
+    border-color: #4b545c;
+  }
+  
+  .condition-label { font-size: 0.75rem; font-weight: bold; color: #6c757d; text-transform: uppercase; margin-bottom: 4px; }
+  .dark-mode .condition-label { color: #adb5bd; }
+  .test-id-badge { font-size: 0.9rem; vertical-align: middle; }
+</style>
+{% endblock %}
+
 {% block content %}
-
-
-<!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <section class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1>Edit Test</h1>
-          </div>
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              <li class="breadcrumb-item"><a href="/">Home</a></li>
-	      <li class="breadcrumb-item"><a href="/tests">Tests</a></li>
-              <li class="breadcrumb-item active">Test Edit</li>
-            </ol>
-          </div>
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1>
+            <i class="fas fa-edit mr-2 text-primary"></i>Edit Security Test
+            <span class="badge badge-secondary ml-2 test-id-badge">ID: {{ test.id }}</span>
+          </h1>
         </div>
-      </div><!-- /.container-fluid -->
-    </section>
-
-    <!-- Main content -->
-    <section class="content">
-      <div class="row">
-        <div class="col-md-10">
-          <div class="card card-primary">
-            <div class="card-header">
-              <h3 class="card-title">Test</h3>
-            </div>
-	    <form method="post">
-            <div class="card-body"> 
-	      <div class="form-group">
-                <label for="inputid">Test ID</label>
-                <input type="text" name="id" placeholder="{{ test.id }}" class="form-control" disabled>
-              </div>
-              <div class="form-group">
-                <label for="inputName">Test Name</label>
-		<input type="text" name="name" value="{{ test.name }}" class="form-control" required>
-              </div>
-              <div class="form-group">
-                <label for="inputDescription">Description</label>
-		<textarea name="description" class="form-control" rows="4">{{ test.description }}</textarea>
-              </div>
-	      <div class="form-group">
-                <label for="inputRational">Severity</label>
-		<select name="severity" class="form-control" style="width: auto; display: inline-block; margin: 0 0.5rem;">
-		    <option {% if test.severity == "Information" %}selected{% endif %}>Information</option>
-                    <option {% if test.severity == "Low" %}selected{% endif %}>Low</option>
-		    <option {% if test.severity == "Medium" %}selected{% endif %}>Medium</option>
-		    <option {% if test.severity == "High" %}selected{% endif %}>High</option>
-		    <option {% if test.severity == "Critical" %}selected{% endif %}>Critical</option>
-                  </select>
-              </div>
-              <div class="form-group">
-                <label for="inputRational">Rational</label>
-		<textarea name="rational" class="form-control" rows="4">{{ test.rational }}</textarea>
-              </div>
-	      <div class="form-group">
-                <label for="inputRational">Remediation</label>
-		<textarea name="remediation" class="form-control" rows="4">{{ test.remediation }}</textarea>
-              </div>
-	      <div class="form-group">
-  		<h5 style="display: flex; align-items: center; gap: 0.5rem;">
-    		  This test match
-		  <select name="filter" class="form-control" style="width: auto; display: inline-block; margin: 0 0.5rem;">
-      		    <option {% if test.filter == "all" %}selected{% endif %}>all</option>
-      		    <option {% if test.filter == "any" %}selected{% endif %}>any</option>
-    		  </select>
-    		  of the following conditions:
-  		</h5>
-	      </div>
-              <h4>Conditions</h4>
-              <div id="conditionsContainer">
-                <div class="condition-row mb-2 row" data-id="cond_1">
-                  <div class="col-sm-2">
-                    <select name="element_1" class="form-control">
-			  <option value="" {% if test.element_1 == "None" %}selected{% endif %}></option>
-		      	  {% for element in elements %}
-       	 			<option {% if test.element_1 == element.name %}selected{% endif %} >{{ element.name }}</option>
-    			  {% endfor %}
-                    </select>
-                  </div>
-		  <div class="col-sm-3">
-			  <input type="text" name="input_1" value="{{ test.input_1 }}" class="form-control">
-                  </div>
-		  <div class="col-sm-2">
-                    <select name="selement_1" class="form-control">
-			 <option value="" {% if test.selement_1 == "None" %}selected{% endif %}></option>
-			 {% for selement in selements %}
-			 	<option {% if test.selement_1 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
-			 {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="condition_1" class="form-control">
-			 <option value="" {% if test.condition_1 == "None" %}selected{% endif %}></option>
-			 {% for condition in conditions %}   
-			 	<option {% if test.condition_1 == condition.name %}selected{% endif %} >{{ condition.name }}</option> 
-                    	 {% endfor %}
-		    </select>
-                  </div>
-		  <div class="col-sm-2">
-		    <input type="text" name="sinput_1" value="{{ test.sinput_1 }}" class="form-control">
-		  </div> 
-                </div>
-              </div>
-	      <div class="condition-row mb-2 row" data-id="cond_2" {% if test.element_2 == "None" %}style="display: none;"{% endif %} >
-                  <div class="col-sm-2">
-                    <select name="element_2" class="form-control">
-                        <option value="" {% if test.element_2 == "None" %}selected{% endif %}></option>
-			{% for element in elements %}
-                                <option {% if test.element_2 == element.name %}selected{% endif %} >{{ element.name }}</option>
-                        {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-3">
-                          <input type="text" name="input_2" value="{{ test.input_2 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="selement_2" class="form-control">
-                         <option value="" {% if test.selement_2 == "None" %}selected{% endif %}></option>
-			 {% for selement in selements %}
-			 	<option {% if test.selement_2 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="condition_2" class="form-control">
-                         <option value="" {% if test.condition_2 == "None" %}selected{% endif %}></option>
-			 {% for condition in conditions %}
-			 	<option {% if test.condition_2 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <input type="text" name="sinput_2" value="{{ test.sinput_2 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-1 float-sm-right">
-                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
-                        <i class="bi bi-trash"></i> Delete
-                    </button>
-                  </div>
-            </div>
-	    <div class="condition-row mb-2 row" data-id="cond_3" {% if test.element_3 == "None" %}style="display: none;"{% endif %}>
-                  <div class="col-sm-2">
-                    <select name="element_3" class="form-control">
-                        <option value="" {% if test.element_3 == "None" %}selected{% endif %}></option>
-			{% for element in elements %}
-                                <option {% if test.element_3 == element.name %}selected{% endif %} >{{ element.name }}</option>
-                        {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-3">
-                          <input type="text" name="input_3" value="{{ test.input_3 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="selement_3" class="form-control">
-                         <option value="" {% if test.selement_3 == "None" %}selected{% endif %}></option>
-			 {% for selement in selements %}
-				 <option {% if test.selement_3 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="condition_3" class="form-control">
-                         <option value="" {% if test.condition_3 == "None" %}selected{% endif %}></option>
-			 {% for condition in conditions %}
-			 	<option {% if test.condition_3 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <input type="text" name="sinput_3" value="{{ test.sinput_3 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-1">
-                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
-                        <i class="bi bi-trash"></i> Delete
-                    </button>
-                  </div>
-            </div>
-	    <div class="condition-row mb-2 row" data-id="cond_4" {% if test.element_4 == "None" %}style="display: none;"{% endif %}>
-                  <div class="col-sm-2">
-                    <select name="element_4" class="form-control">
-                        <option value="" {% if test.element_4 == "None" %}selected{% endif %}></option>
-			{% for element in elements %}
-                                <option {% if test.element_4 == element.name %}selected{% endif %} >{{ element.name }}</option>
-                        {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-3">
-                          <input type="text" name="input_4" value="{{ test.input_4 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="selement_4" class="form-control">
-                         <option value="" {% if test.selement_4 == "None" %}selected{% endif %}></option>
-			 {% for selement in selements %}
-			 	<option {% if test.selement_4 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="condition_4" class="form-control">
-                         <option value="" {% if test.condition_4 == "None" %}selected{% endif %}></option>
-			 {% for condition in conditions %}
-			 	<option {% if test.condition_2 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <input type="text" name="sinput_4" value="{{ test.sinput_4 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-1">
-                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
-                        <i class="bi bi-trash"></i> Delete
-                    </button>
-                  </div>
-            </div>
-	    <div class="condition-row mb-2 row" data-id="cond_5" {% if test.element_5 == "None" %}style="display: none;"{% endif %}>
-                  <div class="col-sm-2">
-                    <select name="element_5" class="form-control">
-                        <option value="" {% if test.element_5 == "None" %}selected{% endif %}></option>
-			{% for element in elements %}
-                                <option {% if test.element_5 == element.name %}selected{% endif %} >{{ element.name }}</option>
-                        {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-3">
-                          <input type="text" name="input_5" value="{{ test.input_5 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="selement_5" class="form-control">
-			 <option value="" {% if test.selement_5 == "None" %}selected{% endif %}></option>
-			 {% for selement in selements %}
-			 	<option {% if test.selement_5 == selement.name %}selected{% endif %} >{{ selement.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <select name="condition_5" class="form-control">
-                         <option value="" {% if test.condition_5 == "None" %}selected{% endif %}></option>
-			 {% for condition in conditions %}
-			 	<option {% if test.condition_5 == condition.name %}selected{% endif %} >{{ condition.name }}</option>
-                         {% endfor %}
-                    </select>
-                  </div>
-                  <div class="col-sm-2">
-                    <input type="text" name="sinput_5" value="{{ test.sinput_5 }}" class="form-control">
-                  </div>
-                  <div class="col-sm-1">
-                    <button type="button" class="btn btn-danger btn-sm" onclick="removeCondition(this)">
-                        <i class="bi bi-trash"></i> Delete
-                    </button>
-                  </div>
-            </div>
-              <button type="button" class="btn btn-primary btn-sm" onclick="addCondition()">
-                <i class="bi bi-plus-square-dotted"></i> 
-		Add Condition
-              </button>
-	      <div class="text-right">
-                <div class="form-group mt-3">
-                  <button type="submit" class="btn btn-success">Save Test</button>
-                  <a href="/tests" class="btn btn-secondary">Cancel</a>
-                </div>
-	      </div>
-	    </form>
-            </div>
-          </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/tests">Tests</a></li>
+            <li class="breadcrumb-item active">Edit</li>
+          </ol>
         </div>
+      </div>
     </div>
-</div>
+  </section>
 
+  <section class="content">
+    <div class="container-fluid">
+      
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Attention</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      <form method="post">
+        <div class="row">
+          <div class="col-md-12">
+            <div class="card card-primary card-outline shadow-sm">
+              <div class="card-header"><h3 class="card-title">Test Settings</h3></div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-md-9">
+                    <div class="form-group">
+                      <label for="name">Test Name</label>
+                      <input type="text" name="name" value="{{ test.name }}" class="form-control" required>
+                    </div>
+                  </div>
+                  <div class="col-md-3">
+                    <div class="form-group">
+                      <label for="severity">Severity</label>
+                      <select name="severity" class="form-control">
+                        <option {% if test.severity == "Information" %}selected{% endif %}>Information</option>
+                        <option {% if test.severity == "Low" %}selected{% endif %}>Low</option>
+                        <option {% if test.severity == "Medium" %}selected{% endif %}>Medium</option>
+                        <option {% if test.severity == "High" %}selected{% endif %}>High</option>
+                        <option {% if test.severity == "Critical" %}selected{% endif %}>Critical</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label for="description">Description</label>
+                  <textarea name="description" class="form-control" rows="2">{{ test.description }}</textarea>
+                </div>
+
+                <div class="row">
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label for="rational">Rationale</label>
+                      <textarea name="rational" class="form-control" rows="3">{{ test.rational }}</textarea>
+                    </div>
+                  </div>
+                  <div class="col-md-6">
+                    <div class="form-group">
+                      <label for="remediation">Remediation</label>
+                      <textarea name="remediation" class="form-control" rows="3">{{ test.remediation }}</textarea>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-12">
+            <div class="card card-info card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-project-diagram mr-2"></i>Logical Conditions</h3>
+              </div>
+              <div class="card-body">
+                <div class="logic-container">
+                  <div class="d-flex align-items-center mb-4">
+                    <h5 class="m-0">This test matches </h5>
+                    <select name="filter" class="form-control mx-2" style="width: auto;">
+                      <option value="all" {% if test.filter == "all" %}selected{% endif %}>ALL</option>
+                      <option value="any" {% if test.filter == "any" %}selected{% endif %}>ANY</option>
+                    </select>
+                    <h5 class="m-0"> of the following conditions:</h5>
+                  </div>
+
+                  <div id="conditionsContainer">
+                    <div class="condition-row mb-3 row align-items-end" data-id="cond_1">
+                      <div class="col-md-2">
+                        <div class="condition-label">Subject</div>
+                        <select name="element_1" class="form-control">
+                          <option value="" {% if test.element_1 == "None" %}selected{% endif %}></option>
+                          {% for element in elements %}
+                            <option {% if test.element_1 == element.name %}selected{% endif %}>{{ element.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-2">
+                        <div class="condition-label">Parameter</div>
+                        <input type="text" name="input_1" value="{{ test.input_1 }}" class="form-control">
+                      </div>
+                      <div class="col-md-2">
+                        <div class="condition-label">Sub-Element</div>
+                        <select name="selement_1" class="form-control">
+                          <option value="" {% if test.selement_1 == "None" %}selected{% endif %}></option>
+                          {% for selement in selements %}
+                            <option {% if test.selement_1 == selement.name %}selected{% endif %}>{{ selement.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-2">
+                        <div class="condition-label">Operator</div>
+                        <select name="condition_1" class="form-control">
+                          <option value="" {% if test.condition_1 == "None" %}selected{% endif %}></option>
+                          {% for condition in conditions %}
+                            <option {% if test.condition_1 == condition.name %}selected{% endif %}>{{ condition.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-3">
+                        <div class="condition-label">Expected Value</div>
+                        <input type="text" name="sinput_1" value="{{ test.sinput_1 }}" class="form-control">
+                      </div>
+                    </div>
+
+                    {% for i in [2,3,4,5] %}
+                    {% set el = "" %}
+                    {% if i == 2 %}{% set el = test.element_2 %}{% elif i == 3 %}{% set el = test.element_3 %}{% elif i == 4 %}{% set el = test.element_4 %}{% elif i == 5 %}{% set el = test.element_5 %}{% endif %}
+                    
+                    <div class="condition-row mb-3 row align-items-end shadow-sm" data-id="cond_{{ i }}" {% if el == "None" or el == "" %}style="display: none;"{% endif %}>
+                      <div class="col-md-2">
+                        <div class="condition-label">Subject</div>
+                        <select name="element_{{ i }}" class="form-control">
+                          <option value="" {% if el == "None" %}selected{% endif %}></option>
+                          {% for element in elements %}
+                             <option {% if el == element.name %}selected{% endif %}>{{ element.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-2">
+                        <div class="condition-label">Parameter</div>
+                        {% set val = "" %}{% if i == 2 %}{% set val = test.input_2 %}{% elif i == 3 %}{% set val = test.input_3 %}{% elif i == 4 %}{% set val = test.input_4 %}{% elif i == 5 %}{% set val = test.input_5 %}{% endif %}
+                        <input type="text" name="input_{{ i }}" value="{{ val }}" class="form-control">
+                      </div>
+                      <div class="col-md-2">
+                        <div class="condition-label">Sub-Element</div>
+                        {% set sel = "" %}{% if i == 2 %}{% set sel = test.selement_2 %}{% elif i == 3 %}{% set sel = test.selement_3 %}{% elif i == 4 %}{% set sel = test.selement_4 %}{% elif i == 5 %}{% set sel = test.selement_5 %}{% endif %}
+                        <select name="selement_{{ i }}" class="form-control">
+                          <option value="" {% if sel == "None" %}selected{% endif %}></option>
+                          {% for selement in selements %}
+                            <option {% if sel == selement.name %}selected{% endif %}>{{ selement.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-2">
+                        <div class="condition-label">Operator</div>
+                        {% set con = "" %}{% if i == 2 %}{% set con = test.condition_2 %}{% elif i == 3 %}{% set con = test.condition_3 %}{% elif i == 4 %}{% set con = test.condition_4 %}{% elif i == 5 %}{% set con = test.condition_5 %}{% endif %}
+                        <select name="condition_{{ i }}" class="form-control">
+                          <option value="" {% if con == "None" %}selected{% endif %}></option>
+                          {% for condition in conditions %}
+                            <option {% if con == condition.name %}selected{% endif %}>{{ condition.name }}</option>
+                          {% endfor %}
+                        </select>
+                      </div>
+                      <div class="col-md-3">
+                        <div class="condition-label">Expected Value</div>
+                        {% set sval = "" %}{% if i == 2 %}{% set sval = test.sinput_2 %}{% elif i == 3 %}{% set sval = test.sinput_3 %}{% elif i == 4 %}{% set sval = test.sinput_4 %}{% elif i == 5 %}{% set sval = test.sinput_5 %}{% endif %}
+                        <input type="text" name="sinput_{{ i }}" value="{{ sval }}" class="form-control">
+                      </div>
+                      <div class="col-md-1 text-right">
+                        <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeCondition(this)">
+                          <i class="fas fa-trash"></i>
+                        </button>
+                      </div>
+                    </div>
+                    {% endfor %}
+                  </div>
+
+                  <button type="button" class="btn btn-outline-primary btn-sm mt-2" onclick="addCondition()">
+                    <i class="fas fa-plus mr-1"></i> Add Another Condition
+                  </button>
+                </div>
+              </div>
+              <div class="card-footer text-right">
+                <a href="/tests" class="btn btn-secondary px-4">Cancel</a>
+                <button type="submit" class="btn btn-success px-5 ml-2 shadow-sm">
+                  <i class="fas fa-save mr-1"></i> Update Test
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
 {% endblock %}
 
 {% block scripts %}
-
 <script>
- const maxConditions = 5;
-    let usedIndexes = new Set([1]); // First visible row is in use
+  const maxConditions = 5;
+  let usedIndexes = new Set();
 
-    function getNextAvailableIndex() {
-        for (let i = 1; i < maxConditions+1; i++) {
-            if (!usedIndexes.has(i)) {
-                return i;
-            }
-        }
-        return -1;
-    }
-
-    function addCondition() {
-      if (usedIndexes.size >= maxConditions) {
-          alert("Maximum number of conditions reached.");
-          return;
+  // Initialize usedIndexes based on what's visible on page load
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('.condition-row').forEach(row => {
+      if (row.style.display !== 'none') {
+        const id = parseInt(row.getAttribute('data-id').replace('cond_', ''));
+        usedIndexes.add(id);
       }
+    });
+  });
 
-      const conditionId = getNextAvailableIndex();
-      if (conditionId === -1) return;
-
-      usedIndexes.add(conditionId);
-      const row = document.querySelector(`.condition-row[data-id="cond_${conditionId}"]`);
-      if (row) {
-        row.style.display = 'flex'; // Or 'block', depending on layout
-      }
+  function getNextAvailableIndex() {
+    for (let i = 1; i <= maxConditions; i++) {
+      if (!usedIndexes.has(i)) return i;
     }
-	
- 	function removeCondition(button) {
- 	 const row = button.closest('.condition-row');
-  	 if (row) {
-    	   const dataId = row.getAttribute('data-id');
-    	   const conditionId = parseInt(dataId.replace('cond_', ''));
+    return -1;
+  }
 
-    	   // Clear all inputs inside the row
-    	   row.querySelectorAll('input, select').forEach(el => {
-      	     if (el.tagName === 'SELECT') {
-        	el.selectedIndex = 0; // reset dropdown
-      	     } else {
-       	 	el.value = ''; // clear input
-      	     } 
-    	   });
+  function addCondition() {
+    if (usedIndexes.size >= maxConditions) {
+      alert("Maximum number of conditions reached.");
+      return;
+    }
+    const id = getNextAvailableIndex();
+    if (id === -1) return;
 
-    	   row.style.display = 'none';
-    	   usedIndexes.delete(conditionId);
-  	 }
-	}
+    usedIndexes.add(id);
+    const row = document.querySelector(`.condition-row[data-id="cond_${id}"]`);
+    if (row) {
+      row.style.display = 'flex';
+      row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
 
+  function removeCondition(button) {
+    const row = button.closest('.condition-row');
+    if (row) {
+      const dataId = row.getAttribute('data-id');
+      const conditionId = parseInt(dataId.replace('cond_', ''));
+
+      // Clear values
+      row.querySelectorAll('input, select').forEach(el => {
+        if (el.tagName === 'SELECT') el.selectedIndex = 0;
+        else el.value = '';
+      });
+
+      row.style.display = 'none';
+      usedIndexes.delete(conditionId);
+    }
+  }
 </script>
-
 {% endblock %}
