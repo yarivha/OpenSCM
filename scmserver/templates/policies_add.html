@@ -1,76 +1,133 @@
 {% extends "base.html" %}
+
+{% block styles %}
+<link rel="stylesheet" href="/static/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
+<style>
+  /* Styling the dual listbox for a cleaner look */
+  .bootstrap-duallistbox-container .btn-group > .btn {
+    border-radius: 4px;
+    margin-bottom: 5px;
+  }
+  .info-container { margin-bottom: 5px; font-weight: bold; color: #6c757d; }
+</style>
+{% endblock %}
+
 {% block content %}
-
-
-<!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <section class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1>Add new Policy</h1>
-          </div>
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              <li class="breadcrumb-item"><a href="/">Home</a></li>
-	      <li class="breadcrumb-item"><a href="/policies">Policies</a></li>
-              <li class="breadcrumb-item active">Add Policy</li>
-            </ol>
-          </div>
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1><i class="fas fa-shield-alt mr-2 text-primary"></i>Create Security Policy</h1>
         </div>
-      </div><!-- /.container-fluid -->
-    </section>
-
-    <!-- Main content -->
-    <section class="content">
-      <div class="row">
-        <div class="col-md-8">
-          <div class="card card-primary">
-            <div class="card-header">
-              <h3 class="card-title">Policy</h3>
-            </div>
-	    <form method="post" action="/policies/add">
-            <div class="card-body"> 
-              <div class="form-group">
-                <label for="inputName">Policy Name</label>
-                <input type="text" name="name" class="form-control" required>
-              </div>
-	      <div class="form-group">
-                <label for="inputName">Version</label>
-                <input type="text" name="version" class="form-control" required>
-              </div>
-              <div class="form-group">
-                <label for="inputDescription">Description</label>
-                <textarea name="description" class="form-control" rows="4"></textarea>
-              </div>
-	      <div class="form-group">
-                  <label>Select Tests</label>
-                  <select name="tests" class="duallistbox" multiple="multiple">
-		    {% for test in tests %}
-                     <option value="{{ test.id }}">{{ test.name }}</option>
-		    {% endfor %} 
-                  </select>
-              </div>
-	      <div class="form-group">
-                  <label>Select System Groups</label>
-                  <select name="system_groups" class="duallistbox" multiple="multiple">
-                    {% for group in system_groups %}
-                     <option value="{{ group.id }}">{{ group.name }}</option>
-                    {% endfor %}
-                  </select>
-              </div>
-	      <div class="text-right">
-	        <div class="form-group mt-3">
-                  <button type="submit" class="btn btn-success">Save Policy</button>
-                  <a href="/policies" class="btn btn-secondary">Cancel</a>
-                </div>
-	      </div>  
-	    </form>
-            </div>
-          </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/policies">Policies</a></li>
+            <li class="breadcrumb-item active">Add Policy</li>
+          </ol>
         </div>
+      </div>
     </div>
-</div>
+  </section>
 
+  <section class="content">
+    <div class="container-fluid">
+      <form method="post" action="/policies/add">
+        <div class="row">
+          <div class="col-md-12">
+            <div class="card card-primary card-outline shadow">
+              <div class="card-header">
+                <h3 class="card-title">Policy Metadata</h3>
+              </div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-md-8">
+                    <div class="form-group">
+                      <label for="name">Policy Name</label>
+                      <input type="text" name="name" class="form-control" placeholder="e.g., CIS Ubuntu 22.04 Level 1" required>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label for="version">Version</label>
+                      <input type="text" name="version" class="form-control" placeholder="1.0.0" required>
+                    </div>
+                  </div>
+                </div>
+                <div class="form-group">
+                  <label for="description">Policy Description</label>
+                  <textarea name="description" class="form-control" rows="3" placeholder="Describe the intent of this compliance policy..."></textarea>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-md-6">
+            <div class="card card-info shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-vial mr-2"></i>Select Security Tests</h3>
+              </div>
+              <div class="card-body">
+                <select name="tests" class="duallistbox" multiple="multiple">
+                  {% for test in tests %}
+                    <option value="{{ test.id }}">[{{ test.severity | upper }}] {{ test.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+
+          <div class="col-md-6">
+            <div class="card card-success shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-server mr-2"></i>Assign System Groups</h3>
+              </div>
+              <div class="card-body">
+                <select name="system_groups" class="duallistbox" multiple="multiple">
+                  {% for group in system_groups %}
+                    <option value="{{ group.id }}">{{ group.name }}</option>
+                  {% endfor %}
+                </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row pb-5">
+          <div class="col-12">
+            <div class="card shadow-sm">
+              <div class="card-body text-right">
+                <a href="/policies" class="btn btn-secondary px-4">Cancel</a>
+                <button type="submit" class="btn btn-success px-5 ml-2">
+                  <i class="fas fa-save mr-1"></i> Save Policy
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
+<script>
+  $(function () {
+    // Initialize Duallistbox
+    $('.duallistbox').bootstrapDualListbox({
+      nonSelectedListLabel: 'Available Items',
+      selectedListLabel: 'Selected for Policy',
+      preserveSelectionOnMove: 'moved',
+      moveOnSelect: false,
+      infoText: 'Showing {0} items',
+      infoTextEmpty: 'Empty list',
+      filterPlaceHolder: 'Filter list...'
+    });
+  });
+</script>
 {% endblock %}
