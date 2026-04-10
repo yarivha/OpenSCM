@@ -1,75 +1,126 @@
-
 {% extends "base.html" %}
-{% block content %}
 
-
-<!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <section class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1>Edit System Group</h1>
-          </div>
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              <li class="breadcrumb-item"><a href="/">Home</a></li>
-	      <li class="breadcrumb-item"><a href="/system_groups">System Groups</a></li>
-              <li class="breadcrumb-item active">Edit System Group</li>
-            </ol>
-          </div>
-        </div>
-      </div><!-- /.container-fluid -->
-    </section>
-
-    <!-- Main content -->
-    <section class="content">
-      <div class="row">
-        <div class="col-md-8">
-          <div class="card card-primary">
-            <div class="card-header">
-              <h3 class="card-title">{{ group.name }}</h3>
-            </div>
-	    <form method="post">
-            <div class="card-body">
-	      <div class="form-group">
-                <label for="inputid">Group ID</label>
-                <input type="text" name="id" placeholder="{{ group.id }}" class="form-control" disabled>
-              </div> 
-              <div class="form-group">
-                <label for="inputName">Group Name</label>
-                <input type="text" name="name" value="{{ group.name }}" class="form-control" required>
-              </div>
-              <div class="form-group">
-                <label for="inputDescription">Description</label>
-                <textarea name="description" value="{{ group.description }}" class="form-control" rows="4"></textarea>
-              </div>
-	      <div class="form-group">
-                  <label>Select Systems</label>
-		  <select class="duallistbox" name="systems" multiple="multiple" data-placeholder="Select a State" style="width: 100%;">
-			{% for system in systems %}
-        		  <option value="{{ system.id }}"
-            		  {% for connection in systems_in_groups %}  
-				  {% if system.id == connection.system_id %}selected="selected"{% endif %}
-			  {% endfor %}>
-            		  {{ system.name }}
-        		  </option>
-			{% endfor %}
-                    </select>
-                </div>
-              <div class="text-right">
-	        <div class="form-group mt-3">
-                  <button type="submit" class="btn btn-success">Save Group</button>
-                  <a href="/system_groups" class="btn btn-secondary">Cancel</a>
-                </div>
-	      </div>
-	    </form>
-            </div>
-          </div>
-        </div>
-    </div>
-</div>
-
+{% block styles %}
+<link rel="stylesheet" href="/static/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
+<style>
+  /* Dark Mode support */
+  .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
+  .dark-mode .card-header { border-bottom: 1px solid #4b545c; }
+  .dark-mode .form-control:disabled { background-color: #2b3035 !important; color: #adb5bd; }
+  
+  /* Duallistbox styling */
+  .bootstrap-duallistbox-container .btn-group > .btn { border-radius: 4px; margin-bottom: 5px; }
+  .group-id-badge { font-size: 0.9rem; vertical-align: middle; }
+</style>
 {% endblock %}
 
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1>
+            <i class="fas fa-layer-group mr-2 text-primary"></i>Edit System Group
+            <span class="badge badge-secondary ml-2 group-id-badge">ID: {{ group.id }}</span>
+          </h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/system_groups">System Groups</a></li>
+            <li class="breadcrumb-item active">Edit</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+      
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Attention</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Done</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-md-10 mx-auto">
+          <form method="post"> <div class="card card-primary card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title">Group Properties: <strong>{{ group.name }}</strong></h3>
+              </div>
+              <div class="card-body">
+                <div class="row">
+                  <div class="col-md-12">
+                    <div class="form-group">
+                      <label for="name">Group Name</label>
+                      <input type="text" name="name" value="{{ group.name }}" class="form-control" required>
+                    </div>
+                  </div>
+                </div>
+                
+                <div class="form-group">
+                  <label for="description">Description</label>
+                  <textarea name="description" class="form-control" rows="3">{{ group.description }}</textarea>
+                </div>
+
+                <hr>
+
+                <div class="form-group">
+                  <label><i class="fas fa-server mr-1"></i> Update System Members</label>
+                  <select class="duallistbox" name="systems" multiple="multiple" style="width: 100%;">
+                    {% for system in systems %}
+                      <option value="{{ system.id }}"
+                        {% for connection in systems_in_groups %}
+                          {% if system.id == connection.system_id %}selected="selected"{% endif %}
+                        {% endfor %}>
+                        {{ system.name }} {% if system.ip %}({{ system.ip }}){% endif %}
+                      </option>
+                    {% endfor %}
+                  </select>
+                </div>
+              </div>
+              
+              <div class="card-footer text-right">
+                <a href="/system_groups" class="btn btn-secondary px-4">Cancel</a>
+                <button type="submit" class="btn btn-success px-5 ml-2">
+                  <i class="fas fa-save mr-1"></i> Update Group
+                </button>
+              </div>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script src="/static/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
+<script>
+  $(function () {
+    $('.duallistbox').bootstrapDualListbox({
+      nonSelectedListLabel: 'Available Systems',
+      selectedListLabel: 'Currently in Group',
+      preserveSelectionOnMove: 'moved',
+      moveOnSelect: false,
+      infoText: 'Showing {0}',
+      infoTextEmpty: 'List is empty',
+      filterPlaceHolder: 'Search systems...'
+    });
+  });
+</script>
+{% endblock %}
