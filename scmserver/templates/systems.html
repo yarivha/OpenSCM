@@ -1,165 +1,171 @@
 {% extends "base.html" %}
 {% block content %}
 
-<!-- Content Wrapper. Contains page content -->
-  <div class="content-wrapper">
-    <!-- Content Header (Page header) -->
-    <div class="content-header">
-      <div class="container-fluid">
-        <div class="row mb-2">
-          <div class="col-sm-6">
-            <h1 class="m-0">Systems</h1>
-          </div><!-- /.col -->
-          <div class="col-sm-6">
-            <ol class="breadcrumb float-sm-right">
-              <li class="breadcrumb-item"><a href="/">Home</a></li>
-              <li class="breadcrumb-item active">Systems</li>
-            </ol>
-          </div><!-- /.col -->
-        </div><!-- /.row -->
-      </div><!-- /.container-fluid -->
-    </div>
-    <!-- /.content-header -->
-
-{% if error_message %}
-<div class="alert alert-danger alert-dismissible">
- <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
- <h5><i class="icon fas fa-ban"></i> Error</h5>
- {{error_message}}
-</div>
-{% endif %}
-
-
-<!-- Main content -->
-    <section class="content">
-      <div class="container-fluid">
-        <div class="row">
-          <div class="col-12">
-            <div class="card">
-              <div class="card-header">
-                <h3 class="card-title">Systems List</h3>
-              </div>
-              <!-- /.card-header -->
-              <div class="card-body">
-	        <table id="systems_table" class="table table-bordered table-striped">
-                  <thead>
-                  <tr>
-		    <th style="display:none;">Status</th>
-                    <th>ID</th>
-                    <th>System Name</th>
-		    <th>Agent Version</th>
-                    <th>IP</th>
-                    <th>Operating System</th>
-		    <th>Architecture</th>
-		    <th>Groups</th>
-                    <th>Last Seen</th>
-                    <th>Actions</th>
-                  </tr>
-                  </thead>
-    		  <tbody>
-  		  {% for system in systems %}
-  		    <tr class="{% if system.status == 'pending' %}table-warning{% endif %}">
-    		      <td style="display:none;">{{ system.status }}</td>
-		      <td>{{ system.id }}</td>
-    		      <td>{{ system.name }}</td>
-		      <td>{{ system.ver }}</td>
-    		      <td>{{ system.ip }}</td>
-    		      <td>{{ system.os }}</td>
-    		      <td>{{ system.arch }}</td>
-      		      <td>{{ system.groups }}</td>
-    		      <td>{{ system.last_seen }}</td>
-    		      <td class="text-right">
-      		      {% if system.status == "pending" %}
-        		<a class="btn btn-danger btn-sm" onclick="return confirm('Delete System?')" href="/systems/delete/{{ system.id}}">
-          		  <i class="fas fa-trash"></i> Delete
-        		</a>
-        		<a class="btn btn-secondary btn-sm" onclick="return confirm('Approve System?')" href="/systems/approve/{{ system.id}}">
-          		  <i class="fas fa-check"></i> Approve
-        		</a>
-      		      {% else %}
-        		<a class="btn btn-primary btn-sm" href="#">
-          		  <i class="fas fa-eye"></i> View
-        		</a>
-        		<a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
-   			   href="{% if is_editor %}/systems/edit/{{ system.id }}{% else %}#{% endif %}"
-   			   {% if not is_editor %}
-       			   aria-disabled="true" 
-       			   role="button"
-       			   style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
-   			   {% endif %}>
-    			   <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
-    			   Edit
-			</a>
-        		<a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
-   			   onclick="{% if is_editor %}return confirm('Delete Test?'){% else %}return false;{% endif %}" 
-   			   href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}"
-   			   {% if not is_editor %}
-       			   aria-disabled="true" 
-       			   role="button"
-       			   style="cursor: not-allowed; opacity: 0.5; filter: grayscale(100%);"
-   			   {% endif %}>
-    			   <i class="fas {% if is_admin %}fa-trash{% else %}fa-lock{% endif %}"></i>
-    			   Delete
-			</a>
-      		      {% endif %}
-    		     </td>
-  	 	  </tr>
-  		  {% endfor %}
-		  </tbody>
-                </table>
-              </div>
-              <!-- /.card-body -->
-            </div>
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1>Managed Systems</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">Systems</li>
+          </ol>
         </div>
       </div>
     </div>
-  </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+      
+      {# Error Message Alert #}
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card card-outline card-primary">
+            <div class="card-header">
+              <h3 class="card-title">Systems Inventory</h3>
+              <div class="card-tools">
+                <button type="button" class="btn btn-tool" onclick="window.location.reload();" title="Refresh List">
+                  <i class="fas fa-sync-alt"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <table id="systems_table" class="table table-bordered table-striped table-hover">
+                <thead>
+                  <tr>
+                    <th style="display:none;">Status_Internal</th>
+                    <th style="width: 10px">ID</th>
+                    <th>Name</th>
+                    <th>OS & Architecture</th>
+                    <th>IP Address</th>
+                    <th>Groups</th>
+                    <th>Agent</th>
+                    <th>Last Seen</th>
+                    <th class="text-center" style="width: 160px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for system in systems %}
+                  {# Pre-calculate lowercase OS to prevent parser errors and improve performance #}
+                  {% set os_lower = system.os | lower %}
+                  
+                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}">
+                    <td style="display:none;">{{ system.status }}</td>
+                    <td>{{ system.id }}</td>
+                    <td>
+                      <strong>{{ system.name }}</strong>
+                      {% if system.status == "pending" %}
+                        <span class="badge badge-warning ml-1">New</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      {# Comprehensive OS Icon Mapping #}
+                      <i class="fab 
+                        {% if 'windows' in os_lower %}fa-windows
+                        {% elif 'apple' in os_lower or 'mac' in os_lower or 'darwin' in os_lower %}fa-apple
+                        {% elif 'freebsd' in os_lower %}fa-freebsd
+                        {% elif 'ubuntu' in os_lower or 'debian' in os_lower or 'fedora' in os_lower or 'suse' in os_lower or 'centos' in os_lower or 'redhat' in os_lower or 'arch' in os_lower or 'alpine' in os_lower %}fa-linux
+                        {% else %}fa-server
+                        {% endif %} mr-1"></i>
+                      {{ system.os }} ({{ system.arch }})
+                    </td>
+                    <td><code>{{ system.ip }}</code></td>
+                    <td>{{ system.groups }}</td>
+                    <td><span class="badge badge-light">v{{ system.ver }}</span></td>
+                    <td class="datetime" data-utc="{{ system.last_seen }}">{{ system.last_seen }}</td>
+                    
+                    <td class="text-right">
+                      <div class="btn-group">
+                        {% if system.status == "pending" %}
+                          {# Actions for Unapproved Systems #}
+                          <a class="btn btn-success btn-sm" onclick="return confirm('Approve this system?')" href="/systems/approve/{{ system.id }}" title="Approve">
+                            <i class="fas fa-check"></i>
+                          </a>
+                          <a class="btn btn-danger btn-sm" onclick="return confirm('Reject and Delete system?')" href="/systems/delete/{{ system.id }}" title="Delete">
+                            <i class="fas fa-trash"></i>
+                          </a>
+                        {% else %}
+                          {# Actions for Managed Systems #}
+                          <a class="btn btn-primary btn-sm" href="/systems/view/{{ system.id }}" title="View Details">
+                            <i class="fas fa-eye"></i>
+                          </a>
+                          
+                          {# Editor/Admin Guard for Edit #}
+                          <a class="btn btn-info btn-sm {% if not is_editor %}disabled{% endif %}" 
+                             href="{% if is_editor %}/systems/edit/{{ system.id }}{% else %}#{% endif %}"
+                             {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                            <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
+                          </a>
+
+                          {# Editor/Admin Guard for Delete #}
+                          <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}" 
+                             onclick="{% if is_editor %}return confirm('Delete system? All historical data will be lost.'){% else %}return false;{% endif %}" 
+                             href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}"
+                             {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                            <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                          </a>
+                        {% endif %}
+                      </div>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
 
 {% endblock %}
 
 {% block scripts %}
 <script>
-  document.addEventListener('DOMContentLoaded', function() {
-    // Find all elements with the 'datetime' class and convert to local timezone
-    const datetimeElements = document.querySelectorAll('.datetime');
-    
-    datetimeElements.forEach(function(element) {
-      const utcDateStr = element.getAttribute('data-utc');
+  $(function () {
+    // 1. Timezone Conversion (UTC -> Local)
+    $('.datetime').each(function() {
+      const utcDateStr = $(this).data('utc');
       if (utcDateStr) {
-        const utcDate = new Date(utcDateStr);
-        if (!isNaN(utcDate.getTime())) {
-          // Format the date in local timezone
-          const options = { 
-            year: 'numeric', 
-            month: '2-digit', 
-            day: '2-digit',
-            hour: '2-digit', 
-            minute: '2-digit', 
-            second: '2-digit',
+        const date = new Date(utcDateStr);
+        if (!isNaN(date.getTime())) {
+          $(this).text(date.toLocaleString(undefined, {
+            year: 'numeric', month: '2-digit', day: '2-digit',
+            hour: '2-digit', minute: '2-digit', second: '2-digit',
             hour12: false
-          };
-          element.textContent = utcDate.toLocaleDateString(navigator.language, options);
+          }));
         }
       }
     });
-  });
-</script>
 
-<script>
-  $(function () {
-    $('#systems_table').DataTable({
-      "paging": true,
-      "lengthChange": false,
-      "searching": true,
-      "ordering": true,
-      "order": [[0, 'desc']],  // <- comma added here
-      "info": true,
-      "autoWidth": false,
+    // 2. DataTables Initialization
+    const table = $("#systems_table").DataTable({
       "responsive": true,
+      "lengthChange": true,
+      "autoWidth": false,
+      "order": [[0, "asc"], [2, "asc"]], // Show 'pending' systems first
       "columnDefs": [
-        { "targets": 0, "visible": false } // hide status column
-      ]
+        { "targets": 0, "visible": false } // Hide the status_internal column
+      ],
+      "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
     });
+    
+    // Append buttons to the card header area
+    table.buttons().container().appendTo('#systems_table_wrapper .col-md-6:eq(0)');
   });
 </script>
 {% endblock %}
