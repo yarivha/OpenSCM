@@ -32,7 +32,7 @@
             <div class="card-header">
 	       <h3 class="card-title">{{ user.username }}</h3>
             </div>
-	    <form method="post" action="/users/add">
+	    <form method="post" action="/users/edit/{{ user.id }}">
             <div class="card-body"> 
 	      <div class="form-group">
                 <label for="if">User ID</label>
@@ -51,18 +51,15 @@
 		<input type="text" name="email" value="{{ user.email }}" class="form-control" required>
               </div>
 	      <div class="form-group">
-                <label for="password">Password</label>
-                <input type="password" name="password" class="form-control" required>
-              </div>
-	      <div class="form-group">
-                <label for="role">Role</label>
+                <label for="role">Role:</label>
 		<select name="role" class="form-control" style="width: auto; display: inline-block; margin: 0 0.5rem;" 
-			{% if not is_admin %} disabled {% endif %} >
-                    <option value="admin">Administrator</option>
-                    <option value="editor">Editor</option>
-		    <option value="runner">Runner</option>
-		    <option value="viewer">Viewer</option>
-                  </select>
+        	{% if not is_admin %} disabled {% endif %} >
+    		  <option value="admin" {% if user.role == "admin" %}selected{% endif %}>Administrator</option>
+    		  <option value="editor" {% if user.role == "editor" %}selected{% endif %}>Editor</option>
+    		  <option value="runner" {% if user.role == "runner" %}selected{% endif %}>Runner</option>
+    		  <option value="viewer" {% if user.role == "viewer" %}selected{% endif %}>Viewer</option>
+
+		</select>
               </div>
 	      <div class="text-right">
                 <div class="form-group mt-3">
@@ -71,6 +68,22 @@
                 </div>
 	      </div>
 	    </form>
+	  </div> 
+	</div>  
+        <div class="card card-primary">
+          <div class="card-header">
+	    <h3 class="card-title">Change Password</h3>
+          </div>
+	  <form method="post" action="/users/changepassword/{{ user.id }}">
+          <div class="card-body">
+	    <div class="form-group">
+                <label for="password">Password</label>
+                <input type="password" name="password1" class="form-control" required>
+              </div>
+	      <div class="form-group">
+                <label for="password">Re-Password</label>
+                <input type="password" name="password2" class="form-control" required>
+              </div>
             </div>
           </div>
         </div>

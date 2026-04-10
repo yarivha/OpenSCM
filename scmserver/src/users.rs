@@ -8,6 +8,7 @@ use std::sync::Arc;
 use std::str::FromStr;
 use urlencoding;
 use tracing::error;
+use bytes::Bytes;
 use bcrypt::{hash, DEFAULT_COST};
 
 use crate::models::ErrorQuery;
@@ -261,6 +262,82 @@ pub async fn users_edit(auth: AuthSession, Path(id): Path<i32>, pool: Extension<
 }
 
 
+
+
+// system_edit_save
+pub async fn users_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> impl IntoResponse {
+    
+    let current_role = UserRole::from(auth.role.as_str());
+
+    let is_admin = current_role >= UserRole::Admin;
+    let is_owner = auth.userid == id;
+
+    if !is_admin && !is_owner {
+        error!(
+            attempted_by = %auth.username,
+            user_id = %auth.userid,
+            "Unauthorized edit attempt"
+        );
+        // Redirect them away or return a 403 Forbidden
+        return Redirect::to("/users?error_message=Unauthorized+edit+attempt").into_response();
+    }
+
+
+     let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            let error_message = format!("Database error: {}", e);
+            let encoded_message = urlencoding::encode(&error_message);
+            return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
+        }
+    };
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(e) => {
+            let error_message = format!("Error converting bytes to string: {}", e);
+            let encoded_message = urlencoding::encode(&error_message);
+            return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
+        }
+    };
+
+    // Parse the URL-encoded string
+    let form_data = parse_form_data(&raw_string);
+
+    // Extract name and description (with error handling)
+    let name = form_data.get("name").and_then(|v| v.first()).map(|s| s.to_string());
+    let email = form_data.get("email").and_then(|v| v.first()).map(|s| s.to_string());
+    let role = form_data.get("role").and_then(|v| v.first()).map(|s| s.to_string());
+
+    // Update system
+    let update_system_result = sqlx::query(
+        "UPDATE users SET name=?, email=?, role=?  WHERE id=?"
+    )
+    .bind(name.as_ref().unwrap()) // Unwrap after checking for None
+    .bind(email.as_ref().unwrap()) // Unwrap after checking for None
+    .bind(role.as_ref().unwrap())
+    .bind(id)
+    .execute(&mut *tx)
+    .await;
+
+    if let Err(e) = update_system_result {
+        let error_message = format!("Error updating user: {}", e);
+        let encoded_message = urlencoding::encode(&error_message);
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
+    }
+
+
+    // Commit the transaction
+    if let Err(e) = tx.commit().await {
+        let error_message = format!("Error updating system: {}", e);
+        let encoded_message = urlencoding::encode(&error_message);
+        return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
+    }
+
+    Redirect::to("/users").into_response()
+}
 
 
 

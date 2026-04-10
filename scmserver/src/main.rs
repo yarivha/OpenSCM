@@ -126,7 +126,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/users", get(users))
         .route("/users/add", get(users_add).post(users_add_save))
         .route("/users/delete/{id}", get(users_delete))
-        .route("/users/edit/{id}", get(users_edit))
+        .route("/users/edit/{id}", get(users_edit).post(users_edit_save))
         .route("/systems", get(systems))
         .route("/systems/delete/{id}", get(systems_delete))
         .route("/systems/edit/{id}", get(systems_edit).post(systems_edit_save))
