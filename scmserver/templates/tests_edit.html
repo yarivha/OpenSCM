@@ -47,11 +47,11 @@
 	      <div class="form-group">
                 <label for="inputRational">Severity</label>
 		<select name="severity" class="form-control" style="width: auto; display: inline-block; margin: 0 0.5rem;">
-		    <option value="0" {% if test.severity == "0" %}selected{% endif %}>Information</option>
-                    <option value="1" {% if test.severity == "1" %}selected{% endif %}>Low</option>
-		    <option value="2" {% if test.severity == "2" %}selected{% endif %}>Medium</option>
-		    <option value="3" {% if test.severity == "3" %}selected{% endif %}>High</option>
-		    <option value="4" {% if test.severity == "4" %}selected{% endif %}>Critical</option>
+		    <option {% if test.severity == "Information" %}selected{% endif %}>Information</option>
+                    <option {% if test.severity == "Low" %}selected{% endif %}>Low</option>
+		    <option {% if test.severity == "Medium" %}selected{% endif %}>Medium</option>
+		    <option {% if test.severity == "High" %}selected{% endif %}>High</option>
+		    <option {% if test.severity == "Critical" %}selected{% endif %}>Critical</option>
                   </select>
               </div>
               <div class="form-group">
