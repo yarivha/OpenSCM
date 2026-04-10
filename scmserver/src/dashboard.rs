@@ -150,6 +150,9 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
     if let Some(msg) = &params.error_message {
         context.insert("error_message", msg);
     }
+    if let Some(msg) = &params.success_message {
+        context.insert("success_message", msg);
+    }
     context.insert("systems_count", &systems_count.to_string());
     context.insert("policies_count", &policies_count.to_string());
     context.insert("reports_count", &reports_count.to_string());
