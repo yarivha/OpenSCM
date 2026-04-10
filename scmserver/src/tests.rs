@@ -31,55 +31,63 @@ pub async fn tests(auth: AuthSession, Query(query): Query<ErrorQuery>,pool: Exte
 
 
     let rows = sqlx::query("
-        SELECT
-                t.id,
-                t.name,
-                t.description,
-                t.severity
-            FROM
-                tests t
-            ORDER BY
-                t.name")
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
+    SELECT 
+        id, name, description, severity,
+        rational, remediation, filter,
+        element_1, input_1, selement_1, condition_1, sinput_1,
+        element_2, input_2, selement_2, condition_2, sinput_2,
+        element_3, input_3, selement_3, condition_3, sinput_3,
+        element_4, input_4, selement_4, condition_4, sinput_4,
+        element_5, input_5, selement_5, condition_5, sinput_5
+    FROM tests
+    ORDER BY name
+")
+.fetch_all(&*pool)
+.await
+.unwrap();
 
     let tests: Vec<Test> = rows.into_iter().map(|row| {
         Test {
             id: row.get("id"),
             name: row.get("name"),
             description: row.get("description"),
-            rational: None,
-            remediation: None,
-            severity: row.get("severity"),    
-            filter: None,
-            element_1: None,
-            input_1: None,
-            selement_1: None,
-            condition_1: None,
-            sinput_1: None,
-            element_2: None,
-            input_2: None,
-            selement_2: None,
-            condition_2: None,
-            sinput_2: None,
-            element_3: None,
-            input_3: None,
-            selement_3: None,
-            condition_3: None,
-            sinput_3: None,
-            element_4: None,
-            input_4: None,
-            selement_4: None,
-            condition_4: None,
-            sinput_4: None,
-            element_5: None,
-            input_5: None,
-            selement_5: None,
-            condition_5: None,
-            sinput_5: None,
+            severity: row.get("severity"),
+            rational: row.get("rational"),
+            remediation: row.get("remediation"),
+            filter: row.get("filter"),
+            // Mapping all 5 logic steps
+            element_1: row.get("element_1"),
+            input_1: row.get("input_1"),
+            selement_1: row.get("selement_1"),
+            condition_1: row.get("condition_1"),
+            sinput_1: row.get("sinput_1"),
+        
+            element_2: row.get("element_2"),
+            input_2: row.get("input_2"),
+            selement_2: row.get("selement_2"),
+            condition_2: row.get("condition_2"),
+            sinput_2: row.get("sinput_2"),
+
+            element_3: row.get("element_3"),
+            input_3: row.get("input_3"),
+            selement_3: row.get("selement_3"),
+            condition_3: row.get("condition_3"),
+            sinput_3: row.get("sinput_3"),
+
+            element_4: row.get("element_4"),
+            input_4: row.get("input_4"),
+            selement_4: row.get("selement_4"),
+            condition_4: row.get("condition_4"),
+            sinput_4: row.get("sinput_4"),
+
+            element_5: row.get("element_5"),
+            input_5: row.get("input_5"),
+            selement_5: row.get("selement_5"),
+            condition_5: row.get("condition_5"),
+            sinput_5: row.get("sinput_5"),
         }
     }).collect();
+
 
     // Prepare handler-specific context
     let mut context = Context::new();
