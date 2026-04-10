@@ -267,20 +267,21 @@ pub async fn users_edit(auth: AuthSession, Path(id): Path<i32>, pool: Extension<
 // system_edit_save
 pub async fn users_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> impl IntoResponse {
     
-    let current_role = UserRole::from(auth.role.as_str());
-
+     let current_role = UserRole::from(auth.role.as_str());
+            
     let is_admin = current_role >= UserRole::Admin;
     let is_owner = auth.userid == id;
-
+        
     if !is_admin && !is_owner {
         error!(
             attempted_by = %auth.username,
-            user_id = %auth.userid,
+            user_id = %auth.userid, 
             "Unauthorized edit attempt"
         );
         // Redirect them away or return a 403 Forbidden
         return Redirect::to("/users?error_message=Unauthorized+edit+attempt").into_response();
     }
+
 
 
      let mut tx = match pool.begin().await {
@@ -336,7 +337,15 @@ pub async fn users_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
         return Redirect::to(&format!("/users?error_message={}", encoded_message)).into_response();
     }
 
-    Redirect::to("/users").into_response()
+
+    let target_url = if current_role >= UserRole::Admin {
+        "/users"
+    } else {
+        "/"
+    };
+
+    let redirect_path = format!("{}?message=Settings+saved+successfully", target_url);
+    Redirect::to(&redirect_path).into_response()
 }
 
 
