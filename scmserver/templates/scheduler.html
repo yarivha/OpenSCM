@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+
+{% block styles %}
+<style>
+  .dark-mode .nav-tabs .nav-link.active { background-color: #343a40; border-color: #4b545c #4b545c #343a40; color: #fff; }
+  .schedule-card { transition: transform 0.2s; border-left: 5px solid #6c757d; }
+  .schedule-card.active { border-left-color: #28a745; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1><i class="fas fa-calendar-alt mr-2 text-primary"></i>Automation Scheduler</h1>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+      
+      <div class="card card-primary card-outline card-tabs shadow-sm">
+        <div class="card-header p-0 pt-1 border-bottom-0">
+          <ul class="nav nav-tabs" id="schedulerTabs" role="tablist">
+            <li class="nav-item">
+              <a class="nav-link active" id="commands-tab" data-toggle="pill" href="#commands" role="tab"><i class="fas fa-terminal mr-1"></i> Policy Scans</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" id="reports-tab" data-toggle="pill" href="#reports" role="tab"><i class="fas fa-file-invoice mr-1"></i> Scheduled Reports</a>
+            </li>
+            <li class="nav-item">
+              <a class="nav-link" id="system-tab" data-toggle="pill" href="#system" role="tab"><i class="fas fa-cog mr-1"></i> System Jobs</a>
+            </li>
+          </ul>
+        </div>
+
+        <div class="card-body">
+          <div class="tab-content" id="schedulerTabsContent">
+            
+            <div class="tab-pane fade show active" id="commands" role="tabpanel">
+              <div class="d-flex justify-content-between mb-3">
+                <p class="text-muted">Automate policy execution across system groups.</p>
+                <button class="btn btn-success btn-sm"><i class="fas fa-plus mr-1"></i> New Scan Schedule</button>
+              </div>
+              
+              <table class="table table-hover">
+                <thead>
+                  <tr>
+                    <th>Job Name</th>
+                    <th>Target Policy</th>
+                    <th>Frequency</th>
+                    <th>Next Run</th>
+                    <th>Status</th>
+                    <th>Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for job in scan_jobs %}
+                  <tr>
+                    <td><b>{{ job.name }}</b></td>
+                    <td>{{ job.policy_name }}</td>
+                    <td><span class="badge badge-info">{{ job.frequency }}</span></td>
+                    <td>{{ job.next_run }}</td>
+                    <td><span class="badge badge-success">Enabled</span></td>
+                    <td>
+                      <button class="btn btn-xs btn-default"><i class="fas fa-edit"></i></button>
+                      <button class="btn btn-xs btn-danger"><i class="fas fa-trash"></i></button>
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+
+            <div class="tab-pane fade" id="reports" role="tabpanel">
+              <div class="d-flex justify-content-between mb-3">
+                <p class="text-muted">Generate and email compliance summaries automatically.</p>
+                <button class="btn btn-success btn-sm"><i class="fas fa-plus mr-1"></i> New Report Schedule</button>
+              </div>
+              </div>
+
+            <div class="tab-pane fade" id="system" role="tabpanel">
+              <div class="callout callout-info shadow-sm">
+                <h5><i class="fas fa-chart-line mr-2"></i> Compliance Trend Aggregator</h5>
+                <p>This job recalculates the global compliance score based on the latest scan results for all systems. It feeds the dashboard trend graph.</p>
+                <hr>
+                <div class="row align-items-center">
+                  <div class="col-md-4">
+                    <strong>Schedule:</strong> Daily at 00:00 (Midnight)
+                  </div>
+                  <div class="col-md-4 text-center">
+                    <span class="badge badge-primary">System Managed</span>
+                  </div>
+                  <div class="col-md-4 text-right">
+                    <button class="btn btn-outline-primary btn-sm"><i class="fas fa-play mr-1"></i> Run Now</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
