@@ -98,14 +98,15 @@ pub async fn render_template(
     }
 
 
-    // Render template
+    // Render template with detailed error reporting
     let rendered = tera.render(template_name, &context).map_err(|e| {
-        error!("Template render error ({}): {}", template_name, e);
+        // The {:?} is critical here to see the "Caused by" chain from Tera
+        error!("Template render error ({}): {:?}", template_name, e);
         StatusCode::INTERNAL_SERVER_ERROR
-
     })?;
 
     Ok(Html(rendered))
+
 }
 
 
