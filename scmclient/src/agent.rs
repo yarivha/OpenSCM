@@ -60,7 +60,7 @@ async fn process_compliance_tests(
                 "any" => results.iter().any(|&r| r),
                 _ => results.iter().all(|&r| r),
             };
-            passed.to_string()
+            if passed { "PASS".to_string() } else { "FAIL".to_string() }
         };
 
         let payload = ComplianceResult {
