@@ -82,8 +82,8 @@ pub async fn capture_compliance_snapshot(pool: &sqlx::SqlitePool) -> Result<(), 
     // 2. Update SYSTEM stats - changed scan_results to results
     sqlx::query(r#"
         UPDATE systems SET 
-            passed_tests = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'),
-            failed_tests = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'FAIL'),
+            tests_passed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'),
+            tests_failed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'FAIL'),
             total_tests  = (SELECT COUNT(*) FROM results WHERE system_id = systems.id),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN 0.0 

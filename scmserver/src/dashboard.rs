@@ -60,8 +60,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
             p.name as policy_name, 
             p.version as policy_version,
             AVG(t.compliance_score) as compliance,
-            SUM(t.systems_passed) as passed_systems,
-            SUM(t.systems_failed) as failed_systems
+            SUM(t.systems_passed) as systems_passed,
+            SUM(t.systems_failed) as systems_failed
         FROM policies p
         JOIN tests_in_policy tip ON p.id = tip.policy_id
         JOIN tests t ON tip.test_id = t.id
@@ -81,8 +81,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
 
     // Get Highest Risk Assets
     let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(
-        "SELECT name as system_name, os, compliance_score as compliance, passed_tests, failed_tests 
-        FROM systems ORDER BY compliance_score ASC LIMIT 5"
+        "SELECT name as system_name, os, compliance_score as compliance, tests_passed, tests_failed 
+        FROM systems WHERE status='active' ORDER BY compliance_score ASC LIMIT 5"
     ).fetch_all(&*pool).await.map_err(|e| { error!("{}", e); StatusCode::INTERNAL_SERVER_ERROR })?; 
 
 

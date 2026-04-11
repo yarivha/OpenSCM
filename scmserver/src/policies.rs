@@ -95,8 +95,8 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
             .unwrap_or_default()),
 
             compliance: row.get::<f64, _>("compliance"),
-            passed_systems: None,
-            failed_systems: None,
+            systems_passed: None,
+            systems_failed: None,
         }
     }).collect();
 

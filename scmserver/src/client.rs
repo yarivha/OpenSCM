@@ -249,12 +249,12 @@ pub async fn receive_result(
     let system_update = sqlx::query(
         r#"
         UPDATE systems SET 
-            passed_tests = (SELECT COUNT(*) FROM results WHERE system_id = ? AND result = 'PASS'),
-            failed_tests = (SELECT COUNT(*) FROM results WHERE system_id = ? AND result = 'FAIL'),
+            tests_passed = (SELECT COUNT(*) FROM results WHERE system_id = ? AND UPPER(result) = 'PASS'),
+            tests_failed = (SELECT COUNT(*) FROM results WHERE system_id = ? AND UPPER(result) = 'FAIL'),
             total_tests  = (SELECT COUNT(*) FROM results WHERE system_id = ?),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN 0.0 
-                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 
+                ELSE (CAST(SUM(CASE WHEN UPPER(result) = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 
                 END FROM results WHERE system_id = ?
             )
         WHERE id = ?
@@ -275,11 +275,11 @@ pub async fn receive_result(
     let test_update = sqlx::query(
         r#"
         UPDATE tests SET 
-            systems_passed = (SELECT COUNT(*) FROM results WHERE test_id = ? AND result = 'PASS'),
-            systems_failed = (SELECT COUNT(*) FROM results WHERE test_id = ? AND result = 'FAIL'),
+            systems_passed = (SELECT COUNT(*) FROM results WHERE test_id = ? AND UPPER(result) = 'PASS'),
+            systems_failed = (SELECT COUNT(*) FROM results WHERE test_id = ? AND UPPER(result) = 'FAIL'),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN 100.0 
-                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 
+                ELSE (CAST(SUM(CASE WHEN UPPER(result) = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 
                 END FROM results WHERE test_id = ?
             )
         WHERE id = ?

@@ -128,9 +128,9 @@
                         </span>
                       </td>
                       <td class="text-center">
-                         <span class="text-success">{{ pol.passed_systems }} <i class="fas fa-check-circle"></i></span>
+                         <span class="text-success">{{ pol.systems_passed }} <i class="fas fa-check-circle"></i></span>
                          <span class="text-muted mx-1">/</span>
-                         <span class="text-danger">{{ pol.failed_systems }} <i class="fas fa-times-circle"></i></span>
+                         <span class="text-danger">{{ pol.systems_failed }} <i class="fas fa-times-circle"></i></span>
                       </td>
                     </tr>
                     {% endfor %}
@@ -172,8 +172,8 @@
                         <small class="font-weight-bold">{{ sys.compliance }}%</small>
                       </td>
                       <td class="text-center">
-                        <small class="text-success font-weight-bold">{{ sys.passed_tests }} OK</small> / 
-                        <small class="text-danger font-weight-bold">{{ sys.failed_tests }} FAIL</small>
+                        <small class="text-success font-weight-bold">{{ sys.tests_passed }} OK</small> / 
+                        <small class="text-danger font-weight-bold">{{ sys.tests_failed }} FAIL</small>
                       </td>
                     </tr>
                     {% endfor %}

@@ -51,8 +51,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
             last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
             compliance_score REAL DEFAULT 0.0,
-            passed_tests INTEGER DEFAULT 0,
-            failed_tests INTEGER DEFAULT 0,
+            tests_passed INTEGER DEFAULT 0,
+            tests_failed INTEGER DEFAULT 0,
             total_tests INTEGER DEFAULT 0
         )",
     )

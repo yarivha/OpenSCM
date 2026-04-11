@@ -7,7 +7,7 @@ use sqlx::Row;
 use std::sync::Arc;
 use urlencoding;
 use std::collections::HashMap;
-use tracing::{warn, error};
+use tracing::{info, warn, error};
 use bytes::Bytes;
 use chrono::{DateTime,Utc};
 
@@ -160,7 +160,6 @@ pub async fn systems_approve(
 }
 
 
-
 // systems_delete
 pub async fn systems_delete(
     auth: AuthSession,
@@ -168,22 +167,34 @@ pub async fn systems_delete(
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
-    // check authorization
+    // 1. Check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-
-    // Attempt to delete the system
+    // 2. Attempt to delete the system 
+    // (Note: ensure your DB schema has ON DELETE CASCADE on the results table)
     if let Err(e) = sqlx::query("DELETE FROM systems WHERE id = ?")
         .bind(id)
         .execute(&pool)
         .await
     {
+        error!("Database error during system deletion: {}", e);
         let error_message = format!("Error deleting system: {}", e);
         let encoded_message = urlencoding::encode(&error_message);
         return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
     }
+
+    // 3. RECALCULATE GLOBAL SCORES
+    // We call the scheduler's snapshot function to update the 'tests' table 
+    // and 'compliance_history' now that one system's data is gone.
+    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+        // We log the error but don't stop the redirect, 
+        // as the system was already successfully deleted.
+        error!("Failed to update compliance scores after system deletion: {}", e);
+    }
+
+    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
 
     // Success: redirect back to systems page
     Redirect::to("/systems").into_response()

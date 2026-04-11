@@ -188,8 +188,8 @@ pub struct SystemCompliance {
     pub system_name: String,
     pub os: String,
     pub compliance: f64,
-    pub passed_tests: i64,
-    pub failed_tests: i64,
+    pub tests_passed: i64,
+    pub tests_failed: i64,
 }
 
 #[derive(FromRow, Serialize, Deserialize)]
@@ -199,8 +199,8 @@ pub struct PolicyCompliance {
     pub policy_version: String,
     pub policy_description: Option<String>,
     pub compliance: f64,
-    pub passed_systems: Option<i64>,
-    pub failed_systems: Option<i64>,
+    pub systems_passed: Option<i64>,
+    pub systems_failed: Option<i64>,
 }
 
 
@@ -209,8 +209,8 @@ pub struct SystemFailRow {
     pub system_name: String,
     pub os: String,
     pub compliance: f64, // Alias for compliance_score
-    pub passed_tests: i32,
-    pub failed_tests: i32,
+    pub tests_passed: i32,
+    pub tests_failed: i32,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -218,8 +218,8 @@ pub struct PolicyFailRow {
     pub policy_name: String, // Alias for test_name
     pub policy_version: String,
     pub compliance: f64,     // Alias for compliance_score
-    pub passed_systems: i32,
-    pub failed_systems: i32,
+    pub systems_passed: i32,
+    pub systems_failed: i32,
 }
 
 
