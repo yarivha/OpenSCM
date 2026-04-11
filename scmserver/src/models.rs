@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Utc, NaiveDateTime};
 
 
 
@@ -100,6 +100,29 @@ pub struct Policy {
 }
 
 
+#[derive(Debug, FromRow, Serialize, Deserialize)]
+pub struct ScheduledJob {
+    pub id: i32,
+    pub job_name: String,
+    pub job_type: String,
+    pub policy_id: i32,
+    pub policy_name: Option<String>, // Joined from policies table
+    pub frequency: String,
+    pub delivery_method: Option<String>,
+    pub recipients: Option<String>,
+    pub last_run: Option<NaiveDateTime>,
+    pub next_run: Option<NaiveDateTime>,
+    pub is_enabled: i32,
+}
+
+
+#[derive(FromRow, Serialize)]
+pub struct ComplianceHistoryRow {
+    pub check_date: String,   // Matches your column name
+    pub global_score: f64,    // Matches your column name
+}
+
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TestInsidePolicy {
     pub policy_id: i32,
@@ -179,6 +202,27 @@ pub struct PolicyCompliance {
     pub passed_systems: Option<i64>,
     pub failed_systems: Option<i64>,
 }
+
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct SystemFailRow {
+    pub system_name: String,
+    pub os: String,
+    pub compliance: f64, // Alias for compliance_score
+    pub passed_tests: i32,
+    pub failed_tests: i32,
+}
+
+#[derive(sqlx::FromRow, serde::Serialize)]
+pub struct PolicyFailRow {
+    pub policy_name: String, // Alias for test_name
+    pub policy_version: String,
+    pub compliance: f64,     // Alias for compliance_score
+    pub passed_systems: i32,
+    pub failed_systems: i32,
+}
+
+
 
 #[derive(Serialize, Deserialize)]
 pub struct Element {

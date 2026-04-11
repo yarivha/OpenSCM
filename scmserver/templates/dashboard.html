@@ -66,7 +66,7 @@
         <div class="col-lg-3 col-6">
           <div class="small-box bg-warning shadow-sm">
             <div class="inner"><h3>{{ policies_count }}</h3><p>Active Policies</p></div>
-            <div class="icon"><i class="fas fa-shield-check"></i></div>
+            <div class="icon"><i class="fas fa-shield-alt"></i></div>
             <a href="/policies" class="small-box-footer">Manage Policies <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
@@ -191,38 +191,25 @@
 
 {% block scripts %}
 <script>
-  // Trend Chart logic stays same, but we make sure colors match AdminLTE Primary
-  var complianceTrendCanvas = document.getElementById('complianceTrendChart').getContext('2d');
-  
-  new Chart(complianceTrendCanvas, {
-    type: 'line',
-    data: {
-      labels: ['January', 'February', 'March', 'April', 'May', 'June', 'July'],
-      datasets: [{
-        label: 'Infrastructure Compliance (%)',
-        backgroundColor: 'rgba(0, 123, 255, 0.1)',
-        borderColor: '#007bff',
-        pointBackgroundColor: '#007bff',
-        pointBorderColor: '#fff',
-        data: [65, 68, 75, 81, 78, 82, 85],
-        fill: true,
-        tension: 0.3
-      }]
-    },
-    options: {
-      maintainAspectRatio: false,
-      responsive: true,
-      plugins: {
-        legend: { display: false }
-      },
-      scales: {
-        y: {
-          min: 0,
-          max: 100,
-          ticks: { callback: function(value) { return value + "%"; } }
-        }
-      }
-    }
-  });
+// Inside your <script> block in dashboard.html
+var complianceTrendCanvas = document.getElementById('complianceTrendChart').getContext('2d');
+new Chart(complianceTrendCanvas, {
+  type: 'line',
+  data: {
+    labels: {{ trend_labels | json_encode | safe }}, // Dates from compliance_history
+    datasets: [{
+      label: 'Global Compliance %',
+      data: {{ trend_scores | json_encode | safe }}, // Scores from compliance_history
+      borderColor: '#007bff',
+      backgroundColor: 'rgba(0, 123, 255, 0.1)',
+      fill: true,
+      tension: 0.3
+    }]
+  },
+  options: { 
+    maintainAspectRatio: false, 
+    scales: { y: { min: 0, max: 100 } } 
+  }
+});
 </script>
 {% endblock %}

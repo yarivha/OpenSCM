@@ -48,10 +48,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             groups TEXT,
             auth_public_key TEXT,
             auth_signature TEXT,
-            trust_challenge TEXT,
-            trust_proof TEXT,
             created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
-            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP
+            last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
+            compliance_score REAL DEFAULT 0.0,
+            passed_tests INTEGER DEFAULT 0,
+            failed_tests INTEGER DEFAULT 0,
+            total_tests INTEGER DEFAULT 0
         )",
     )
     .execute(pool)
@@ -116,7 +118,10 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             input_5 TEXT,
             selement_5 TEXT,
             condition_5 TEXT,
-            sinput_5 TEXT
+            sinput_5 TEXT,
+            compliance_score REAL DEFAULT 0.0,
+            systems_passed INTEGER DEFAULT 0,
+            systems_failed INTEGER DEFAULT 0
         )",
     )
     .execute(pool)
@@ -213,6 +218,26 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     // Create compliance history table
     sqlx::query(
+        "CREATE TABLE IF NOT EXISTS scheduler (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            job_name TEXT NOT NULL,
+            job_type TEXT NOT NULL,      -- 'command' or 'report'
+            policy_id INTEGER NOT NULL,  -- The policy to execute or report on
+            frequency TEXT NOT NULL,     -- 'daily', 'weekly', 'monthly', 'yearly'
+            delivery_method TEXT,        -- 'save', 'email', or 'both' (for reports)
+            recipients TEXT,             -- Comma-separated emails
+            last_run DATETIME,           -- Timestamp of last execution
+            next_run DATETIME,           -- Calculated next run time
+            is_enabled INTEGER DEFAULT 1, -- 1 for active, 0 for paused
+            FOREIGN KEY (policy_id) REFERENCES policies(id)
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+
+    // Create compliance history table
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS compliance_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             check_date DATE DEFAULT (CURRENT_DATE),
@@ -221,7 +246,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             failed_systems INTEGER
         )",
     )
-    .execure(pool)
+    .execute(pool)
     .await?;
 
 

@@ -191,7 +191,6 @@ pub async fn send(
 }
 
 
-
 // =========================================================
 // HANDLER: Receive Compliance Results (POST /result)
 // =========================================================
@@ -228,14 +227,17 @@ pub async fn receive_result(
     
     debug!("Result Authenticity: Verified signature for Agent ID {}.", payload.client_id);
 
-    // 3. Store Result
+    // 3. Store Individual Result
     let now = chrono::Utc::now().to_string();
     let db_res = sqlx::query(
         r#"INSERT INTO results (system_id, test_id, result, last_updated) 
            VALUES (?, ?, ?, ?) 
            ON CONFLICT(system_id, test_id) DO UPDATE SET result=excluded.result, last_updated=excluded.last_updated"#
     )
-    .bind(payload.client_id).bind(payload.test_id).bind(&payload.result).bind(&now)
+    .bind(payload.client_id)
+    .bind(payload.test_id)
+    .bind(&payload.result)
+    .bind(&now)
     .execute(&pool).await;
 
     if let Err(e) = db_res {
@@ -243,11 +245,64 @@ pub async fn receive_result(
         return (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Storage Error"}))).into_response();
     }
 
+    // 4. LIVE UPDATE: System Stats
+    let system_update = sqlx::query(
+        r#"
+        UPDATE systems SET 
+            passed_tests = (SELECT COUNT(*) FROM results WHERE system_id = ? AND result = 'PASS'),
+            failed_tests = (SELECT COUNT(*) FROM results WHERE system_id = ? AND result = 'FAIL'),
+            total_tests  = (SELECT COUNT(*) FROM results WHERE system_id = ?),
+            compliance_score = (
+                SELECT CASE WHEN COUNT(*) = 0 THEN 0.0 
+                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 
+                END FROM results WHERE system_id = ?
+            )
+        WHERE id = ?
+        "#
+    )
+    .bind(payload.client_id)
+    .bind(payload.client_id)
+    .bind(payload.client_id)
+    .bind(payload.client_id)
+    .bind(payload.client_id)
+    .execute(&pool).await;
+
+    if let Err(e) = system_update {
+        error!("Failed to update live system stats for {}: {}", payload.client_id, e);
+    }
+
+    // 5. LIVE UPDATE: Test Stats
+    let test_update = sqlx::query(
+        r#"
+        UPDATE tests SET 
+            systems_passed = (SELECT COUNT(*) FROM results WHERE test_id = ? AND result = 'PASS'),
+            systems_failed = (SELECT COUNT(*) FROM results WHERE test_id = ? AND result = 'FAIL'),
+            compliance_score = (
+                SELECT CASE WHEN COUNT(*) = 0 THEN 100.0 
+                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 
+                END FROM results WHERE test_id = ?
+            )
+        WHERE id = ?
+        "#
+    )
+    .bind(payload.test_id)
+    .bind(payload.test_id)
+    .bind(payload.test_id)
+    .bind(payload.test_id)
+    .execute(&pool).await;
+
+    if let Err(e) = test_update {
+        error!("Failed to update live test stats for {}: {}", payload.test_id, e);
+    }
+
     info!("COMPLIANCE LOG: System {} passed Test {} with status: {}", payload.client_id, payload.test_id, payload.result);
 
+    // 6. Response
     let response_data = serde_json::json!({"status": "ok"});
     match sign_response(response_data, &config) {
         Ok(signed) => (StatusCode::OK, Json(signed)).into_response(),
         Err(_) => (StatusCode::INTERNAL_SERVER_ERROR, Json(serde_json::json!({"error": "Signing Error"}))).into_response(),
     }
 }
+
+

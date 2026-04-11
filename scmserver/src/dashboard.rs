@@ -10,6 +10,9 @@ use tracing::error;
 use crate::models::ErrorQuery;
 use crate::models::SystemCompliance;
 use crate::models::PolicyCompliance;
+use crate::models::ComplianceHistoryRow;
+use crate::models::PolicyFailRow;
+use crate::models::SystemFailRow;
 use crate::auth::AuthSession;
 use crate::handlers::render_template;
 
@@ -50,103 +53,63 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
     let reports_count: i64 = reports_count_row.get("count");
 
 
-    // Get Top failed systems
-    let rows = sqlx::query(r#"
-        SELECT
-            s.name AS system_name,
-            s.os,
-
-            CASE 
-                WHEN COUNT(r.test_id) = 0 THEN 0.0 -- Using 0.0 to keep sqlx happy (f64)
-                ELSE ROUND(
-                    (SUM(CASE WHEN r.result = 'true' THEN 1 ELSE 0 END) * 100.0) 
-                    / COUNT(r.test_id),
-                    2)
-            END AS compliance,
-
-            COALESCE(SUM(CASE WHEN r.result = 'true' THEN 1 ELSE 0 END), 0) AS passed_tests,
-            COALESCE(SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END), 0) AS failed_tests
-
-        FROM systems s
-        JOIN results r ON s.id = r.system_id
-
-        GROUP BY s.id, s.name, s.os
-
+    // Get Critical Policy Failures
+    let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
+        r#"
+        SELECT 
+            p.name as policy_name, 
+            p.version as policy_version,
+            AVG(t.compliance_score) as compliance,
+            SUM(t.systems_passed) as passed_systems,
+            SUM(t.systems_failed) as failed_systems
+        FROM policies p
+        JOIN tests_in_policy tip ON p.id = tip.policy_id
+        JOIN tests t ON tip.test_id = t.id
+        GROUP BY p.id
         ORDER BY compliance ASC
         LIMIT 5
-    "#)
+        "#
+    )
+    .fetch_all(&*pool)
+    .await
+    .map_err(|e| { 
+        error!("Dashboard Policy Aggregation Error: {}", e); 
+        StatusCode::INTERNAL_SERVER_ERROR 
+    })?;
+
+
+
+    // Get Highest Risk Assets
+    let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(
+        "SELECT name as system_name, os, compliance_score as compliance, passed_tests, failed_tests 
+        FROM systems ORDER BY compliance_score ASC LIMIT 5"
+    ).fetch_all(&*pool).await.map_err(|e| { error!("{}", e); StatusCode::INTERNAL_SERVER_ERROR })?; 
+
+
+
+    let history: Vec<ComplianceHistoryRow> = sqlx::query_as::<_, ComplianceHistoryRow>(
+        "SELECT check_date, global_score FROM compliance_history ORDER BY id DESC LIMIT 10"
+    )
     .fetch_all(&*pool)
     .await
     .map_err(|e| {
-        error!("Systems stats DB error: {}", e);
+        // Using the log crate macro for structured logging
+        error!("Failed to fetch compliance history: {}", e); 
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
 
-    
+    let mut labels = Vec::new();
+    let mut scores = Vec::new();
 
-    let top_failed_systems: Vec<SystemCompliance> = rows.into_iter().map(|row| {
-        SystemCompliance {
-            system_name: row.get::<String, _>("system_name"),
-            os: row.get::<String, _>("os"),
-            compliance: row.get::<f64, _>("compliance"),
-            passed_tests: row.get::<i64, _>("passed_tests"),
-            failed_tests: row.get::<i64, _>("failed_tests"),
-        }
-    }).collect();
-  
+    for rec in history.into_iter().rev() {
+        labels.push(rec.check_date); 
+        scores.push(rec.global_score); 
+    }
 
-    // Get Top failed policies
-    let rows = sqlx::query(r#"
-        SELECT
-            p.id AS policy_id,
-            p.name AS policy_name,
-            p.version AS policy_version,
-            ROUND(
-                SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) * 100.0
-                / COUNT(*),
-                2
-            ) AS compliance,
-            SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) AS passed_systems,
-            SUM(CASE WHEN system_status = 'failed' THEN 1 ELSE 0 END) AS failed_systems
-        FROM (
-            SELECT
-                tip.policy_id,
-                r.system_id,
-                CASE
-                    WHEN SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END) > 0
-                        THEN 'failed'
-                    ELSE 'passed'
-                END AS system_status
-            FROM tests_in_policy tip
-            JOIN results r ON r.test_id = tip.test_id
-            GROUP BY tip.policy_id, r.system_id
-        ) AS system_results
-        JOIN policies p ON p.id = system_results.policy_id
-        GROUP BY p.id, p.name, p.version
-        ORDER BY compliance ASC
-        LIMIT 5
-    "#)
-    .fetch_all(&*pool)
-    .await
-    .map_err(|e| {
-        error!("Dashboard stats DB error: {}", e);
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
 
-    
-    let top_failed_policies: Vec<PolicyCompliance> = rows.into_iter().map(|row| {
-        PolicyCompliance {
-            policy_id: row.get::<i64, _>("policy_id"),
-            policy_name: row.get::<String, _>("policy_name"),
-            policy_version: row.get::<String, _>("policy_version"),
-            policy_description: None,
-            compliance: row.get::<f64, _>("compliance"),
-            passed_systems: Some(row.get::<i64, _>("passed_systems")),
-            failed_systems: Some(row.get::<i64, _>("failed_systems")),
-        }
-    }).collect();
-    
+
+
     if let Some(msg) = &params.error_message {
         context.insert("error_message", msg);
     }
@@ -158,6 +121,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
     context.insert("reports_count", &reports_count.to_string());
     context.insert("top_failed_systems", &top_failed_systems); 
     context.insert("top_failed_policies", &top_failed_policies);
+    context.insert("trend_labels", &labels);
+    context.insert("trend_scores", &scores);
     render_template(&tera,Some(&pool), "dashboard.html", context, Some(auth)).await
 }
 
