@@ -9,7 +9,6 @@ mod systems;
 mod tests;
 mod policies;
 mod reports;
-mod scheduler;
 mod users;
 mod settings;
 
@@ -30,7 +29,6 @@ use crate::systems::*;
 use crate::tests::*;
 use crate::policies::*;
 use crate::reports::*;
-use crate::scheduler::*;
 use crate::users::*;
 use crate::settings::*;
 
@@ -119,7 +117,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // ---------------------------------------------------------
     // Start the background worker for daily compliance snapshots
     // This allows the dashboard trend graph to populate automatically.
-    crate::scheduler::start_background_scheduler(pool.clone()).await;
+    crate::handlers::start_background_scheduler(pool.clone()).await;
 
     // 5. Template Engine
     info!("Loading Server Templates");
