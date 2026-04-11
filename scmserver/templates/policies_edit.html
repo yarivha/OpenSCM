@@ -34,12 +34,11 @@
   <section class="content">
     <div class="container-fluid">
       <form method="post" action="/policies/edit/{{ policy.id }}">
+        
         <div class="row">
           <div class="col-md-12">
             <div class="card card-primary card-outline shadow">
-              <div class="card-header">
-                <h3 class="card-title">Policy Settings</h3>
-              </div>
+              <div class="card-header"><h3 class="card-title">Policy Settings</h3></div>
               <div class="card-body">
                 <div class="row">
                   <div class="col-md-8">
@@ -57,7 +56,7 @@
                 </div>
                 <div class="form-group">
                   <label for="description">Description</label>
-                  <textarea name="description" class="form-control" rows="3">{{ policy.description }}</textarea>
+                  <textarea name="description" class="form-control" rows="2">{{ policy.description | default(value='') }}</textarea>
                 </div>
               </div>
             </div>
@@ -67,17 +66,12 @@
         <div class="row">
           <div class="col-md-6">
             <div class="card card-info card-outline shadow-sm">
-              <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-vial mr-2"></i>Assigned Tests</h3>
-              </div>
+              <div class="card-header"><h3 class="card-title"><i class="fas fa-vial mr-2"></i>Assigned Tests</h3></div>
               <div class="card-body">
                 <select name="tests" class="duallistbox" multiple="multiple">
                   {% for test in tests %}
                     <option value="{{ test.id }}"
-                      {% for connection in tests_in_policy %}
-                        {% if test.id == connection.test_id %}selected="selected"{% endif %}
-                      {% endfor %}
-                    >
+                      {% for connection in tests_in_policy %}{% if test.id == connection.test_id %}selected="selected"{% endif %}{% endfor %}>
                       {{ test.name }}
                     </option>
                   {% endfor %}
@@ -85,20 +79,14 @@
               </div>
             </div>
           </div>
-
           <div class="col-md-6">
             <div class="card card-success card-outline shadow-sm">
-              <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-layer-group mr-2"></i>Target Groups</h3>
-              </div>
+              <div class="card-header"><h3 class="card-title"><i class="fas fa-layer-group mr-2"></i>Target Groups</h3></div>
               <div class="card-body">
                 <select name="system_groups" class="duallistbox" multiple="multiple">
                   {% for group in system_groups %}
                     <option value="{{ group.id }}"
-                      {% for connection in systems_in_policy %}
-                        {% if group.id == connection.group_id %}selected="selected"{% endif %}
-                      {% endfor %}
-                    >
+                      {% for connection in systems_in_policy %}{% if group.id == connection.group_id %}selected="selected"{% endif %}{% endfor %}>
                       {{ group.name }}
                     </option>
                   {% endfor %}
@@ -108,15 +96,71 @@
           </div>
         </div>
 
-        <div class="row pb-5">
-          <div class="col-12">
-            <div class="card shadow-sm">
-              <div class="card-body text-right">
-                <a href="/policies" class="btn btn-secondary px-4">Cancel</a>
-                <button type="submit" class="btn btn-success px-5 ml-2">
-                  <i class="fas fa-save mr-1"></i> Update Policy
-                </button>
+        <div class="row">
+          <div class="col-md-12">
+            <div class="card card-warning card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-clock mr-2"></i>Automation & Scheduling</h3>
+                <div class="card-tools">
+                  <div class="custom-control custom-switch mt-1">
+                    <input type="checkbox" class="custom-control-input" id="schedule_enabled" name="schedule_enabled"
+                           {% if schedule and schedule.enabled %}checked{% endif %}>
+                    <label class="custom-control-label" for="schedule_enabled">Enable Auto-Scan</label>
+                  </div>
+                </div>
               </div>
+              
+              <div class="card-body" id="schedule-config-area" {% if not schedule or not schedule.enabled %}style="display: none;"{% endif %}>
+                <div class="row">
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label for="frequency">Interval</label>
+                      <select name="frequency" id="frequency" class="form-control">
+                        {# Guard against null schedule by using 'schedule and ...' #}
+                        <option value="daily" {% if schedule and schedule.frequency == 'daily' %}selected{% endif %}>Daily</option>
+                        <option value="weekly" {% if schedule and schedule.frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+                        <option value="monthly" {% if schedule and schedule.frequency == 'monthly' %}selected{% endif %}>Monthly</option>
+                        <option value="custom" {% if schedule and schedule.frequency == 'custom' %}selected{% endif %}>Custom (Cron)</option>
+                      </select>
+                    </div>
+                  </div>
+
+                  <div class="col-md-4" id="cron-input-group" {% if not schedule or schedule.frequency != 'custom' %}style="display: none;"{% endif %}>
+                    <div class="form-group">
+                      <label>Cron Expression</label>
+                      <input type="text" name="cron_val" class="form-control" 
+                             value="{{ schedule.cron_expression | default(value='') }}" placeholder="0 0 * * *">
+                    </div>
+                  </div>
+
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label>Next Execution Time</label>
+                      <input type="datetime-local" name="next_run" 
+                             value="{{ schedule.next_run | default(value='') }}" class="form-control">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              
+              <div class="card-footer text-muted text-sm" id="schedule-status-msg">
+                {% if schedule and schedule.enabled %}
+                  <i class="fas fa-calendar-check text-success mr-1"></i> Automation is currently <strong>Active</strong>.
+                {% else %}
+                  <i class="fas fa-info-circle mr-1"></i> Policy is currently set to <strong>Manual Run</strong> only.
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row pb-5">
+	  <div class="col-12">
+	    <div class="text-right">
+              <a href="/policies" class="btn btn-secondary px-4">Cancel</a>
+              <button type="submit" class="btn btn-success px-5 ml-2">
+                <i class="fas fa-save mr-1"></i> Update Policy
+              </button>
             </div>
           </div>
         </div>
@@ -130,6 +174,7 @@
 <script src="/static/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
 <script>
   $(function () {
+    // 1. Initialize Dual Listbox
     $('.duallistbox').bootstrapDualListbox({
       nonSelectedListLabel: 'Available',
       selectedListLabel: 'Active in Policy',
@@ -138,6 +183,26 @@
       infoText: 'Total {0}',
       infoTextEmpty: 'No items',
       filterPlaceHolder: 'Filter...'
+    });
+
+    // 2. Handle Schedule Toggle logic
+    $('#schedule_enabled').on('change', function() {
+      if($(this).is(':checked')) {
+        $('#schedule-config-area').slideDown();
+        $('#schedule-status-msg').html('<i class="fas fa-calendar-check text-success mr-1"></i> Automation is <strong>Enabled</strong>.');
+      } else {
+        $('#schedule-config-area').slideUp();
+        $('#schedule-status-msg').html('<i class="fas fa-info-circle mr-1"></i> Policy is currently set to <strong>Manual Run</strong> only.');
+      }
+    });
+
+    // 3. Handle Frequency dropdown visibility
+    $('#frequency').on('change', function() {
+      if($(this).val() === 'custom') {
+        $('#cron-input-group').fadeIn();
+      } else {
+        $('#cron-input-group').fadeOut();
+      }
     });
   });
 </script>

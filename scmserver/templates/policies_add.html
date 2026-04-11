@@ -3,12 +3,10 @@
 {% block styles %}
 <link rel="stylesheet" href="/static/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
 <style>
-  /* Styling the dual listbox for a cleaner look */
-  .bootstrap-duallistbox-container .btn-group > .btn {
-    border-radius: 4px;
-    margin-bottom: 5px;
-  }
+  .bootstrap-duallistbox-container .btn-group > .btn { border-radius: 4px; margin-bottom: 5px; }
   .info-container { margin-bottom: 5px; font-weight: bold; color: #6c757d; }
+  /* Animation for the schedule section */
+  #schedule-config-area { transition: all 0.3s ease; }
 </style>
 {% endblock %}
 
@@ -20,13 +18,6 @@
         <div class="col-sm-6">
           <h1><i class="fas fa-shield-alt mr-2 text-primary"></i>Create Security Policy</h1>
         </div>
-        <div class="col-sm-6">
-          <ol class="breadcrumb float-sm-right">
-            <li class="breadcrumb-item"><a href="/">Home</a></li>
-            <li class="breadcrumb-item"><a href="/policies">Policies</a></li>
-            <li class="breadcrumb-item active">Add Policy</li>
-          </ol>
-        </div>
       </div>
     </div>
   </section>
@@ -34,30 +25,29 @@
   <section class="content">
     <div class="container-fluid">
       <form method="post" action="/policies/add">
+        
         <div class="row">
           <div class="col-md-12">
             <div class="card card-primary card-outline shadow">
-              <div class="card-header">
-                <h3 class="card-title">Policy Metadata</h3>
-              </div>
+              <div class="card-header"><h3 class="card-title">Policy Metadata</h3></div>
               <div class="card-body">
                 <div class="row">
                   <div class="col-md-8">
                     <div class="form-group">
-                      <label for="name">Policy Name</label>
+                      <label>Policy Name</label>
                       <input type="text" name="name" class="form-control" placeholder="e.g., CIS Ubuntu 22.04 Level 1" required>
                     </div>
                   </div>
                   <div class="col-md-4">
                     <div class="form-group">
-                      <label for="version">Version</label>
+                      <label>Version</label>
                       <input type="text" name="version" class="form-control" placeholder="1.0.0" required>
                     </div>
                   </div>
                 </div>
                 <div class="form-group">
-                  <label for="description">Policy Description</label>
-                  <textarea name="description" class="form-control" rows="3" placeholder="Describe the intent of this compliance policy..."></textarea>
+                  <label>Policy Description</label>
+                  <textarea name="description" class="form-control" rows="2" placeholder="Describe the intent..."></textarea>
                 </div>
               </div>
             </div>
@@ -67,9 +57,7 @@
         <div class="row">
           <div class="col-md-6">
             <div class="card card-info shadow-sm">
-              <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-vial mr-2"></i>Select Security Tests</h3>
-              </div>
+              <div class="card-header"><h3 class="card-title"><i class="fas fa-vial mr-2"></i>Select Security Tests</h3></div>
               <div class="card-body">
                 <select name="tests" class="duallistbox" multiple="multiple">
                   {% for test in tests %}
@@ -79,18 +67,62 @@
               </div>
             </div>
           </div>
-
           <div class="col-md-6">
             <div class="card card-success shadow-sm">
-              <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-server mr-2"></i>Assign System Groups</h3>
-              </div>
+              <div class="card-header"><h3 class="card-title"><i class="fas fa-server mr-2"></i>Assign System Groups</h3></div>
               <div class="card-body">
                 <select name="system_groups" class="duallistbox" multiple="multiple">
                   {% for group in system_groups %}
                     <option value="{{ group.id }}">{{ group.name }}</option>
                   {% endfor %}
                 </select>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        <div class="row">
+          <div class="col-md-12">
+            <div class="card card-warning card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-clock mr-2"></i>Automation & Scheduling</h3>
+                <div class="card-tools">
+                  <div class="custom-control custom-switch mt-1">
+                    <input type="checkbox" class="custom-control-input" id="schedule_enabled" name="schedule_enabled">
+                    <label class="custom-control-label" for="schedule_enabled">Enable Auto-Scan</label>
+                  </div>
+                </div>
+              </div>
+              <div class="card-body" id="schedule-config-area" style="display: none;">
+                <div class="row">
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label for="frequency">Interval</label>
+                      <select name="frequency" id="frequency" class="form-control">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="custom">Custom (Cron)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="col-md-4" id="cron-input-group" style="display: none;">
+                    <div class="form-group">
+                      <label>Cron Expression</label>
+                      <input type="text" name="cron_val" class="form-control" placeholder="0 0 * * *">
+                      <small class="text-muted text-xs">min hour day month day-of-week</small>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label>First Execution Time</label>
+                      <input type="datetime-local" name="next_run" class="form-control">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="card-footer text-muted text-sm" id="schedule-status-msg">
+                <i class="fas fa-info-circle mr-1"></i> Policy is currently set to <strong>Manual Run</strong> only.
               </div>
             </div>
           </div>
@@ -118,15 +150,33 @@
 <script src="/static/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
 <script>
   $(function () {
-    // Initialize Duallistbox
+    // 1. Initialize Duallistbox
     $('.duallistbox').bootstrapDualListbox({
       nonSelectedListLabel: 'Available Items',
       selectedListLabel: 'Selected for Policy',
       preserveSelectionOnMove: 'moved',
       moveOnSelect: false,
-      infoText: 'Showing {0} items',
-      infoTextEmpty: 'Empty list',
       filterPlaceHolder: 'Filter list...'
+    });
+
+    // 2. Handle the Schedule Toggle
+    $('#schedule_enabled').on('change', function() {
+      if($(this).is(':checked')) {
+        $('#schedule-config-area').slideDown();
+        $('#schedule-status-msg').html('<i class="fas fa-calendar-check text-success mr-1"></i> Automation is <strong>Enabled</strong>. Policy will run on the defined schedule.');
+      } else {
+        $('#schedule-config-area').slideUp();
+        $('#schedule-status-msg').html('<i class="fas fa-info-circle mr-1"></i> Policy is currently set to <strong>Manual Run</strong> only.');
+      }
+    });
+
+    // 3. Handle Cron Field Visibility
+    $('#frequency').on('change', function() {
+      if($(this).val() === 'custom') {
+        $('#cron-input-group').fadeIn();
+      } else {
+        $('#cron-input-group').fadeOut();
+      }
     });
   });
 </script>

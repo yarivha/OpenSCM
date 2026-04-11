@@ -39,7 +39,7 @@ pub struct System {
     pub last_seen: Option<DateTime<Utc>>,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Default)]
 pub struct SystemGroup {
     pub id: Option<i32>,
     pub name: String,
@@ -54,7 +54,7 @@ pub struct SystemInsideGroup {
     pub group_id:  i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow)]
+#[derive(Debug, Serialize, Deserialize, FromRow, Default)]
 pub struct Test {
     pub id: Option<i32>,
     pub name: String,
@@ -97,6 +97,17 @@ pub struct Policy {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
+pub struct PolicySchedule {
+    pub id: i32,
+    pub policy_id: i32,
+    pub enabled: bool, // sqlx handles SQLite 0/1 to bool automatically
+    pub frequency: String, // "daily", "weekly", "monthly", "custom"
+    pub cron_expression: Option<String>, // Only used for "custom"
+    pub next_run: String, // Stored as ISO 8601 string in SQLite
+    pub last_run: Option<String>, // Null until the first successful execution
 }
 
 

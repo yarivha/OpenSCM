@@ -17,6 +17,7 @@ use crate::models::ErrorQuery;
 use crate::models::SystemGroup;
 use crate::models::Test;
 use crate::models::Policy;
+use crate::models::PolicySchedule;
 use crate::models::SystemInsidePolicy;
 use crate::models::TestInsidePolicy;
 use crate::models::PolicyCompliance;
@@ -193,10 +194,12 @@ pub async fn policies_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: 
 
 
 //policies_add_save
+
+// policies_add_save
 pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<SqlitePool>, RawForm(raw_form): RawForm) 
         -> impl IntoResponse {
     
-     // check authorization
+    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
        return redir;
     }
@@ -234,34 +237,26 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
     };
 
     let description: Option<String> = form_data
-    .get("description")
-    .and_then(|v| v.first())
-    .map(|s| s.trim().to_string())
-    .filter(|s| !s.is_empty());
+        .get("description")
+        .and_then(|v| v.first())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
 
+    // Multi-selects
+    let tests = form_data.get("tests").cloned().unwrap_or_default();
+    let system_groups = form_data.get("system_groups").cloned().unwrap_or_default();
 
-    // Multi-selects (must have at least one)
-    let tests = form_data
-        .get("tests")
-        .cloned()
-        .unwrap_or_default();
+    // --- NEW: Automation Fields ---
+    // Browsers send "on" for checked checkboxes in form data
+    let schedule_enabled = form_data.get("schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
+    let frequency = form_data.get("frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
+    let cron_val = form_data.get("cron_val").and_then(|v| v.first()).cloned();
+    let next_run = form_data.get("next_run").and_then(|v| v.first()).cloned();
 
-    let system_groups = form_data
-        .get("system_groups")
-        .cloned()
-        .unwrap_or_default();
-
-
-    // Insert into DB using transaction
-    let result = sqlx::query(
-        "INSERT INTO policies (name, version, description) VALUES (?, ?, ?)"
-    )
-    .bind(&name) 
-    .bind(&version) 
-    .bind(&description) 
-    .execute(&mut *tx)
-    .await;
-
+    // Insert Policy
+    let result = sqlx::query("INSERT INTO policies (name, version, description) VALUES (?, ?, ?)")
+        .bind(&name).bind(&version).bind(&description)
+        .execute(&mut *tx).await;
 
     let policy_id = match result {
         Ok(res) => res.last_insert_rowid(),
@@ -272,356 +267,252 @@ pub async fn policies_add_save(auth: AuthSession, Extension(pool): Extension<Sql
         }
     };
 
-    // Insert into DB tests
-        for test_id_str in tests {
-            if let Ok(test_id) = test_id_str.parse::<i32>() {
-                if let Err(e) = sqlx::query(
-                    "INSERT OR IGNORE INTO tests_in_policy (policy_id, test_id) VALUES (?, ?)"
-                )
-                .bind(policy_id)
-                .bind(test_id)
-                .execute(&mut *tx)
-                .await
-                {
-                    let error_message = format!("Database error: {}", e);
-                    let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-                }
-            } else {
-                let error_message = format!("Invalid test ID: {}", test_id_str);
-                let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+    // --- NEW: Insert Schedule if enabled ---
+    if schedule_enabled {
+        // Fallback to current time if user didn't pick a specific start time
+        let start_time = next_run.filter(|s| !s.is_empty())
+            .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%dT%H:%M").to_string());
+
+        if let Err(e) = sqlx::query(
+            "INSERT INTO policy_schedules (policy_id, enabled, frequency, cron_expression, next_run) VALUES (?, ?, ?, ?, ?)"
+        )
+        .bind(policy_id)
+        .bind(1) // enabled
+        .bind(&frequency)
+        .bind(&cron_val)
+        .bind(&start_time)
+        .execute(&mut *tx)
+        .await 
+        {
+            let error_message = format!("Schedule error: {}", e);
+            let encoded_message = urlencoding::encode(&error_message);
+            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+        }
+    }
+
+    // Insert Tests
+    for test_id_str in tests {
+        if let Ok(test_id) = test_id_str.parse::<i32>() {
+            if let Err(e) = sqlx::query("INSERT OR IGNORE INTO tests_in_policy (policy_id, test_id) VALUES (?, ?)")
+                .bind(policy_id).bind(test_id)
+                .execute(&mut *tx).await {
+                return Redirect::to(&format!("/policies?error_message={}", urlencoding::encode(&e.to_string()))).into_response();
             }
         }
+    }
 
-    // insert into DB system_groups
-        for group_id_str in system_groups {
-            if let Ok(group_id) = group_id_str.parse::<i32>() {
-                if let Err(e) = sqlx::query(
-                    "INSERT OR IGNORE INTO systems_in_policy (policy_id, group_id) VALUES (?, ?)"
-                )
-                .bind(policy_id)
-                .bind(group_id)
-                .execute(&mut *tx)
-                .await
-                {
-                    let error_message = format!("Database error: {}", e);
-                    let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-                }
-            } else {
-                let error_message = format!("Invalid group ID: {}", group_id_str);
-                let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+    // Insert System Groups
+    for group_id_str in system_groups {
+        if let Ok(group_id) = group_id_str.parse::<i32>() {
+            if let Err(e) = sqlx::query("INSERT OR IGNORE INTO systems_in_policy (policy_id, group_id) VALUES (?, ?)")
+                .bind(policy_id).bind(group_id)
+                .execute(&mut *tx).await {
+                return Redirect::to(&format!("/policies?error_message={}", urlencoding::encode(&e.to_string()))).into_response();
             }
         }
+    }
 
-    // Commit the transaction
+    // Commit
     if let Err(e) = tx.commit().await {
-        let error_message = format!("Database error: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+        return Redirect::to(&format!("/policies?error_message={}", urlencoding::encode(&e.to_string()))).into_response();
     }
 
     Redirect::to("/policies").into_response()
 }
 
-//policies_edit
-pub async fn policies_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
 
-     // check authorization
+
+// policies_edit
+pub async fn policies_edit(
+    auth: AuthSession, 
+    Path(id): Path<i32>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>
+) -> impl IntoResponse {
+
+    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
        return redir;
     }
 
-    let row_result = sqlx::query("
-                SELECT id,name,version,description from policies where id=?")
-    .bind(id)
-    .fetch_optional(&*pool)
-    .await;
+    // 1. Fetch Policy Metadata
+    let row_result = sqlx::query("SELECT id, name, version, description FROM policies WHERE id = ?")
+        .bind(id)
+        .fetch_optional(&*pool)
+        .await;
 
-    // Handle potential Database Errors AND missing rows
     let row = match row_result {
-        Ok(Some(r)) => r, // We found the test
-        Ok(None) => {     // The query worked, but no test found
-            return Redirect::to("/policies?error_message=Policy+not+found").into_response();
-        }
-        Err(e) => {      // Database error (connection lost, etc.)
+        Ok(Some(r)) => r,
+        Ok(None) => return Redirect::to("/policies?error_message=Policy+not+found").into_response(),
+        Err(e) => {
             error!("Database error: {}", e);
-            return Redirect::to("/tests?error_message=Database+error").into_response();
+            return Redirect::to("/policies?error_message=Database+error").into_response();
         }
     };
 
     let policy = Policy {
-            id: row.try_get("id").unwrap(),
-            name: row.try_get("name").unwrap(),
-            version: row.try_get("version").unwrap(),
-            description: row.try_get("description").unwrap(),
+        id: row.get("id"),
+        name: row.get("name"),
+        version: row.get("version"),
+        description: row.get("description"),
     };
 
-    // get tests
-    let rows = sqlx::query("
-        SELECT id,name,severity from tests")
+    // 2. NEW: Fetch Schedule Data
+    let schedule_row = sqlx::query_as::<_, PolicySchedule>(
+        "SELECT id, policy_id, enabled, frequency, cron_expression, next_run, last_run 
+         FROM policy_schedules WHERE policy_id = ?"
+    )
+    .bind(id)
+    .fetch_optional(&*pool)
+    .await
+    .unwrap_or(None); // If no schedule exists, we just pass None to the template
+
+    // 3. Fetch All Available Tests (for the dual listbox)
+    let test_rows = sqlx::query("SELECT id, name, severity FROM tests")
         .fetch_all(&*pool)
         .await
-        .unwrap(); 
+        .unwrap();
         
-    let test_groups: Vec<Test> = rows.into_iter().map(|row| {
-        Test { 
-            id: row.get("id"),
-            name: row.get("name"),
-            description: None,
-            rational: None,
-            remediation: None,
-            severity: row.get("severity"),
-            filter: None,
-            element_1: None,
-            input_1: None,
-            selement_1: None,
-            condition_1: None,
-            sinput_1: None,
-            element_2: None,
-            input_2: None,
-            selement_2: None,
-            condition_2: None,
-            sinput_2: None,
-            element_3: None,
-            input_3: None,
-            selement_3: None, 
-            condition_3: None,
-            sinput_3: None,
-            element_4: None,
-            input_4: None,
-            selement_4: None,
-            condition_4: None,
-            sinput_4: None,
-            element_5: None,
-            input_5: None,
-            selement_5: None,
-            condition_5: None,
-            sinput_5: None,
-        }
+    let test_groups: Vec<Test> = test_rows.into_iter().map(|r| {
+        Test { id: r.get("id"), name: r.get("name"), severity: r.get("severity"), ..Default::default() }
     }).collect();
 
-    // get system_groups
-    let rows = sqlx::query("
-        SELECT id,name from system_groups")
+    // 4. Fetch All Available System Groups (for the dual listbox)
+    let group_rows = sqlx::query("SELECT id, name FROM system_groups")
         .fetch_all(&*pool)
         .await
         .unwrap();
-    let system_groups: Vec<SystemGroup> = rows.into_iter().map(|row| {
-        SystemGroup {
-            id: row.get("id"),
-            name: row.get("name"),
-            description: None,
-            systems: None,
-    }
+
+    let system_groups: Vec<SystemGroup> = group_rows.into_iter().map(|r| {
+        SystemGroup { id: r.get("id"), name: r.get("name"), ..Default::default() }
     }).collect();
 
-    // get tests inside the policy
-    let rows = sqlx::query("
-         SELECT policy_id,test_id from tests_in_policy where policy_id=?")
+    // 5. Fetch existing connections (Tests in this policy)
+    let tip_rows = sqlx::query("SELECT policy_id, test_id FROM tests_in_policy WHERE policy_id = ?")
         .bind(id)
         .fetch_all(&*pool)
         .await
         .unwrap();
 
-    let tests_in_policy: Vec<TestInsidePolicy> = rows.into_iter().map(|row| {
-        TestInsidePolicy {
-            policy_id: row.get("policy_id"),
-            test_id: row.get("test_id"),
-        }
+    let tests_in_policy: Vec<TestInsidePolicy> = tip_rows.into_iter().map(|r| {
+        TestInsidePolicy { policy_id: r.get("policy_id"), test_id: r.get("test_id") }
     }).collect();
 
-
-   // get system_groups inside the policy
-    let rows = sqlx::query("
-         SELECT policy_id,group_id from systems_in_policy where policy_id=?")
+    // 6. Fetch existing connections (Systems in this policy)
+    let sip_rows = sqlx::query("SELECT policy_id, group_id FROM systems_in_policy WHERE policy_id = ?")
         .bind(id)
         .fetch_all(&*pool)
         .await
         .unwrap();
 
-    let systems_in_policy: Vec<SystemInsidePolicy> = rows.into_iter().map(|row| { 
-        SystemInsidePolicy {
-            policy_id: row.get("policy_id"),
-            group_id: row.get("group_id"),
-        }
+    let systems_in_policy: Vec<SystemInsidePolicy> = sip_rows.into_iter().map(|r| { 
+        SystemInsidePolicy { policy_id: r.get("policy_id"), group_id: r.get("group_id") }
     }).collect();
 
-
-
+    // 7. Build Context
     let mut context = Context::new();
-    context.insert("policy",&policy);
+    context.insert("policy", &policy);
+    context.insert("schedule", &schedule_row); // Pass the schedule (Option)
     context.insert("tests", &test_groups);
-    context.insert("system_groups",&system_groups);
+    context.insert("system_groups", &system_groups);
     context.insert("tests_in_policy", &tests_in_policy);
     context.insert("systems_in_policy", &systems_in_policy);
-    render_template(&tera,Some(&pool), "policies_edit.html", context, Some(auth)).await.into_response()
 
+    render_template(&tera, Some(&pool), "policies_edit.html", context, Some(auth)).await.into_response()
 }
 
 
-//policies_edit_save
-pub async fn policies_edit_save(auth: AuthSession, Path(id): Path<i32>, Extension(pool): Extension<SqlitePool>, RawForm(raw_form): RawForm) ->      impl IntoResponse {
+
+// policies_edit_save
+pub async fn policies_edit_save(
+    auth: AuthSession, 
+    Path(id): Path<i32>, 
+    Extension(pool): Extension<SqlitePool>, 
+    RawForm(raw_form): RawForm
+) -> impl IntoResponse {
     
-     // check authorization
+    // Check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
        return redir;
     }
 
-
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
-        Err(e) => {
-            let error_message = format!("Database error: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-        }
+        Err(e) => return Redirect::to(&format!("/policies?error_message={}", urlencoding::encode(&e.to_string()))).into_response(),
     };
 
-    let raw_string = match String::from_utf8(raw_form.to_vec()) {
-        Ok(s) => s,
-        Err(e) => {
-            let error_message = format!("Error converting bytes to string: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-        }
-    };
-
-    // Parse the URL-encoded string
+    let raw_string = String::from_utf8_lossy(&raw_form).to_string();
     let form_data = parse_form_data(&raw_string);
 
-    // Required fields
-    let name = match form_data.get("name").and_then(|v| v.first()) {
-        Some(v) if !v.trim().is_empty() => v.to_string(),
-        _ => return Redirect::to("/policies?error_message=Name is required").into_response(),
-    };
+    // Metadata extraction
+    let name = form_data.get("name").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let version = form_data.get("version").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let description = form_data.get("description").and_then(|v| v.first()).map(|s| s.trim().to_string());
 
-    let version = match form_data.get("version").and_then(|v| v.first()) {
-        Some(v) if !v.trim().is_empty() => v.to_string(),
-        _ => return Redirect::to("/policies?error_message=Version is required").into_response(),
-    };
+    // --- Automation Fields ---
+    let schedule_enabled = form_data.get("schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
+    let frequency = form_data.get("frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
+    let cron_val = form_data.get("cron_val").and_then(|v| v.first()).cloned();
+    let next_run = form_data.get("next_run").and_then(|v| v.first()).cloned();
 
-    let description: Option<String> = form_data
-    .get("description")
-    .and_then(|v| v.first())
-    .map(|s| s.trim().to_string())
-    .filter(|s| !s.is_empty());
-
-    // Multi-selects (must have at least one)
-    let tests = form_data
-        .get("tests")
-        .cloned()
-        .unwrap_or_default();
-
-    let system_groups = form_data
-        .get("system_groups")
-        .cloned()
-        .unwrap_or_default();
-
-
-    // update policy table 
-    let update_policy_result = sqlx::query(
-        "UPDATE policies SET name=?, version=?, description=? WHERE id=?" 
-    )
-    .bind(&name) 
-    .bind(&version) 
-    .bind(&description) 
-    .bind(id)
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = update_policy_result { 
-        let error_message = format!("Error updating policy: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok(); 
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+    // 1. Update Policy Metadata
+    if let Err(e) = sqlx::query("UPDATE policies SET name=?, version=?, description=? WHERE id=?")
+        .bind(&name).bind(&version).bind(&description).bind(id)
+        .execute(&mut *tx).await {
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/policies?error_message={}", urlencoding::encode(&e.to_string()))).into_response();
     }
 
-    // Remove all related groups
-    let remove_related_groups = sqlx::query(
-        "DELETE FROM tests_in_policy WHERE policy_id=?"
-    )
-    .bind(id) 
-    .execute(&mut *tx)
-    .await;
+    // 2. Sync Schedule (UPSERT logic)
+    // We attempt to update, or insert if it doesn't exist. SQLite 3.24+ supports ON CONFLICT
+    let schedule_query = r#"
+        INSERT INTO policy_schedules (policy_id, enabled, frequency, cron_expression, next_run)
+        VALUES (?, ?, ?, ?, ?)
+        ON CONFLICT(policy_id) DO UPDATE SET
+            enabled = excluded.enabled,
+            frequency = excluded.frequency,
+            cron_expression = excluded.cron_expression,
+            next_run = excluded.next_run
+    "#;
 
-    if let Err(e) = remove_related_groups
-    {
-        let error_message = format!("Error updating policy: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok();
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-    }
-    
+    let start_time = next_run.filter(|s| !s.is_empty())
+        .unwrap_or_else(|| chrono::Local::now().format("%Y-%m-%dT%H:%M").to_string());
 
-    // Remove all related systems
-    let remove_related_systems = sqlx::query(
-        "DELETE FROM systems_in_policy WHERE policy_id=?"
-    )
-    .bind(id)
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = remove_related_systems
-    {
-        let error_message = format!("Error updating policy: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok();
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+    if let Err(e) = sqlx::query(schedule_query)
+        .bind(id)
+        .bind(schedule_enabled) // This will be 1 or 0
+        .bind(&frequency)
+        .bind(&cron_val)
+        .bind(&start_time)
+        .execute(&mut *tx)
+        .await {
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/policies?error_message=Schedule Update Error: {}", urlencoding::encode(&e.to_string()))).into_response();
     }
 
-
-    // Insert into DB test_groups
-        for test_id_str in tests {
-            if let Ok(test_id) = test_id_str.parse::<i32>() {
-                if let Err(e) = sqlx::query(
-                    "INSERT OR IGNORE INTO tests_in_policy (policy_id, test_id) VALUES (?, ?)"
-                )
-                .bind(id)
-                .bind(test_id)
-                .execute(&mut *tx)
-                .await
-                {
-                    let error_message = format!("Database error: {}", e);
-                    let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-                }
-            } else {
-                let error_message = format!("Invalid test ID: {}", test_id_str);
-                let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-            }
+    // 3. Clear and Re-insert Tests
+    sqlx::query("DELETE FROM tests_in_policy WHERE policy_id=?").bind(id).execute(&mut *tx).await.ok();
+    let tests = form_data.get("tests").cloned().unwrap_or_default();
+    for test_id_str in tests {
+        if let Ok(test_id) = test_id_str.parse::<i32>() {
+            sqlx::query("INSERT OR IGNORE INTO tests_in_policy (policy_id, test_id) VALUES (?, ?)")
+                .bind(id).bind(test_id).execute(&mut *tx).await.ok();
         }
+    }
 
-    // insert into DB system_groups
-        for group_id_str in system_groups {
-            if let Ok(group_id) = group_id_str.parse::<i32>() {
-                if let Err(e) = sqlx::query(
-                    "INSERT OR IGNORE INTO systems_in_policy (policy_id, group_id) VALUES (?, ?)"
-                )
-                .bind(id)
-                .bind(group_id)
-                .execute(&mut *tx)
-                .await
-                {
-                    let error_message = format!("Database error: {}", e);
-                    let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-                }
-            } else {
-                let error_message = format!("Invalid group ID: {}", group_id_str);
-                let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-            }
+    // 4. Clear and Re-insert System Groups
+    sqlx::query("DELETE FROM systems_in_policy WHERE policy_id=?").bind(id).execute(&mut *tx).await.ok();
+    let system_groups = form_data.get("system_groups").cloned().unwrap_or_default();
+    for group_id_str in system_groups {
+        if let Ok(group_id) = group_id_str.parse::<i32>() {
+            sqlx::query("INSERT OR IGNORE INTO systems_in_policy (policy_id, group_id) VALUES (?, ?)")
+                .bind(id).bind(group_id).execute(&mut *tx).await.ok();
         }
+    }
 
-    // Commit the transaction
+    // Commit
     if let Err(e) = tx.commit().await {
-        let error_message = format!("Database error: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+        return Redirect::to(&format!("/policies?error_message={}", urlencoding::encode(&e.to_string()))).into_response();
     }
 
     Redirect::to("/policies").into_response()
