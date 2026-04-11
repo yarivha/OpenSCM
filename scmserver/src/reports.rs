@@ -130,9 +130,12 @@ pub async fn reports_save(
         let s_name: String = row.get("system_name");
         let t_name: String = row.get("test_name");
         let status_str: String = row.get("status_text");
-        
-        // Match your agent's pass/fail string (assuming "Pass")
-        let t_status: bool = status_str.to_lowercase() == "true";
+
+        // 1. Calculate the boolean (checking for old "true" and new "pass" formats)
+        let t_status: bool = status_str.to_lowercase() == "pass" || status_str == "true";
+
+        // 2. Convert that bool to the String the struct expects
+        let status_label = if t_status { "PASS".to_string() } else { "FAIL".to_string() };
 
         let entry = reports_map.entry(s_name.clone()).or_insert(SystemReport {
             system_name: s_name,
@@ -140,9 +143,17 @@ pub async fn reports_save(
             is_passed: true,
         });
 
-        entry.results.push(IndividualResult { test_name: t_name, status: t_status });
-        if !t_status { entry.is_passed = false; }
+        // 3. Push using the string label
+        entry.results.push(IndividualResult { 
+            test_name: t_name, 
+            status: status_label 
+        });
+
+        if !t_status { 
+            entry.is_passed = false; 
+        }
     }
+
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();
 
     // 5. Serialize to JSON
@@ -152,11 +163,11 @@ pub async fn reports_save(
 
     // 6. Archive the snapshot
     let insert_result = sqlx::query(
-        r#"
-        INSERT INTO reports 
-        (policy_name, policy_version, policy_description, submitter_name, tests_metadata, report_results) 
-        VALUES (?, ?, ?, ?, ?, ?)
-        "#
+          r#"
+          INSERT INTO reports 
+            (policy_name, policy_version, policy_description, submitter_name, tests_metadata, report_results) 
+            VALUES (?, ?, ?, ?, ?, ?)
+            "#
     )
     .bind(policy_row.get::<String, _>("name"))
     .bind(policy_row.get::<String, _>("version"))
@@ -442,8 +453,9 @@ pub async fn reports_download(
         doc.push(elements::Break::new(0.5));
 
         // System Compliance Summary
-        let compliant_count = system.results.iter().filter(|r| r.status).count();
+        let compliant_count = system.results.iter().filter(|r| r.status == "PASS" || r.status == "true").count();
         let violation_count = system.results.len() - compliant_count;
+
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
@@ -479,11 +491,14 @@ pub async fn reports_download(
                 .map(|t| t.description.as_str())
                 .unwrap_or("No description provided");
 
-            let (status_text, status_color) = if res.status {
+            let is_pass = res.status == "PASS" || res.status == "true";
+
+            let (status_text, status_color) = if is_pass {
                 ("PASS", style::Color::Rgb(0, 128, 0))
             } else {
                 ("FAIL", style::Color::Rgb(200, 0, 0))
             };
+
 
             rules_table.push_row(vec![
                 Box::new(elements::Text::new(&res.test_name)),

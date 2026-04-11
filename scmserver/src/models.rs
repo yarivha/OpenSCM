@@ -279,7 +279,7 @@ pub struct SystemReport {
 #[derive(Serialize, Deserialize)]
 pub struct IndividualResult {
     pub test_name: String,
-    pub status: bool, // true = Pass, false = Fail
+    pub status: String, 
 }
 
 

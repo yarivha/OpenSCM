@@ -812,34 +812,43 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
     // Group results by System Name
     let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
     for row in result_rows {
-        // Use Option to handle cases where a system name might be NULL
         let system_name = row.get::<Option<String>, _>("system_name")
             .unwrap_or_else(|| "Unknown System".to_string());
-            
+
         let test_name: String = row.get("test_name");
-        let status_str: String = row.get("status");
-        let status = status_str.to_uppercase()  == "PASS";
+        let status_raw: String = row.get("status");
+
+        // 1. Determine the boolean state (handling old "true" and new "PASS")
+        let is_pass = status_raw.to_uppercase() == "PASS" || status_raw.to_lowercase() == "true";
+
+        // 2. Convert that back to the String the struct expects
+        let status = if is_pass { "PASS".to_string() } else { "FAIL".to_string() };
 
         system_map
             .entry(system_name)
             .or_insert_with(Vec::new)
-            .push(IndividualResult { test_name, status });
+            .push(IndividualResult { test_name, status }); // Now status is a String
     }
+
 
     // Convert the BTreeMap into a Vec<SystemReport>
     let system_reports: Vec<SystemReport> = system_map
     .into_iter()
     .map(|(name, results)| {
-        // A system is passed ONLY if all its results are true
-        let is_passed = results.iter().all(|r| r.status);
+        // A system is passed ONLY if all its results are "PASS"
+        // We compare the String to "PASS" to get the bool that .all() needs
+        let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "true");
 
         SystemReport {
             system_name: name,
             results,
-            is_passed, // Pass the pre-calculated value
+            is_passed, 
         }
     })
     .collect();
+
+
+    let fail_count = system_reports.iter().filter(|s| !s.is_passed).count();
 
 
     // Build context
@@ -854,8 +863,10 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
         system_reports, // Now this variable exists!
     };
 
+
     let mut context = Context::new();
     context.insert("report", &report_data);
+    context.insert("fail_count", &fail_count); 
     render_template(&tera,Some(&pool),"policies_report.html", context, Some(auth)).await.into_response()
 }
 
@@ -942,18 +953,36 @@ pub async fn policies_report_download(
     // Group results by System
     let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
     for row in result_rows {
-        let system_name = row.get::<Option<String>, _>("system_name").unwrap_or_else(|| "Unknown System".to_string());
+        let system_name = row.get::<Option<String>, _>("system_name")
+            .unwrap_or_else(|| "Unknown System".to_string());
+    
         let test_name: String = row.get("test_name");
         let status_str: String = row.get("status");
-        let status = status_str.to_lowercase() == "pass" || status_str == "true" || status_str == "1";
 
+        // 1. Calculate the boolean logic (supporting all legacy formats)
+        let is_pass = status_str.to_lowercase() == "pass" 
+                || status_str == "true" 
+                || status_str == "1";
+
+        // 2. Convert that boolean back to a String ("PASS" or "FAIL")
+        let status = if is_pass { "PASS".to_string() } else { "FAIL".to_string() };
+
+        // 3. Now the types match: String -> String
         system_map.entry(system_name).or_default().push(IndividualResult { test_name, status });
     }
 
+
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
-        let is_passed = results.iter().all(|r| r.status);
-        SystemReport { system_name: name, results, is_passed }
+        // We compare each result string to "PASS" to get a boolean
+        let is_passed = results.iter().all(|r| r.status == "PASS");
+
+        SystemReport { 
+            system_name: name, 
+            results, 
+            is_passed 
+        }
     }).collect();
+
 
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
@@ -1035,8 +1064,9 @@ pub async fn policies_report_download(
         doc.push(elements::Break::new(0.5));
 
         // System Compliance Summary
-        let compliant_count = system.results.iter().filter(|r| r.status).count();
+        let compliant_count = system.results.iter().filter(|r| r.status == "PASS" || r.status == "true").count();
         let violation_count = system.results.len() - compliant_count;
+
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
@@ -1066,13 +1096,17 @@ pub async fn policies_report_download(
             Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
         ]);
 
+
         for res in &system.results {
             let desc = report_data.tests_metadata.iter()
                 .find(|t| t.name == res.test_name)
                 .map(|t| t.description.as_str())
                 .unwrap_or("No description provided");
 
-            let (status_text, status_color) = if res.status {
+            // Compare the string to determine the boolean state for the IF block
+            let is_pass = res.status == "PASS" || res.status == "true";
+
+            let (status_text, status_color) = if is_pass {
                 ("PASS", style::Color::Rgb(0, 128, 0))
             } else {
                 ("FAIL", style::Color::Rgb(200, 0, 0))

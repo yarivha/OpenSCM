@@ -126,12 +126,12 @@
                         <i class="fas {% if is_editor %}fa-cog{% else %}fa-lock{% endif %}"></i>
                       </a>
 
-                      <a class="btn btn-sm {% if is_editor %}btn-outline-danger{% else %}btn-default disabled{% endif %} ml-1" 
-                      href="{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}"
-		      title="{% if not is_editor %}Editor permissions required{% else %}Delete Policy{% endif %}">
-                        <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                      <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                           onclick="{% if is_editor %}return confirm('Delete system?'){% else %}return false;{% endif %}" 
+                           href="{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}"
+                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
+                          <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                       </a>
-
                     </div>
                 </div>
               </div>
