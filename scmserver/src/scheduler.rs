@@ -15,6 +15,7 @@ use chrono::NaiveDateTime;
 use crate::models::ErrorQuery;
 use crate::models::ScheduledJob;
 use crate::models::ComplianceHistoryRow;
+use crate::models::Policy;
 use crate::auth::{self, UserRole, AuthSession};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
@@ -61,6 +62,45 @@ pub async fn scheduler(auth: AuthSession, Extension(pool): Extension<SqlitePool>
     // (Assuming you have a render function or template manager)
      render_template(&tera,Some(&pool), "scheduler.html", context, Some(auth)).await.into_response()
 }
+
+
+
+
+// scheduler_add
+pub async fn scheduler_add(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
+    -> impl IntoResponse { 
+    
+    // check authorization
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+     // Fetch users from the database
+    let rows = sqlx::query("SELECT id, name, version, description FROM policies")
+        .fetch_all(&*pool)
+        .await
+        .unwrap();
+
+    let policies: Vec<Policy> = rows.into_iter().map(|row| {
+        Policy {
+            id: row.get("id"),
+            name: row.get("name"),
+            version: row.get("version"),
+            description: row.get("description"),
+        }
+    }).collect();
+
+    // Prepare handler-specific context
+    let mut context = Context::new();
+    if let Some(error_message) = query.error_message {
+        context.insert("error_message", &error_message);
+    }
+
+    context.insert("policies", &policies);
+
+    render_template(&tera,Some(&pool), "scheduler_add.html", context, Some(auth)).await.into_response()
+}
+
 
 
 
