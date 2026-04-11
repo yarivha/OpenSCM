@@ -62,7 +62,7 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
                     tip.policy_id, 
                     r.system_id,
                     CASE 
-                        WHEN SUM(CASE WHEN r.result = 'false' THEN 1 ELSE 0 END) > 0 
+                        WHEN SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) > 0 
                             THEN 'failed' 
                         ELSE 'passed' 
                     END AS system_status
@@ -818,7 +818,7 @@ pub async fn policies_report(auth: AuthSession,  Path(id): Path<i32>,pool: Exten
             
         let test_name: String = row.get("test_name");
         let status_str: String = row.get("status");
-        let status = status_str == "true";
+        let status = status_str.to_uppercase()  == "PASS";
 
         system_map
             .entry(system_name)
