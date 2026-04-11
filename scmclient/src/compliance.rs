@@ -347,7 +347,7 @@ pub fn evaluate(
 
         "directory" => match selement_l.as_str() {
             "exists" => Path::new(input).is_dir(),
-            "not exits" => !Path::new(input).is_dir(),
+            "not exists" => !Path::new(input).is_dir(),
             _ => {
                 error!(
                     "Unsupported directory check: element={}, input={}, selement={}, condition={}, sinput={}",
