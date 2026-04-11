@@ -8,12 +8,16 @@
         <div class="col-sm-6">
           <h1><i class="fas fa-shield-alt mr-2 text-primary"></i>Security Policies</h1>
         </div>
-        <div class="col-sm-6 text-right">
-          <div class="btn-group">
-            <button type="button" id="grid-view-btn" class="btn btn-default btn-sm active"><i class="fas fa-th"></i></button>
-            <button type="button" id="list-view-btn" class="btn btn-default btn-sm"><i class="fas fa-list"></i></button>
-          </div>
-        </div>
+	<div class="col-sm-6 text-right">
+  	  <div class="btn-group">
+    	    <button type="button" id="grid-view-btn" class="btn btn-default btn-sm active" title="Grid View">
+      	      <i class="fas fa-th"></i>
+    	    </button>
+    	    <button type="button" id="list-view-btn" class="btn btn-default btn-sm" title="List View">
+      	      <i class="fas fa-list"></i>
+    	    </button>
+   	  </div>
+	</div>
       </div>
     </div>
   </section>
@@ -106,25 +110,25 @@
     
     		      <a class="btn btn-sm {% if is_viewer %}btn-outline-secondary{% else %}btn-default disabled{% endif %} ml-1" 
                       href="{% if is_viewer %}/policies/report/{{ policy.policy_id }}{% else %}#{% endif %}"
-                      title="{% if not is_viewer %}Viewer permissions required{% endif %}">
+		      title="{% if not is_viewer %}Viewer permissions required{% else %}View Report{% endif %}">
                         <i class="fas {% if is_viewer %}fa-chart-bar{% else %}fa-lock{% endif %}"></i>
                       </a>
 
                       <a class="btn btn-sm {% if is_runner %}btn-success{% else %}btn-default disabled{% endif %} ml-1" 
                       href="{% if is_runner %}/policies/run/{{ policy.policy_id }}{% else %}#{% endif %}"
-                      title="{% if not is_runner %}Runner permissions required{% endif %}">
+		      title="{% if not is_runner %}Runner permissions required{% else %}Run Policy Checks{% endif %}">
                         <i class="fas {% if is_runner %}fa-play{% else %}fa-lock{% endif %}"></i>
                       </a>
 
                       <a class="btn btn-sm {% if is_editor %}btn-info{% else %}btn-default disabled{% endif %} ml-1" 
                       href="{% if is_editor %}/policies/edit/{{ policy.policy_id }}{% else %}#{% endif %}"
-                      title="{% if not is_editor %}Editor permissions required{% endif %}">
+		      title="{% if not is_editor %}Editor permissions required{% else %}Edit Policy{% endif %}">
                         <i class="fas {% if is_editor %}fa-cog{% else %}fa-lock{% endif %}"></i>
                       </a>
 
                       <a class="btn btn-sm {% if is_editor %}btn-outline-danger{% else %}btn-default disabled{% endif %} ml-1" 
                       href="{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}"
-                      title="{% if not is_editor %}Editor permissions required{% endif %}">
+		      title="{% if not is_editor %}Editor permissions required{% else %}Delete Policy{% endif %}">
                         <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                       </a>
 
@@ -139,4 +143,39 @@
     </div>
   </section>
 </div>
+{% endblock %}
+
+
+{% block scripts %}
+<script>
+  $(function () {
+    const container = $('#policy-container');
+
+    $('#list-view-btn').on('click', function() {
+      // Toggle button active states
+      $(this).addClass('active').siblings().removeClass('active');
+
+      // Apply List View CSS logic
+      container.addClass('list-view');
+
+      // Force cards to full width
+      container.find('.policy-card-item')
+               .removeClass('col-md-4 col-sm-6')
+               .addClass('col-12');
+    });
+
+    $('#grid-view-btn').on('click', function() {
+      // Toggle button active states
+      $(this).addClass('active').siblings().removeClass('active');
+
+      // Remove List View CSS logic
+      container.removeClass('list-view');
+
+      // Restore Grid columns
+      container.find('.policy-card-item')
+               .removeClass('col-12')
+               .addClass('col-md-4 col-sm-6');
+    });
+  });
+</script>
 {% endblock %}
