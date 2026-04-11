@@ -141,6 +141,33 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+
+
+     // Create policy schedules table
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS policy_schedules (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        policy_id INTEGER NOT NULL UNIQUE, -- This UNIQUE keyword is the fix
+        enabled BOOLEAN NOT NULL DEFAULT 1,
+        frequency TEXT NOT NULL,
+        cron_expression TEXT,
+        next_run DATETIME NOT NULL,
+        last_run DATETIME,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_next_run ON policy_schedules (enabled, next_run)",
+    )
+    .execute(pool)
+    .await?;
+
+
     // Create tests_in_policy table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tests_in_policy (
