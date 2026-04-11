@@ -123,10 +123,18 @@
                         <small class="text-muted">Version: {{ pol.policy_version }}</small>
                       </td>
                       <td class="text-center">
-                        <span class="badge {% if pol.compliance < 50 %}bg-danger{% else %}bg-warning{% endif %} px-2 py-1">
-                          {{ pol.compliance }}%
-                        </span>
-                      </td>
+  			<div class="progress-wrapper" style="width: 80px; margin: 0 auto;">
+    			  <div class="progress progress-xxs mb-1">
+      			    <div class="progress-bar 
+        		    {% if pol.compliance >= 80 %}bg-success
+        		    {% elif pol.compliance >= 50 %}bg-warning
+        		    {% else %}bg-danger{% endif %}" 
+        		    style="width: {{ pol.compliance }}%">
+      			    </div>
+    			  </div>
+    			  <small class="font-weight-bold">{{ pol.compliance }}%</small>
+  		        </div>
+		      </td>
                       <td class="text-center">
                          <span class="text-success">{{ pol.systems_passed }} <i class="fas fa-check-circle"></i></span>
                          <span class="text-muted mx-1">/</span>
@@ -167,7 +175,7 @@
                       </td>
                       <td class="text-center">
                         <div class="progress progress-xxs mt-1 mb-1" style="width: 60px; margin: 0 auto;">
-                          <div class="progress-bar {% if sys.compliance < 50 %}bg-danger{% else %}bg-warning{% endif %}" style="width: {{ sys.compliance }}%"></div>
+                          <div class="progress-bar {% if sys.compliance >= 80 %}bg-success{% elif sys.compliance >= 50 %}bg-warning{% else %}bg-danger{% endif %}" style="width: {{ sys.compliance }}%"></div>  
                         </div>
                         <small class="font-weight-bold">{{ sys.compliance }}%</small>
                       </td>

@@ -107,8 +107,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
         scores.push(rec.global_score); 
     }
 
-
-
+    let current_global_score = scores.last().cloned().unwrap_or(0.0);
+    let formatted_score = format!("{:.1}", current_global_score);
 
     if let Some(msg) = &params.error_message {
         context.insert("error_message", msg);
@@ -116,6 +116,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
     if let Some(msg) = &params.success_message {
         context.insert("success_message", msg);
     }
+    context.insert("global_score", &formatted_score);
     context.insert("systems_count", &systems_count.to_string());
     context.insert("policies_count", &policies_count.to_string());
     context.insert("reports_count", &reports_count.to_string());
