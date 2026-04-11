@@ -1,34 +1,17 @@
 {% extends "base.html" %}
 
-{% block styles %}
-<style>
-  /* Dark Mode support */
-  .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
-  .dark-mode .card-footer { background-color: rgba(0,0,0,.2) !important; border-top: 1px solid #4b545c; }
-  .dark-mode .text-muted { color: #adb5bd !important; }
-
-  /* Grid/List Toggle Logic */
-  .list-view .policy-card-item { flex: 0 0 100% !important; max-width: 100% !important; }
-  .list-view .policy-card-content { flex-direction: row !important; }
-  .list-view .cert-icon-col { border-left: 1px solid #dee2e6; margin-left: 15px; }
-  .dark-mode .list-view .cert-icon-col { border-left-color: #4b545c; }
-  
-  .hover-zoom:hover { transform: scale(1.1); transition: transform 0.2s; }
-</style>
-{% endblock %}
-
 {% block content %}
 <div class="content-wrapper">
   <section class="content-header">
     <div class="container-fluid">
       <div class="row mb-2">
         <div class="col-sm-6">
-          <h1>Security Policies</h1>
+          <h1><i class="fas fa-shield-alt mr-2 text-primary"></i>Security Policies</h1>
         </div>
         <div class="col-sm-6 text-right">
           <div class="btn-group">
-            <button type="button" id="grid-view-btn" class="btn btn-default btn-sm active" title="Grid View"><i class="fas fa-th"></i></button>
-            <button type="button" id="list-view-btn" class="btn btn-default btn-sm" title="List View"><i class="fas fa-list"></i></button>
+            <button type="button" id="grid-view-btn" class="btn btn-default btn-sm active"><i class="fas fa-th"></i></button>
+            <button type="button" id="list-view-btn" class="btn btn-default btn-sm"><i class="fas fa-list"></i></button>
           </div>
         </div>
       </div>
@@ -36,35 +19,20 @@
   </section>
 
   <section class="content">
-   <div class="container-fluid">
-  
-     {% if error_message %}
-     <div class="alert alert-danger alert-dismissible shadow-sm">
-       <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
-       <h5><i class="icon fas fa-ban"></i> Attention</h5>
-       {{ error_message }}
-     </div>
-     {% endif %}
-
-     {% if success_message %}
-     <div class="alert alert-success alert-dismissible shadow-sm">
-       <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
-       <h5><i class="icon fas fa-check"></i> Done</h5>
-       {{ success_message }}
-     </div>
-     {% endif %}
-
-   </div>
-
+    <div class="container-fluid">
       <div class="card card-solid card-outline card-primary shadow-sm">
         <div class="card-header">
           <h3 class="card-title">Policy Overview</h3>
           <div class="card-tools">
-            <a href="{% if is_editor %}/policies/add{% else %}#{% endif %}" 
-               class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}"
-               {% if not is_editor %}title="Editor permissions required"{% endif %}>
-              <i class="fas {% if is_editor %}fa-shield-alt{% else %}fa-lock{% endif %} mr-1"></i> New Policy
+            {% if is_editor %}
+            <a href="/policies/add" class="btn btn-primary btn-sm">
+              <i class="fas fa-plus mr-1"></i> New Policy
             </a>
+            {% else %}
+            <button class="btn btn-secondary btn-sm disabled" title="Editor permissions required">
+              <i class="fas fa-lock mr-1"></i> New Policy
+            </button>
+            {% endif %}
           </div>
         </div>
 
@@ -86,44 +54,62 @@
                         {{ policy.policy_description | truncate(length=85) }}
                       </p>
                       
-                      <ul class="ml-0 mb-0 fa-ul text-muted text-xs">
-                        <li><span class="fa-li"><i class="fas fa-tasks"></i></span> <b>Checks:</b> {{ policy.test_count | default(value="0") }}</li>
-                        <li><span class="fa-li"><i class="fas fa-server"></i></span> <b>Groups:</b> {{ policy.system_count | default(value="0") }}</li>
-                      </ul>
-
                       <div class="mt-3">
-                        {% if policy.compliance == -1.0 %}
-                          <small class="text-muted text-xs font-weight-bold">NOT SCANNED</small>
-                          <div class="progress progress-xxs mt-1"><div class="progress-bar bg-secondary" style="width: 100%"></div></div>
-                        {% else %}
-                          <div class="d-flex justify-content-between text-xs font-weight-bold mb-1">
-                             <span>COMPLIANCE</span>
-                             <span>{{ policy.compliance }}%</span>
+                        <div class="d-flex justify-content-between text-xs font-weight-bold mb-1">
+                          <span>COMPLIANCE</span>
+                          <span>{{ policy.compliance }}%</span>
+                        </div>
+                        <div class="progress progress-xxs">
+                          <div class="progress-bar 
+                            {% if policy.compliance >= 80 %}bg-success
+                            {% elif policy.compliance >= 50 %}bg-warning
+                            {% else %}bg-danger{% endif %}" 
+                            style="width: {{ policy.compliance }}%">
                           </div>
-                          <div class="progress progress-xxs"><div class="progress-bar {% if policy.compliance < 50 %}bg-danger{% elif policy.compliance < 80 %}bg-warning{% else %}bg-success{% endif %}" style="width: {{ policy.compliance }}%"></div></div>
-                        {% endif %}
+                        </div>
                       </div>
                     </div>
 
                     <div class="col-5 text-center d-flex align-items-center justify-content-center cert-icon-col">
+                      {% if is_viewer %}
                       <a href="/policies/report/{{ policy.policy_id }}" class="hover-zoom">
                         <i class="fas fa-certificate fa-4x 
-                          {% if policy.compliance == -1.0 %} text-secondary opacity-50
-                          {% elif policy.compliance < 50 %} text-danger
-                          {% elif policy.compliance < 80 %} text-warning
-                          {% else %} text-success {% endif %}">
+                          {% if policy.compliance >= 80 %}text-success
+                          {% elif policy.compliance >= 50 %}text-warning
+                          {% else %}text-danger{% endif %}">
                         </i>
                       </a>
+                      {% else %}
+                        <i class="fas fa-lock fa-3x text-muted opacity-50" title="Viewer permissions required"></i>
+                      {% endif %}
                     </div>
                   </div>
                 </div>
 
                 <div class="card-footer p-2">
                   <div class="text-right">
-                    <a class="btn btn-outline-secondary btn-sm" href="/policies/report/{{ policy.policy_id }}"><i class="fas fa-chart-bar"></i></a>
-                    <a class="btn btn-success btn-sm ml-1" href="/policies/run/{{ policy.policy_id }}"><i class="fas fa-play"></i></a>
-                    <a class="btn btn-info btn-sm ml-1" href="/policies/edit/{{ policy.policy_id }}"><i class="fas fa-cog"></i></a>
-                    <a class="btn btn-outline-danger btn-sm ml-1" href="/policies/delete/{{ policy.policy_id }}"><i class="fas fa-trash"></i></a>
+                    
+                    {% if is_viewer %}
+                    <a class="btn btn-outline-secondary btn-sm" href="/policies/report/{{ policy.policy_id }}" title="View Report">
+                      <i class="fas fa-chart-bar"></i>
+                    </a>
+                    {% endif %}
+
+                    {% if is_runner %}
+                    <a class="btn btn-success btn-sm ml-1" href="/policies/run/{{ policy.policy_id }}" title="Run Now">
+                      <i class="fas fa-play"></i>
+                    </a>
+                    {% endif %}
+
+                    {% if is_editor %}
+                    <a class="btn btn-info btn-sm ml-1" href="/policies/edit/{{ policy.policy_id }}" title="Edit">
+                      <i class="fas fa-cog"></i>
+                    </a>
+                    <a class="btn btn-outline-danger btn-sm ml-1" href="/policies/delete/{{ policy.policy_id }}" title="Delete">
+                      <i class="fas fa-trash"></i>
+                    </a>
+                    {% endif %}
+
                   </div>
                 </div>
               </div>
@@ -135,25 +121,4 @@
     </div>
   </section>
 </div>
-{% endblock %}
-
-{% block scripts %}
-<script>
-  $(function () {
-    const container = $('#policy-container');
-    const items = container.find('.policy-card-item');
-
-    $('#list-view-btn').on('click', function() {
-      $(this).addClass('active').siblings().removeClass('active');
-      container.addClass('list-view');
-      items.removeClass('col-md-4 col-sm-6').addClass('col-12');
-    });
-
-    $('#grid-view-btn').on('click', function() {
-      $(this).addClass('active').siblings().removeClass('active');
-      container.removeClass('list-view');
-      items.removeClass('col-12').addClass('col-md-4 col-sm-6');
-    });
-  });
-</script>
 {% endblock %}
