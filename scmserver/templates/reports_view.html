@@ -87,9 +87,10 @@
                       <small class="text-uppercase text-muted text-xs">Systems</small>
                     </div>
                     <div class="col-6">
-                      {% set fail_count = 0 %}
-                      {% for s in report.system_reports %}{% if not s.is_passed %}{% set fail_count = fail_count + 1 %}{% endif %}{% endfor %}
-                      <h3 class="{% if fail_count > 0 %}text-danger{% else %}text-success{% endif %} mb-0">{{ fail_count }}</h3>
+    		      {% set fail_count = report.system_reports | filter(attribute="is_passed", value=false) | length %}
+                      <h3 class="{% if fail_count > 0 %}text-danger{% else %}text-success{% endif %} mb-0">
+                        {{ fail_count }}
+                      </h3>
                       <small class="text-uppercase text-muted text-xs">Failures</small>
                     </div>
                   </div>
@@ -128,8 +129,8 @@
               <tr>
                 <td style="padding-left: 20px;">{{ res.test_name }}</td>
                 <td class="text-center">
-                  {% if res.status %}
-                    <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i> OK</span>
+                  {% if res.status == "PASS" %}
+                    <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i> PASS</span>
                   {% else %}
                     <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i> FAIL</span>
                   {% endif %}

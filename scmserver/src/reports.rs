@@ -246,7 +246,8 @@ pub async fn reports_view(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
-
+    
+    let fail_count = system_reports.iter().filter(|s| !s.is_passed).count();
 
     // 3. Reconstruct the ReportData for the template
     let report_data = ReportData {
@@ -263,7 +264,7 @@ pub async fn reports_view(
     // 4. Render using the same template
     let mut context = Context::new();
     context.insert("report", &report_data);
-    
+    context.insert("fail_count", &fail_count); 
     render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth)).await.into_response()
 }
 
