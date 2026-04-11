@@ -34,7 +34,6 @@ use crate::scheduler::*;
 use crate::users::*;
 use crate::settings::*;
 
-
 // Embedded templates/static files
 static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");
 static STATIC_FILES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/static");
@@ -97,7 +96,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Connecting database at '{}'...", config.database.path);
     let db_path = PathBuf::from(&config.database.path);
     
-    // Ensure the directory for the DB exists (usually C:\ProgramData\OpenSCM\Server)
+    // Ensure the directory for the DB exists
     if let Some(parent) = db_path.parent() {
         std::fs::create_dir_all(parent)?;
     }
@@ -115,12 +114,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
     sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
     initialize_database(&pool).await?;
 
-    // 4. Template Engine
+    // ---------------------------------------------------------
+    // 4. Background Scheduler Initialization
+    // ---------------------------------------------------------
+    // Start the background worker for daily compliance snapshots
+    // This allows the dashboard trend graph to populate automatically.
+    crate::scheduler::start_background_scheduler(pool.clone()).await;
+
+    // 5. Template Engine
     info!("Loading Server Templates");
     let tera = Arc::new(init_tera()?);
     let config = Arc::new(config);
 
-    // 5. Routes
+    // 6. Routes
     let app = Router::new()
         .route("/", get(dashboard))
         .route("/login", get(login).post(login_submit))
