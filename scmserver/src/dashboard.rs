@@ -92,7 +92,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
             "SELECT strftime('%m-%Y', check_date) as check_date, AVG(global_score) as global_score, AVG(policy_score) as policy_score
             FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
         _ => // daily (default)
-            "SELECT check_date, global_score, policy_score
+            "SELECT strftime('%m-%d %H:%M', check_date) as check_date, global_score, policy_score 
             FROM compliance_history ORDER BY id DESC LIMIT 14"
     };
 
