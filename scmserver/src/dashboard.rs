@@ -4,6 +4,7 @@ use axum::extract::{Extension, Query};
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
+use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
 
@@ -18,12 +19,20 @@ use crate::handlers::render_template;
 
 
 
-/////////////////////////////////// Handlers Functions /////////////////////////////////
+#[derive(serde::Deserialize)]
+pub struct DashboardParams {
+    pub error_message: Option<String>,
+    pub success_message: Option<String>,
+    pub range: Option<String>,
+}
+
 
 // dashboard
-// dashboard
-pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
+pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
     -> impl IntoResponse {
+
+    
+    let range = params.range.clone().unwrap_or_else(|| "daily".to_string()).to_lowercase();
 
     let mut context = Context::new();
     
@@ -71,16 +80,31 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
     ).fetch_all(&*pool).await.map_err(|e| { error!("{}", e); StatusCode::INTERNAL_SERVER_ERROR })?; 
 
     // 4. Fetch History including POLICY_SCORE
-    // Note: ensure your ComplianceHistoryRow struct has the policy_score field!
-    let history = sqlx::query_as::<_, ComplianceHistoryRow>(
-        "SELECT check_date, global_score, policy_score FROM compliance_history ORDER BY id DESC LIMIT 10"
-    )
-    .fetch_all(&*pool)
-    .await
-    .map_err(|e| {
-        error!("Failed to fetch compliance history: {}", e); 
-        StatusCode::INTERNAL_SERVER_ERROR
-    })?;
+    
+    let history_query = match range.as_str() {
+        "yearly" =>
+            "SELECT strftime('%Y', check_date) as check_date, AVG(global_score) as global_score, AVG(policy_score) as policy_score
+            FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 10",
+        "weekly" =>
+            "SELECT strftime('%Y-W%W', check_date) as check_date, AVG(global_score) as global_score, AVG(policy_score) as policy_score
+            FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
+        "monthly" =>
+            "SELECT strftime('%m-%Y', check_date) as check_date, AVG(global_score) as global_score, AVG(policy_score) as policy_score
+            FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
+        _ => // daily (default)
+            "SELECT check_date, global_score, policy_score
+            FROM compliance_history ORDER BY id DESC LIMIT 14"
+    };
+
+    
+    let history = sqlx::query_as::<_, ComplianceHistoryRow>(history_query)
+        .fetch_all(&*pool)
+        .await
+        .map_err(|e| {
+            error!("Failed to fetch compliance history: {}", e);
+            StatusCode::INTERNAL_SERVER_ERROR
+        })?;
+
 
     let mut labels = Vec::new();
     let mut scores = Vec::new();
@@ -95,14 +119,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
     let current_global_score = scores.last().cloned().unwrap_or(0.0);
     let formatted_score = format!("{:.1}", current_global_score);
 
-    // 5. Fill Context
-    if let Some(msg) = &params.error_message {
-        context.insert("error_message", msg);
-    }
-    if let Some(msg) = &params.success_message {
-        context.insert("success_message", msg);
-    }
-
+    context.insert("range", &range);
     context.insert("global_score", &formatted_score);
     context.insert("systems_count", &systems_count);
     context.insert("pending_count", &pending_count); // Added for the red/green box
@@ -115,6 +132,16 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
     context.insert("trend_labels", &labels);
     context.insert("trend_scores", &scores);
     context.insert("trend_policy_scores", &policy_scores); // THE MISSING VARIABLE FIXED
+
+
+    // 5. Fill Context
+    if let Some(msg) = &params.error_message {
+        context.insert("error_message", msg);
+    }
+    if let Some(msg) = &params.success_message {
+        context.insert("success_message", msg);
+    }
+
 
     render_template(&tera, Some(&pool), "dashboard.html", context, Some(auth)).await
 }

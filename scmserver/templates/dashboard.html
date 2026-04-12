@@ -85,7 +85,12 @@
             <div class="card-header">
               <h3 class="card-title font-weight-bold"><i class="fas fa-chart-line mr-2"></i>Compliance Trend</h3>
               <div class="card-tools">
-                <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
+                <div class="btn-group btn-group-toggle" data-toggle="buttons">
+                  <a href="/?range=daily" class="btn btn-sm btn-outline-primary {% if range == 'daily' %}active{% endif %}">Daily</a>
+                  <a href="/?range=weekly" class="btn btn-sm btn-outline-primary {% if range == 'weekly' %}active{% endif %}">Weekly</a>
+                  <a href="/?range=monthly" class="btn btn-sm btn-outline-primary {% if range == 'monthly' %}active{% endif %}">Monthly</a>
+		  <a href="/?range=yearly" class="btn btn-sm btn-outline-primary {% if range == 'yearly' %}active{% endif %}">Yearly</a>
+                </div>
               </div>
             </div>
             <div class="card-body">
