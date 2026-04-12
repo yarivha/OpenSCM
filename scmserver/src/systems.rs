@@ -668,6 +668,18 @@ pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: 
         return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
 
+
+    // RECALCULATE GLOBAL SCORES
+    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+        // We log the error but don't stop the redirect, 
+        // as the system was already successfully deleted.
+        error!("Failed to update compliance scores after system deletion: {}", e);
+    }
+
+    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+
+
+
     Redirect::to("/system_groups").into_response()
 }
 
@@ -855,6 +867,17 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
         let encoded_message = urlencoding::encode(&error_message);
         return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
     }
+
+
+    // RECALCULATE GLOBAL SCORES
+    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+        // We log the error but don't stop the redirect, 
+        // as the system was already successfully deleted.
+        error!("Failed to update compliance scores after system deletion: {}", e);
+    }
+
+    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+    
 
     Redirect::to("/system_groups").into_response()
 }

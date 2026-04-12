@@ -6,7 +6,7 @@ use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
 use urlencoding;
-use tracing::error;
+use tracing::{info, warn,error};
 use bytes::Bytes;
 
 use crate::models::ErrorQuery;
@@ -668,6 +668,17 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
         let encoded_message = urlencoding::encode(&error_message);
         return Redirect::to(&format!("/tests?error_message={}", encoded_message)).into_response();
     }
+
+
+    // RECALCULATE GLOBAL SCORES
+    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+        // We log the error but don't stop the redirect, 
+        // as the system was already successfully deleted.
+        error!("Failed to update compliance scores after system deletion: {}", e);
+    }
+
+    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+
 
     Redirect::to("/tests").into_response()
 }

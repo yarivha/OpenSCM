@@ -8,7 +8,7 @@ use std::sync::Arc;
 use std::fs;
 use urlencoding;
 use std::collections::BTreeMap;
-use tracing::error;
+use tracing::{info, warn,error};
 use chrono::Local;
 use genpdf::{fonts, elements, style, Element};
 
@@ -515,6 +515,17 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", urlencoding::encode(&e.to_string()))).into_response();
     }
 
+
+    // RECALCULATE GLOBAL SCORES
+    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+        // We log the error but don't stop the redirect, 
+        // as the system was already successfully deleted.
+        error!("Failed to update compliance scores after system deletion: {}", e);
+    }
+
+    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+
+
     Redirect::to("/policies").into_response()
 }
 
@@ -559,6 +570,17 @@ pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Exten
         let encoded_message = urlencoding::encode(&error_message);
         return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
+
+
+    // RECALCULATE GLOBAL SCORES
+    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+        // We log the error but don't stop the redirect, 
+        // as the system was already successfully deleted.
+        error!("Failed to update compliance scores after system deletion: {}", e);
+    }
+
+    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+
 
     Redirect::to("/policies").into_response()
 }
