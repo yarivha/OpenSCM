@@ -14,6 +14,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             type TEXT,
             timestamp TEXT,
+            owner_id INTEGER,
             message TEXT NOT NULL
         )",
     )

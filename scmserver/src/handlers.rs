@@ -157,5 +157,23 @@ pub async fn not_found() -> impl IntoResponse {
 }
 
 
+/// Creates a notification entry for a specific owner or the system
+pub async fn add_notification(pool: &sqlx::SqlitePool, n_type: &str, owner_id: i32, message: &str) {
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M").to_string();
+    
+    let result = sqlx::query(
+        "INSERT INTO notify (type, timestamp, owner_id, message) VALUES (?, ?, ?, ?)"
+    )
+    .bind(n_type)
+    .bind(now)
+    .bind(owner_id) 
+    .bind(message)
+    .execute(pool)
+    .await;
+
+    if let Err(e) = result {
+        error!("Failed to insert notification: {}", e);
+    }
+}
 
 

@@ -6,6 +6,8 @@ use tracing::{info,warn,error};
 
 use crate::models::PolicySchedule;
 use crate::policies::execute_policy_run_logic;
+use crate::handlers::add_notification;
+
 
 /// Internal helper for date math
 fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
@@ -121,15 +123,19 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                         .bind(schedule.id)
                         .execute(&loop_pool)
                         .await;
-
+                    
                         if let Err(e) = update_res {
                             error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
                         } else {
-                            info!("Policy {} scheduled next for: {}", schedule.policy_id, next_run_time);
+                            let msg = format!("Scheduled scan successfully initiated for Policy ID: {}", schedule.policy_id);
+                            info!("{}",&msg);
+                            add_notification(&loop_pool, "success", 0, &msg).await;
                         }
                     },
                     Err(e) => {
                         error!("Scheduled execution failed for policy {}: {}", schedule.policy_id, e);
+                        let msg = format!("Automation Error: Failed to run Policy ID {}. Error: {}", schedule.policy_id, e);
+                        add_notification(&loop_pool, "error", 0, &msg).await;
                     }
                 }
             }
