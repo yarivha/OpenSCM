@@ -187,7 +187,7 @@
                         <div class="progress progress-xxs mt-1 mb-1" style="width: 60px; margin: 0 auto;">
                           <div class="progress-bar {% if sys.compliance >= 80 %}bg-success{% elif sys.compliance >= 50 %}bg-warning{% else %}bg-danger{% endif %}" style="width: {{ sys.compliance }}%"></div>  
                         </div>
-                        <small class="font-weight-bold">{{ sys.compliance }}%</small>
+                        <small class="font-weight-bold">{{ sys.compliance | round(precision=2) }}%</small>
                       </td>
                       <td class="text-center">
                         <small class="text-success font-weight-bold">{{ sys.tests_passed }} OK</small> / 
