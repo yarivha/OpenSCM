@@ -9,10 +9,14 @@ use urlencoding;
 use std::collections::HashMap;
 use urlencoding::decode;
 use tracing::{info,warn,error};
+use chrono::{Utc, Timelike};
+
+
 use crate::models::Notification;
 use crate::auth::UserRole;
 use crate::auth::AuthSession;
-
+use crate::models::PolicySchedule;
+use crate::policies::execute_policy_run_logic;
 
 
 //////////////////////////////// Helper Functions ///////////////////////////////////
@@ -155,75 +159,3 @@ pub async fn not_found() -> impl IntoResponse {
 
 
 
-pub async fn capture_compliance_snapshot(pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
-    info!("Starting full compliance aggregation...");
-
-    // 1. Update TEST stats - changed scan_results to results
-    sqlx::query(r#"
-        UPDATE tests SET
-            systems_passed = (SELECT COUNT(*) FROM results WHERE test_id = tests.id AND result = 'PASS'),
-            systems_failed = (SELECT COUNT(*) FROM results WHERE test_id = tests.id AND result = 'FAIL'),
-            compliance_score = (
-                SELECT CASE WHEN COUNT(*) = 0 THEN 100.0
-                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END FROM results WHERE test_id = tests.id
-            )
-    "#).execute(pool).await?;
-
-    // 2. Update SYSTEM stats - changed scan_results to results
-    sqlx::query(r#"
-        UPDATE systems SET
-            tests_passed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'),
-            tests_failed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'FAIL'),
-            total_tests  = (SELECT COUNT(*) FROM results WHERE system_id = systems.id),
-            compliance_score = (
-                SELECT CASE WHEN COUNT(*) = 0 THEN 0.0
-                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END FROM results WHERE system_id = systems.id
-            )
-    "#).execute(pool).await?;
-
-    // 3. Global Stats for Trend Graph
-    let stats = sqlx::query("SELECT AVG(compliance_score) as avg_score, COUNT(*) as sys_count FROM systems")
-        .fetch_one(pool).await?;
-
-    sqlx::query("INSERT INTO compliance_history (global_score, total_systems, failed_systems)
-                 VALUES (?, ?, (SELECT COUNT(*) FROM systems WHERE compliance_score < 100))")
-        .bind(stats.try_get::<f64, _>("avg_score").unwrap_or(0.0))
-        .bind(stats.try_get::<i32, _>("sys_count").unwrap_or(0))
-        .execute(pool).await?;
-
-    Ok(())
-}
-
-
-
-
-// This matches the function name you built for the trend table
-pub async fn start_background_scheduler(pool: SqlitePool) {
-    // 1. Run once immediately on startup
-    // This ensures your graph has at least one dot as soon as you open the dashboard
-    let startup_pool = pool.clone();
-    tokio::spawn(async move {
-        info!("Initiating startup compliance snapshot...");
-        if let Err(e) = capture_compliance_snapshot(&startup_pool).await {
-            error!("Startup compliance snapshot failed: {}", e);
-        }
-    });
-
-    // 2. Set the 24-hour loop
-    let mut interval = time::interval(Duration::from_secs(86400));
-
-    // Skip the first tick of the interval because we handled it above
-    interval.tick().await;
-
-    tokio::spawn(async move {
-        loop {
-            interval.tick().await;
-            info!("Running scheduled daily compliance aggregation...");
-            if let Err(e) = capture_compliance_snapshot(&pool).await {
-                error!("Daily scheduler task failed: {}", e);
-            }
-        }
-    });
-}

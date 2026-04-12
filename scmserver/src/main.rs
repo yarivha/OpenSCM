@@ -11,6 +11,7 @@ mod policies;
 mod reports;
 mod users;
 mod settings;
+mod scheduler;
 
 use tera::Tera;
 use axum::{Extension, Router, response::{Response, IntoResponse}, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
@@ -31,6 +32,8 @@ use crate::policies::*;
 use crate::reports::*;
 use crate::users::*;
 use crate::settings::*;
+use crate::scheduler::*;
+
 
 // Embedded templates/static files
 static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");
@@ -117,7 +120,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // ---------------------------------------------------------
     // Start the background worker for daily compliance snapshots
     // This allows the dashboard trend graph to populate automatically.
-    crate::handlers::start_background_scheduler(pool.clone()).await;
+    crate::scheduler::start_background_scheduler(pool.clone()).await;
 
     // 5. Template Engine
     info!("Loading Server Templates");

@@ -188,7 +188,7 @@ pub async fn systems_delete(
     // 3. RECALCULATE GLOBAL SCORES
     // We call the scheduler's snapshot function to update the 'tests' table 
     // and 'compliance_history' now that one system's data is gone.
-    if let Err(e) = crate::handlers::capture_compliance_snapshot(&pool).await {
+    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
         // We log the error but don't stop the redirect, 
         // as the system was already successfully deleted.
         error!("Failed to update compliance scores after system deletion: {}", e);

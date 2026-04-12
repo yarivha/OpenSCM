@@ -569,53 +569,25 @@ pub async fn policies_run(
     Path(id): Path<i32>,
     pool: Extension<SqlitePool>
 ) -> impl IntoResponse {
-    
 
-     // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
        return redir;
     }
 
-
-    let mut tx = match pool.begin().await {
-        Ok(tx) => tx,
+    // Call the shared logic
+    match execute_policy_run_logic(id, &pool).await {
+        Ok(_) => Redirect::to("/policies?success_message=Policy run successfully").into_response(),
         Err(e) => {
-            let error_message = format!("Database error: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
+            let msg = format!("Error running policy: {}", e);
+            let encoded_message = urlencoding::encode(&msg).to_string();
+            Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response()
         }
-    };
 
-    // Insert commands for all system × test combinations
-    if let Err(e) = sqlx::query(
-        r#"
-        INSERT OR IGNORE INTO commands (system_id, test_id)
-        SELECT sig.system_id, tip.test_id
-        FROM systems_in_policy sip
-        JOIN systems_in_groups sig ON sip.group_id = sig.group_id
-        JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
-        WHERE sip.policy_id = ?
-        "#
-    )
-    .bind(id)
-    .execute(&mut *tx)
-    .await
-    {
-        let error_message = format!("Error running policy: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok();
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
     }
-
-    // Commit transaction
-    if let Err(e) = tx.commit().await {
-        let error_message = format!("Database commit error: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/policies?error_message={}", encoded_message)).into_response();
-    }
-
-    Redirect::to("/policies?success_message=Policy run successfully").into_response()
 }
+
+
+
 
 
 // policies_report
@@ -1030,3 +1002,27 @@ pub async fn policies_report_download(
         .unwrap()
         .into_response()
 }
+
+
+
+// Internal logic that actually triggers the scan
+pub async fn execute_policy_run_logic(id: i32, pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        r#"
+        INSERT OR IGNORE INTO commands (system_id, test_id)
+        SELECT sig.system_id, tip.test_id
+        FROM systems_in_policy sip
+        JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+        JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
+        WHERE sip.policy_id = ?
+        "#
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
+
+
