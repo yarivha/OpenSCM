@@ -1,6 +1,7 @@
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::http::StatusCode;
 use axum::extract::{RawForm, Extension, Query, Path};
+use axum::Form;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
@@ -10,6 +11,8 @@ use urlencoding;
 use tracing::error;
 use bytes::Bytes;
 use bcrypt::{hash, DEFAULT_COST};
+use serde::Deserialize;
+
 
 use crate::models::ErrorQuery;
 use crate::models::User;
@@ -204,12 +207,17 @@ pub async fn users_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extensio
 }   
 
 
+#[derive(serde::Deserialize)]
+pub struct UserEditParams {
+    pub error_message: Option<String>,
+    pub success_message: Option<String>,
+}
 
-pub async fn users_edit(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
+
+pub async fn users_edit(auth: AuthSession, Path(id): Path<i32>, Query(params): Query<UserEditParams>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
     -> impl IntoResponse {
 
     let current_role = UserRole::from(auth.role.as_str());
-
     let is_admin = current_role >= UserRole::Admin;
     let is_owner = auth.userid == id;
 
@@ -257,6 +265,12 @@ pub async fn users_edit(auth: AuthSession, Path(id): Path<i32>, pool: Extension<
 
 
     let mut context = Context::new();
+    if let Some(msg) = &params.error_message {
+        context.insert("error_message", msg);
+    }
+    if let Some(msg) = &params.success_message {
+        context.insert("success_message", msg);
+    }
     context.insert("user", &user);
     render_template(&tera,Some(&pool), "users_edit.html", context, Some(auth)).await.into_response()
 }
@@ -264,7 +278,7 @@ pub async fn users_edit(auth: AuthSession, Path(id): Path<i32>, pool: Extension<
 
 
 
-// system_edit_save
+// users_edit_save
 pub async fn users_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) -> impl IntoResponse {
     
      let current_role = UserRole::from(auth.role.as_str());
@@ -350,3 +364,63 @@ pub async fn users_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
 
 
 
+
+#[derive(Deserialize)]
+pub struct ChangePasswordForm {
+    pub password1: String,
+    pub password2: String,
+}
+
+
+pub async fn change_password(
+    auth: AuthSession,
+    pool: Extension<SqlitePool>,
+    Path(user_id): Path<i64>,
+    Form(payload): Form<ChangePasswordForm>,
+) -> impl IntoResponse {
+
+    // 1. Check if the user is authorized to change this specific password
+    // (User can change their own, or an Admin can change anyone's)
+    let current_role = UserRole::from(auth.role.as_str());
+
+    // 2. Now perform the comparison using the converted enum
+    if auth.userid as i64 != user_id && current_role < UserRole::Admin {
+        return Redirect::to(&format!("/?error_message=Access Denied"));
+    }
+
+
+    // 2. Match Validation
+    if payload.password1 != payload.password2 {
+        return Redirect::to(&format!("/users/edit/{}?error_message=Passwords do not match", user_id));
+    }
+
+    // 3. Length Validation (Per your UI info-box)
+    if payload.password1.len() < 8 {
+        return Redirect::to(&format!("/users/edit/{}?error_message=Password must be at least 8 characters", user_id));
+    }
+
+    // 4. Hashing with Bcrypt
+    // DEFAULT_COST = 12. Increase this if you want to make it harder to brute force.
+    let hashed_password = match hash(&payload.password1, DEFAULT_COST) {
+        Ok(h) => h,
+        Err(_) => return Redirect::to(&format!("/users/edit/{}?error_message=Encryption error", user_id)),
+    };
+
+    // 5. Update Database
+    let result = sqlx::query("UPDATE users SET password = ? WHERE id = ?")
+        .bind(hashed_password)
+        .bind(user_id)
+        .execute(&*pool)
+        .await;
+
+
+    match result {
+        Ok(_) => {
+            Redirect::to(&format!("/users/edit/{}?success_message=Password updated successfully", user_id))
+        }
+        Err(e) => {
+            error!("DB Error: {:?}", e);
+            Redirect::to(&format!("/users/edit/{}?error_message=Database failure", user_id))
+        }
+    }
+}
