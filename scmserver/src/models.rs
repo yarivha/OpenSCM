@@ -211,6 +211,8 @@ pub struct PolicyCompliance {
     pub policy_version: String,
     pub policy_description: Option<String>,
     pub compliance: f64,
+    pub test_count: i64,    // Added
+    pub system_count: i64,  // Added
     pub systems_passed: Option<i64>,
     pub systems_failed: Option<i64>,
 }

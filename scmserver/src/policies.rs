@@ -35,18 +35,18 @@ use crate::handlers::parse_form_data;
 pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
 -> impl IntoResponse  {
     
-     // check authorization
+    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
        return redir;
     }
 
-    
     let rows = match sqlx::query(r#"
             SELECT 
                 p.id AS policy_id,
                 p.name AS policy_name,
                 p.version AS policy_version,
                 p.description AS policy_description,
+                -- Existing Compliance Logic
                 CAST(
                     COALESCE(
                         ROUND(
@@ -56,7 +56,10 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
                         ), 
                         -1.0
                     ) AS REAL
-                ) AS compliance
+                ) AS compliance,
+                -- New: Subqueries for counts
+                (SELECT COUNT(*) FROM tests_in_policy WHERE policy_id = p.id) as test_count,
+                (SELECT COUNT(*) FROM systems_in_policy WHERE policy_id = p.id) as system_count
             FROM policies p
             LEFT JOIN (
                 SELECT 
@@ -84,24 +87,22 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
         }
     };
 
-
     let policies: Vec<PolicyCompliance> = rows.into_iter().map(|row| {
         PolicyCompliance {
-            // The Turbofish (::<Type, _>) fixes the E0282 error
             policy_id: row.get::<i64, _>("policy_id"),
             policy_name: row.get::<String, _>("policy_name"),
             policy_version: row.get::<String, _>("policy_version"),
-
-            policy_description: Some(row.get::<Option<String>, _>("policy_description")
-            .unwrap_or_default()),
-
+            policy_description: Some(row.get::<Option<String>, _>("policy_description").unwrap_or_default()),
             compliance: row.get::<f64, _>("compliance"),
+            
+            // Map the new count fields here
+            test_count: row.get::<i64, _>("test_count"),
+            system_count: row.get::<i64, _>("system_count"),
+
             systems_passed: None,
             systems_failed: None,
         }
     }).collect();
-
-
 
     // Prepare handler-specific context
     let mut context = Context::new();
@@ -112,6 +113,7 @@ pub async fn policies(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: 
         context.insert("success_message", &success_message);
     }
     context.insert("policies", &policies);
+    
     render_template(&tera, Some(&pool), "policies.html", context, Some(auth)).await.into_response()
 }
 

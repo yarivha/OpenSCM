@@ -19,10 +19,13 @@ use crate::handlers::render_template;
 
 
 
-#[derive(serde::Deserialize)]
+#[derive(serde::Deserialize, serde::Serialize)] // Add Serialize if passing to template
 pub struct DashboardParams {
+    #[serde(default)] // Helps handle empty strings/missing keys
     pub error_message: Option<String>,
+    #[serde(default)]
     pub success_message: Option<String>,
+    #[serde(default)]
     pub range: Option<String>,
 }
 
