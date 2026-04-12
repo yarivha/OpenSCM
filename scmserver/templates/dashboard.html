@@ -80,27 +80,32 @@
       </div>
 
       <div class="row">
-        <div class="col-md-12">
-          <div class="card card-outline card-primary shadow-sm">
-            <div class="card-header">
-              <h3 class="card-title font-weight-bold"><i class="fas fa-chart-line mr-2"></i>Compliance Trend</h3>
-              <div class="card-tools">
-                <div class="btn-group btn-group-toggle" data-toggle="buttons">
-                  <a href="/?range=daily" class="btn btn-sm btn-outline-primary {% if range == 'daily' %}active{% endif %}">Daily</a>
-                  <a href="/?range=weekly" class="btn btn-sm btn-outline-primary {% if range == 'weekly' %}active{% endif %}">Weekly</a>
-                  <a href="/?range=monthly" class="btn btn-sm btn-outline-primary {% if range == 'monthly' %}active{% endif %}">Monthly</a>
-		  <a href="/?range=yearly" class="btn btn-sm btn-outline-primary {% if range == 'yearly' %}active{% endif %}">Yearly</a>
-                </div>
-              </div>
-            </div>
-            <div class="card-body">
-              <div class="chart">
-                <canvas id="complianceTrendChart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
-              </div>
-            </div>
+  <div class="col-md-12">
+    <div class="card card-outline card-primary shadow-sm">
+      <div class="card-header">
+        <h3 class="card-title font-weight-bold">
+          <i class="fas fa-chart-line mr-2"></i>Compliance Trend
+        </h3>
+        <div class="card-tools">
+          <div class="btn-group shadow-sm">
+            <a href="/?range=daily" class="btn btn-xs btn-outline-primary {% if range == 'daily' %}active{% endif %}">Daily</a>
+            <a href="/?range=weekly" class="btn btn-xs btn-outline-primary {% if range == 'weekly' %}active{% endif %}">Weekly</a>
+            <a href="/?range=monthly" class="btn btn-xs btn-outline-primary {% if range == 'monthly' %}active{% endif %}">Monthly</a>
+            <a href="/?range=yearly" class="btn btn-xs btn-outline-primary {% if range == 'yearly' %}active{% endif %}">Yearly</a>
           </div>
         </div>
       </div>
+      <div class="card-body">
+        <div class="chart">
+          <canvas id="complianceTrendChart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
 
       <div class="row">
         <div class="col-md-6">
