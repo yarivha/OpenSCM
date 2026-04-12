@@ -269,7 +269,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS compliance_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            check_date DATE DEFAULT (CURRENT_DATE),
+            check_date DATE DEFAULT CURRENT_TIMESTAMP,
             global_score REAL DEFAULT 0.0,
             policy_score REAL DEFAULT 0.0,
             total_systems INTEGER,
