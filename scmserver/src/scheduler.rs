@@ -101,11 +101,9 @@ pub async fn capture_compliance_snapshot(pool: &sqlx::SqlitePool) -> Result<(), 
 
 
 
-
 // start_background_scheduler
 pub async fn start_background_scheduler(pool: SqlitePool) {
     // 1. Initial Startup Snapshot
-    // Runs once as soon as the server starts to ensure the dashboard has data.
     let startup_pool = pool.clone();
     tokio::spawn(async move {
         info!("Initiating startup compliance snapshot...");
@@ -116,20 +114,20 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 
     // 2. The Main "Heartbeat" Loop (Every 60 Seconds)
     let mut interval = time::interval(Duration::from_secs(60));
-
-    // Clone the pool for the long-running loop
     let loop_pool = pool.clone();
 
     tokio::spawn(async move {
+        // Variable to prevent double-firing Task B within the same minute
+        let mut last_snapshot_hour: i32 = -1;
+
         loop {
-            // Wait for the next 60-second tick
             interval.tick().await;
 
             let now = Utc::now();
             let now_str = now.format("%Y-%m-%dT%H:%M").to_string();
+            let current_hour = now.hour() as i32;
 
-            // --- TASK A: POLICY SCAN SCHEDULER ---
-            // Find all enabled policies that have reached their 'next_run' time
+            // --- TASK A: POLICY SCAN SCHEDULER (Every 60s) ---
             let due_policies = sqlx::query_as::<_, PolicySchedule>(
                 "SELECT * FROM policy_schedules WHERE enabled = 1 AND next_run <= ?"
             )
@@ -141,13 +139,9 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             for schedule in due_policies {
                 info!("Scheduler: Triggering Policy ID {} ('{}')", schedule.policy_id, now_str);
 
-                // Execute the shared logic to insert commands into the queue
                 match execute_policy_run_logic(schedule.policy_id, &loop_pool).await {
                     Ok(_) => {
-                        // On success, calculate the NEXT time this should run
                         let next_run_time = calculate_next_run(&schedule.frequency, &schedule.next_run);
-
-                        // Update the database: set the new next_run and update last_run to now
                         let update_res = sqlx::query(
                             "UPDATE policy_schedules SET next_run = ?, last_run = ? WHERE id = ?"
                         )
@@ -160,9 +154,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                         if let Err(e) = update_res {
                             error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
                         } else {
-                            let msg = format!("Scheduled scan successfully initiated for Policy ID: {}", schedule.policy_id);
-                            info!("{}",&msg);
-                            add_notification(&loop_pool, "success", 0, &msg).await;
+                            info!("Scheduled scan successfully initiated for Policy ID: {}", schedule.policy_id);
                         }
                     },
                     Err(e) => {
@@ -173,15 +165,19 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 }
             }
 
-            // --- TASK B: DAILY COMPLIANCE SNAPSHOT (For Trend Graphs) ---
-            // Triggered only once per day at exactly Midnight (00:00)
-            if now.hour() == 0 && now.minute() == 0 {
-                info!("Running daily compliance aggregation snapshot...");
+            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT (For Trend Graphs) ---
+            // Triggered whenever the minute is 00 (once per hour)
+            if now.minute() == 0 && current_hour != last_snapshot_hour {
+                info!("Running hourly compliance aggregation snapshot for trend graph...");
                 if let Err(e) = capture_compliance_snapshot(&loop_pool).await {
-                    error!("Daily compliance snapshot failed: {}", e);
+                    error!("Hourly compliance snapshot failed: {}", e);
+                } else {
+                    // Update guard variable to ensure we don't run again until next hour
+                    last_snapshot_hour = current_hour;
                 }
             }
         }
     });
 }
+
 
