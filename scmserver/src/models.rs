@@ -127,10 +127,11 @@ pub struct ScheduledJob {
 }
 
 
-#[derive(FromRow, Serialize)]
+#[derive(sqlx::FromRow, serde::Serialize, Clone)]
 pub struct ComplianceHistoryRow {
-    pub check_date: String,   // Matches your column name
-    pub global_score: f64,    // Matches your column name
+    pub check_date: String,
+    pub global_score: f64,
+    pub policy_score: f64, // <--- ADD THIS LINE
 }
 
 

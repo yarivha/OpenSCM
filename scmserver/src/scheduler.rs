@@ -26,10 +26,12 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
 }
 
 
+
+// capture_compliance_snapshot
 pub async fn capture_compliance_snapshot(pool: &sqlx::SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting full compliance aggregation...");
 
-    // 1. Update TEST stats - changed scan_results to results
+    // 1. Update TEST stats
     sqlx::query(r#"
         UPDATE tests SET
             systems_passed = (SELECT COUNT(*) FROM results WHERE test_id = tests.id AND result = 'PASS'),
@@ -41,7 +43,7 @@ pub async fn capture_compliance_snapshot(pool: &sqlx::SqlitePool) -> Result<(), 
             )
     "#).execute(pool).await?;
 
-    // 2. Update SYSTEM stats - changed scan_results to results
+    // 2. Update SYSTEM stats
     sqlx::query(r#"
         UPDATE systems SET
             tests_passed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'),
@@ -54,18 +56,49 @@ pub async fn capture_compliance_snapshot(pool: &sqlx::SqlitePool) -> Result<(), 
             )
     "#).execute(pool).await?;
 
+    // --- NEW: 2.5 Update POLICY stats ---
+    // This calculates the average compliance of all systems assigned to each policy
+    sqlx::query(r#"
+        UPDATE policies SET
+            compliance_score = (
+                SELECT AVG(s.compliance_score)
+                FROM systems s
+                JOIN systems_in_groups sig ON s.id = sig.system_id
+                JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+                WHERE sip.policy_id = policies.id
+            )
+    "#).execute(pool).await?;
+
     // 3. Global Stats for Trend Graph
-    let stats = sqlx::query("SELECT AVG(compliance_score) as avg_score, COUNT(*) as sys_count FROM systems")
+    // Get average of all systems
+    let sys_stats = sqlx::query("SELECT AVG(compliance_score) as avg_score, COUNT(*) as sys_count FROM systems")
         .fetch_one(pool).await?;
 
-    sqlx::query("INSERT INTO compliance_history (global_score, total_systems, failed_systems)
-                 VALUES (?, ?, (SELECT COUNT(*) FROM systems WHERE compliance_score < 100))")
-        .bind(stats.try_get::<f64, _>("avg_score").unwrap_or(0.0))
-        .bind(stats.try_get::<i32, _>("sys_count").unwrap_or(0))
-        .execute(pool).await?;
+    // Get average of all policies
+    let pol_stats = sqlx::query("SELECT AVG(compliance_score) as avg_score FROM policies")
+        .fetch_one(pool).await?;
+
+    let global_score = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
+    let policy_score = pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
+    let sys_count = sys_stats.try_get::<i32, _>("sys_count").unwrap_or(0);
+
+    // 4. Insert into compliance_history with the new policy_score column
+    sqlx::query(
+        r#"
+        INSERT INTO compliance_history (global_score, policy_score, total_systems, failed_systems)
+        VALUES (?, ?, ?, (SELECT COUNT(*) FROM systems WHERE compliance_score < 100))
+        "#
+    )
+    .bind(global_score)
+    .bind(policy_score)
+    .bind(sys_count)
+    .execute(pool).await?;
+
+    info!("Compliance aggregation completed. Global: {}%, Policy: {}%", global_score, policy_score);
 
     Ok(())
 }
+
 
 
 

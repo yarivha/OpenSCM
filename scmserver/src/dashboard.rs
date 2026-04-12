@@ -21,39 +21,26 @@ use crate::handlers::render_template;
 /////////////////////////////////// Handlers Functions /////////////////////////////////
 
 // dashboard
+// dashboard
 pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
     -> impl IntoResponse {
 
     let mut context = Context::new();
     
-    // Get systems count
-    let systems_count_row = sqlx::query("SELECT COUNT(*) as count FROM systems WHERE status= 'active'")
-        .fetch_one(&*pool)
-        .await
-        .unwrap();
+    // 1. Get counts for the Small Boxes
+    let systems_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM systems WHERE status = 'active'")
+        .fetch_one(&*pool).await.unwrap_or(0);
     
-    let systems_count: i64 = systems_count_row.get("count");
-    
+    let pending_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM systems WHERE status = 'pending'")
+        .fetch_one(&*pool).await.unwrap_or(0);
 
-    // Get policies count
-    let policies_count_row = sqlx::query("SELECT COUNT(*) as count FROM policies")
-        .fetch_one(&*pool)
-        .await
-        .unwrap();
+    let policies_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM policies")
+        .fetch_one(&*pool).await.unwrap_or(0);
 
-    let policies_count: i64 = policies_count_row.get("count");
+    let reports_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reports")
+        .fetch_one(&*pool).await.unwrap_or(0);
 
-
-    // Get reports count
-    let reports_count_row = sqlx::query("SELECT COUNT(*) as count FROM reports")
-        .fetch_one(&*pool)
-        .await
-        .unwrap();
-
-    let reports_count: i64 = reports_count_row.get("count");
-
-
-    // Get Critical Policy Failures
+    // 2. Get Critical Policy Failures
     let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
         r#"
         SELECT 
@@ -77,55 +64,58 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<ErrorQuery>, pool
         StatusCode::INTERNAL_SERVER_ERROR 
     })?;
 
-
-
-    // Get Highest Risk Assets
+    // 3. Get Highest Risk Assets
     let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(
         "SELECT name as system_name, os, compliance_score as compliance, tests_passed, tests_failed 
         FROM systems WHERE status='active' ORDER BY compliance_score ASC LIMIT 5"
     ).fetch_all(&*pool).await.map_err(|e| { error!("{}", e); StatusCode::INTERNAL_SERVER_ERROR })?; 
 
-
-
-    let history: Vec<ComplianceHistoryRow> = sqlx::query_as::<_, ComplianceHistoryRow>(
-        "SELECT check_date, global_score FROM compliance_history ORDER BY id DESC LIMIT 10"
+    // 4. Fetch History including POLICY_SCORE
+    // Note: ensure your ComplianceHistoryRow struct has the policy_score field!
+    let history = sqlx::query_as::<_, ComplianceHistoryRow>(
+        "SELECT check_date, global_score, policy_score FROM compliance_history ORDER BY id DESC LIMIT 10"
     )
     .fetch_all(&*pool)
     .await
     .map_err(|e| {
-        // Using the log crate macro for structured logging
         error!("Failed to fetch compliance history: {}", e); 
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
-
     let mut labels = Vec::new();
     let mut scores = Vec::new();
+    let mut policy_scores = Vec::new(); // NEW: For the second line on the graph
 
     for rec in history.into_iter().rev() {
         labels.push(rec.check_date); 
         scores.push(rec.global_score); 
+        policy_scores.push(rec.policy_score); // NEW
     }
 
     let current_global_score = scores.last().cloned().unwrap_or(0.0);
     let formatted_score = format!("{:.1}", current_global_score);
 
+    // 5. Fill Context
     if let Some(msg) = &params.error_message {
         context.insert("error_message", msg);
     }
     if let Some(msg) = &params.success_message {
         context.insert("success_message", msg);
     }
+
     context.insert("global_score", &formatted_score);
-    context.insert("systems_count", &systems_count.to_string());
-    context.insert("policies_count", &policies_count.to_string());
-    context.insert("reports_count", &reports_count.to_string());
+    context.insert("systems_count", &systems_count);
+    context.insert("pending_count", &pending_count); // Added for the red/green box
+    context.insert("policies_count", &policies_count);
+    context.insert("reports_count", &reports_count);
     context.insert("top_failed_systems", &top_failed_systems); 
     context.insert("top_failed_policies", &top_failed_policies);
+    
+    // Graph Data
     context.insert("trend_labels", &labels);
     context.insert("trend_scores", &scores);
-    render_template(&tera,Some(&pool), "dashboard.html", context, Some(auth)).await
+    context.insert("trend_policy_scores", &policy_scores); // THE MISSING VARIABLE FIXED
+
+    render_template(&tera, Some(&pool), "dashboard.html", context, Some(auth)).await
 }
-
-
 

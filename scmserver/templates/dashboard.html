@@ -83,7 +83,7 @@
         <div class="col-md-12">
           <div class="card card-outline card-primary shadow-sm">
             <div class="card-header">
-              <h3 class="card-title font-weight-bold"><i class="fas fa-chart-line mr-2"></i>Infrastructure Compliance Trend</h3>
+              <h3 class="card-title font-weight-bold"><i class="fas fa-chart-line mr-2"></i>Compliance Trend</h3>
               <div class="card-tools">
                 <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
               </div>
@@ -199,25 +199,60 @@
 
 {% block scripts %}
 <script>
-// Inside your <script> block in dashboard.html
 var complianceTrendCanvas = document.getElementById('complianceTrendChart').getContext('2d');
 new Chart(complianceTrendCanvas, {
   type: 'line',
   data: {
-    labels: {{ trend_labels | json_encode | safe }}, // Dates from compliance_history
-    datasets: [{
-      label: 'Global Compliance %',
-      data: {{ trend_scores | json_encode | safe }}, // Scores from compliance_history
-      borderColor: '#007bff',
-      backgroundColor: 'rgba(0, 123, 255, 0.1)',
-      fill: true,
-      tension: 0.3
-    }]
+    // Labels are shared between both datasets (Dates)
+    labels: {{ trend_labels | json_encode | safe }}, 
+    datasets: [
+      {
+        label: 'System Compliance %',
+        data: {{ trend_scores | json_encode | safe }}, 
+        borderColor: '#007bff', // Blue
+        backgroundColor: 'rgba(0, 123, 255, 0.05)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3
+      },
+      {
+        label: 'Policy Compliance %',
+        // New variable from your Rust handler
+        data: {{ trend_policy_scores | json_encode | safe }}, 
+        borderColor: '#28a745', // Green
+        backgroundColor: 'rgba(40, 167, 69, 0.05)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3
+      }
+    ]
   },
   options: { 
-    maintainAspectRatio: false, 
-    scales: { y: { min: 0, max: 100 } } 
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        labels: { boxWidth: 12, padding: 20 }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false
+      }
+    },
+    scales: { 
+      y: { 
+        min: 0, 
+        max: 100,
+        ticks: { callback: function(value) { return value + "%"; } }
+      },
+      x: {
+        grid: { display: false }
+      }
+    }
   }
 });
 </script>
-{% endblock %}
+{% endblock %}	

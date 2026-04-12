@@ -136,7 +136,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
            id INTEGER PRIMARY KEY AUTOINCREMENT,
            name TEXT NOT NULL,
            description TEXT,
-           version TEXT
+           version TEXT,
+           compliance_score REAL DEFAULT 0.0
         )",
     )
     .execute(pool)
@@ -244,7 +245,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
 
-    // Create compliance history table
+    // Create scheduler table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS scheduler (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -269,7 +270,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS compliance_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             check_date DATE DEFAULT (CURRENT_DATE),
-            global_score REAL,
+            global_score REAL DEFAULT 0.0,
+            policy_score REAL DEFAULT 0.0,
             total_systems INTEGER,
             failed_systems INTEGER
         )",
