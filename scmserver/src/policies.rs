@@ -532,7 +532,13 @@ pub async fn policies_edit_save(
 
 
 // policies_delete
-pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>,) ->  impl IntoResponse{
+pub async fn policies_delete(
+    auth: AuthSession, 
+    Path(id): Path<i32>, 
+    Extension(pool): Extension<SqlitePool>,          // Destructured for consistency
+    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped Extensions
+) -> impl IntoResponse {
+
     
      // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {

@@ -330,8 +330,13 @@ pub async fn tests_add_save(
 
 
 // tests_delete
-pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>,) 
-    -> impl IntoResponse  {
+pub async fn tests_delete(
+    auth: AuthSession, 
+    Path(id): Path<i32>, 
+    Extension(pool): Extension<SqlitePool>,          // Destructured for consistency
+    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped Extensions
+) -> impl IntoResponse {
+
 
      // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -507,9 +512,15 @@ pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<S
 
 
 // tests_edit_save
-pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>, raw_form: RawForm) 
-    -> impl IntoResponse {
-    
+pub async fn tests_edit_save(
+    auth: AuthSession, 
+    Path(id): Path<i32>, 
+    Extension(pool): Extension<SqlitePool>,          // Destructured for consistency
+    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Extensions grouped
+    raw_form: RawForm                                // Body consumer must stay LAST
+) -> impl IntoResponse {
+
+
      // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
        return redir;

@@ -295,13 +295,14 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
 }
 
 // systems_edit_save
-pub async fn systems_edit_save(
-    auth: AuthSession, 
+pub async fn systems_edit_save( 
+    auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>, 
-    Extension(sync_tx): Extension<mpsc::Sender<()>>,
-    raw_form: RawForm
+    Extension(pool): Extension<SqlitePool>,          // Added Extension() wrapper
+    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped together
+    raw_form: RawForm                                // Body consumer must be LAST
 ) -> impl IntoResponse {
+
 
     // 1. Auth check
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -616,8 +617,13 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
 
 
 // system_groups_delete
-pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>,Extension(sync_tx): Extension<mpsc::Sender<()>>,) 
-    -> impl IntoResponse {
+pub async fn system_groups_delete(
+    auth: AuthSession, 
+    Path(id): Path<i32>, 
+    Extension(pool): Extension<SqlitePool>,          // Added Extension() wrapper
+    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped Extensions
+) -> impl IntoResponse {
+
     
     // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -769,8 +775,13 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
 
 
 // system_groups_edit_save
-    pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>, raw_form: RawForm) 
-        -> impl IntoResponse {
+    pub async fn system_groups_edit_save(
+    auth: AuthSession, 
+    Path(id): Path<i32>, 
+    Extension(pool): Extension<SqlitePool>,          // Added Extension() wrapper
+    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped extensions together
+    raw_form: RawForm                                // Body consumer stays LAST
+) -> impl IntoResponse {
     
 
     // check authorization
