@@ -201,7 +201,7 @@ pub async fn systems_delete(
 
 
 // systems_edit
-pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
+pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,Extension(sync_tx): Extension<mpsc::Sender<()>>, tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
 
     // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
