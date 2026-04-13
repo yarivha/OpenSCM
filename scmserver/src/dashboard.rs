@@ -56,24 +56,21 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
         r#"
         SELECT 
-            p.name as policy_name, 
-            p.version as policy_version,
-            AVG(t.compliance_score) as compliance,
-            SUM(t.systems_passed) as systems_passed,
-            SUM(t.systems_failed) as systems_failed
-        FROM policies p
-        JOIN tests_in_policy tip ON p.id = tip.policy_id
-        JOIN tests t ON tip.test_id = t.id
-        GROUP BY p.id
-        ORDER BY compliance ASC
+            name as policy_name, 
+            version as policy_version,
+            compliance_score as compliance,
+            systems_passed as systems_passed,
+            systems_failed as systems_failed
+        FROM policies 
+        ORDER BY compliance_score ASC 
         LIMIT 5
         "#
     )
     .fetch_all(&*pool)
     .await
-    .map_err(|e| { 
-        error!("Dashboard Policy Aggregation Error: {}", e); 
-        StatusCode::INTERNAL_SERVER_ERROR 
+    .map_err(|e| {
+        error!("Dashboard Policy Fetch Error: {}", e);
+        StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     // 3. Get Highest Risk Assets
@@ -94,9 +91,10 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
         "monthly" =>
             "SELECT strftime('%m-%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
             FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
-        _ => // daily (default)
-            "SELECT strftime('%m-%d %H:%M', check_date) as check_date, systems_score,policies_score 
-            FROM compliance_history ORDER BY id DESC LIMIT 14"
+        _ => // daily (average per hour)
+            "SELECT strftime('%m-%d %H:00', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
+            FROM compliance_history GROUP BY 1 ORDER BY id DESC LIMIT 24"
+
     };
 
     
