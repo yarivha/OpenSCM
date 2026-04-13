@@ -138,8 +138,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
            description TEXT,
            version TEXT,
            compliance_score REAL DEFAULT 0.0,
-           systems_passed INTEGER,
-           systems_failed INTEGER
+           systems_passed INTEGER DEFAULT 0,
+           systems_failed INTEGER DEFAULT 0
         )",
     )
     .execute(pool)

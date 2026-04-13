@@ -26,24 +26,36 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
 }
 
 
-pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    info!("Starting compliance aggregation using Strict Policy methodology...");
 
-    // 1. Update TEST stats
-    // Updates the health of each individual test across the whole environment
+pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    info!("Starting compliance aggregation (Active Systems Only)...");
+
+    // 0. Start a Transaction to ensure atomicity
+    let mut tx = pool.begin().await?;
+
+    // 1. Update TEST stats (Only counting results from Active Systems)
     sqlx::query(r#"
         UPDATE tests SET
-            systems_passed = (SELECT COUNT(*) FROM results WHERE test_id = tests.id AND result = 'PASS'),
-            systems_failed = (SELECT COUNT(*) FROM results WHERE test_id = tests.id AND result = 'FAIL'),
+            systems_passed = (
+                SELECT COUNT(*) FROM results r 
+                JOIN systems s ON r.system_id = s.id 
+                WHERE r.test_id = tests.id AND r.result = 'PASS' AND s.status = 'active'
+            ),
+            systems_failed = (
+                SELECT COUNT(*) FROM results r 
+                JOIN systems s ON r.system_id = s.id 
+                WHERE r.test_id = tests.id AND r.result = 'FAIL' AND s.status = 'active'
+            ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN 100.0
-                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END FROM results WHERE test_id = tests.id
+                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+                END FROM results r 
+                JOIN systems s ON r.system_id = s.id 
+                WHERE r.test_id = tests.id AND s.status = 'active'
             )
-    "#).execute(pool).await?;
+    "#).execute(&mut *tx).await?;
 
-    // 2. Update SYSTEM stats
-    // System Score = (Passed Tests / Total Tests) * 100
+    // 2. Update SYSTEM stats (Only for systems marked as 'active')
     sqlx::query(r#"
         UPDATE systems SET
             tests_passed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'),
@@ -54,65 +66,56 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
                 END FROM results WHERE system_id = systems.id
             )
-    "#).execute(pool).await?;
+        WHERE status = 'active'
+    "#).execute(&mut *tx).await?;
 
-
-
-    // 3. Update POLICY stats (Strict Scoped Binary)
+        
+    // 3. Update POLICY stats (The most robust version)
     sqlx::query(r#"
-        UPDATE policies SET
-            /* 1. Calculate the raw counts first */
-            systems_passed = COALESCE((
-                SELECT SUM(CASE WHEN policy_failures = 0 THEN 1 ELSE 0 END)
-                FROM (
-                    SELECT s.id,
-                        (SELECT COUNT(*) FROM results r 
-                        JOIN tests_in_policy tip ON r.test_id = tip.test_id
-                        WHERE r.system_id = s.id AND tip.policy_id = policies.id AND r.result = 'FAIL'
-                        ) as policy_failures
-                    FROM systems s
-                    JOIN systems_in_groups sig ON s.id = sig.system_id
-                    JOIN systems_in_policy sip ON sig.group_id = sip.group_id
-                    WHERE sip.policy_id = policies.id
-                    GROUP BY s.id
-                )
-            ), 0),
-            systems_failed = COALESCE((
-                SELECT SUM(CASE WHEN policy_failures > 0 THEN 1 ELSE 0 END)
-                FROM (
-                    SELECT s.id,
-                        (SELECT COUNT(*) FROM results r 
-                        JOIN tests_in_policy tip ON r.test_id = tip.test_id
-                        WHERE r.system_id = s.id AND tip.policy_id = policies.id AND r.result = 'FAIL'
-                        ) as policy_failures
-                    FROM systems s
-                    JOIN systems_in_groups sig ON s.id = sig.system_id
-                    JOIN systems_in_policy sip ON sig.group_id = sip.group_id
-                    WHERE sip.policy_id = policies.id
-                    GROUP BY s.id
-                )
-            ), 0),
-            /* 2. Calculate the score based on those counts */
-            compliance_score = COALESCE((
-                SELECT (CAST(SUM(CASE WHEN policy_failures = 0 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                FROM (
-                    SELECT s.id,
-                        (SELECT COUNT(*) FROM results r 
-                        JOIN tests_in_policy tip ON r.test_id = tip.test_id
-                        WHERE r.system_id = s.id AND tip.policy_id = policies.id AND r.result = 'FAIL'
-                        ) as policy_failures
-                    FROM systems s
-                    JOIN systems_in_groups sig ON s.id = sig.system_id
-                    JOIN systems_in_policy sip ON sig.group_id = sip.group_id
-                    WHERE sip.policy_id = policies.id
-                    GROUP BY s.id
-                )
-            ), 0.0)
-    "#).execute(pool).await?;
+        UPDATE policies
+        SET
+            systems_passed = subquery.passed,
+            systems_failed = subquery.failed,
+            compliance_score = subquery.score
+        FROM (
+            SELECT
+                p.id as policy_id,
+                COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) as passed,
+                COUNT(CASE WHEN fails > 0 THEN 1 END) as failed,
+                CASE
+                    WHEN COUNT(CASE WHEN total_results > 0 THEN 1 END) = 0 THEN 0.0
+                    ELSE (CAST(COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) AS REAL) /
+                          COUNT(CASE WHEN total_results > 0 THEN 1 END)) * 100
+                END as score
+            FROM policies p
+            JOIN systems_in_policy sip ON p.id = sip.policy_id
+            JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+            JOIN systems s ON sig.system_id = s.id
+            LEFT JOIN (
+                /* Pre-calculate failures per system per policy */
+                SELECT
+                    r.system_id,
+                    tip.policy_id,
+                    COUNT(*) as total_results,
+                    SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
+                FROM results r
+                JOIN tests_in_policy tip ON r.test_id = tip.test_id
+                GROUP BY r.system_id, tip.policy_id
+            ) res ON (res.system_id = s.id AND res.policy_id = p.id)
+            WHERE s.status = 'active'
+            GROUP BY p.id
+        ) AS subquery
+        WHERE policies.id = subquery.policy_id
+    "#).execute(&mut *tx).await?;
 
-    info!("Current compliance status synchronized with latest results.");
+
+    // 4. Commit the Transaction
+    tx.commit().await?;
+
+    info!("Compliance recalculation complete. All metrics isolated to active systems.");
     Ok(())
 }
+
 
 
 pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
