@@ -86,16 +86,16 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     
     let history_query = match range.as_str() {
         "yearly" =>
-            "SELECT strftime('%Y', check_date) as check_date, AVG(global_score) as global_score, AVG(policy_score) as policy_score
+            "SELECT strftime('%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
             FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 10",
         "weekly" =>
-            "SELECT strftime('%Y-W%W', check_date) as check_date, AVG(global_score) as global_score, AVG(policy_score) as policy_score
+            "SELECT strftime('%Y-W%W', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
             FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
         "monthly" =>
-            "SELECT strftime('%m-%Y', check_date) as check_date, AVG(global_score) as global_score, AVG(policy_score) as policy_score
+            "SELECT strftime('%m-%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
             FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
         _ => // daily (default)
-            "SELECT strftime('%m-%d %H:%M', check_date) as check_date, global_score, policy_score 
+            "SELECT strftime('%m-%d %H:%M', check_date) as check_date, systems_score,policies_score 
             FROM compliance_history ORDER BY id DESC LIMIT 14"
     };
 
@@ -110,20 +110,17 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
 
     let mut labels = Vec::new();
-    let mut scores = Vec::new();
-    let mut policy_scores = Vec::new(); // NEW: For the second line on the graph
+    let mut systems_scores= Vec::new();
+    let mut policies_scores = Vec::new(); 
 
     for rec in history.into_iter().rev() {
         labels.push(rec.check_date); 
-        scores.push(rec.global_score); 
-        policy_scores.push(rec.policy_score); // NEW
+        systems_scores.push(rec.systems_score); 
+        policies_scores.push(rec.policies_score); // NEW
     }
 
-    let current_global_score = scores.last().cloned().unwrap_or(0.0);
-    let formatted_score = format!("{:.1}", current_global_score);
 
     context.insert("range", &range);
-    context.insert("global_score", &formatted_score);
     context.insert("systems_count", &systems_count);
     context.insert("pending_count", &pending_count); // Added for the red/green box
     context.insert("policies_count", &policies_count);
@@ -133,8 +130,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     
     // Graph Data
     context.insert("trend_labels", &labels);
-    context.insert("trend_scores", &scores);
-    context.insert("trend_policy_scores", &policy_scores); // THE MISSING VARIABLE FIXED
+    context.insert("trend_systems_scores", &systems_scores);
+    context.insert("trend_policies_scores", &policies_scores); 
 
 
     // 5. Fill Context

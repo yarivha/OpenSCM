@@ -218,7 +218,7 @@ new Chart(complianceTrendCanvas, {
     datasets: [
       {
         label: 'System Compliance %',
-        data: {{ trend_scores | json_encode | safe }}, 
+        data: {{ trend_systems_scores | json_encode | safe }}, 
         borderColor: '#007bff', // Blue
         backgroundColor: 'rgba(0, 123, 255, 0.05)',
         borderWidth: 2,
@@ -229,7 +229,7 @@ new Chart(complianceTrendCanvas, {
       {
         label: 'Policy Compliance %',
         // New variable from your Rust handler
-        data: {{ trend_policy_scores | json_encode | safe }}, 
+        data: {{ trend_policies_scores | json_encode | safe }}, 
         borderColor: '#28a745', // Green
         backgroundColor: 'rgba(40, 167, 69, 0.05)',
         borderWidth: 2,
