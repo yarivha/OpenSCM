@@ -299,6 +299,7 @@ pub async fn systems_edit_save(
     auth: AuthSession, 
     Path(id): Path<i32>,
     pool: Extension<SqlitePool>, 
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
     raw_form: RawForm
 ) -> impl IntoResponse {
 
