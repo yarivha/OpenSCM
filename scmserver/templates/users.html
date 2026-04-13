@@ -73,19 +73,17 @@
                       </span>
                     </td>
                     <td class="text-right">
-                      <div class="btn-group">
-                        <a class="btn btn-info btn-sm" href="/users/edit/{{ user.id }}" title="Edit User">
-                          <i class="fas fa-pencil-alt"></i>
-                        </a>
-                        {% if user.id != 1 %}
-                        <a class="btn btn-danger btn-sm" 
-                           onclick="return confirm('Are you sure you want to delete {{ user.username }}? This cannot be undone.')" 
-                           href="/users/delete/{{ user.id }}" 
-                           title="Delete User">
-                          <i class="fas fa-trash"></i>
-                        </a>
-                        {% endif %}
-                      </div>
+                      <a class="btn btn-info btn-sm ml-1" href="/users/edit/{{ user.id }}" title="Edit User">
+                        <i class="fas fa-pencil-alt"></i>
+                      </a>
+                      {% if user.id != 1 %}
+                      <a class="btn btn-danger btn-sm ml-1" 
+                         onclick="return confirm('Are you sure you want to delete {{ user.username }}? This cannot be undone.')" 
+                         href="/users/delete/{{ user.id }}" 
+                         title="Delete User">
+                        <i class="fas fa-trash"></i>
+                      </a>
+                      {% endif %}
                     </td>
                   </tr>
                   {% endfor %}
