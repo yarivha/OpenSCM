@@ -519,7 +519,7 @@ pub async fn policies_edit_save(
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
         // We log the error but don't stop the redirect, 
         // as the system was already successfully deleted.
         error!("Failed to update compliance scores after system deletion: {}", e);
@@ -575,7 +575,7 @@ pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Exten
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
         // We log the error but don't stop the redirect, 
         // as the system was already successfully deleted.
         error!("Failed to update compliance scores after system deletion: {}", e);

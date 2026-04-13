@@ -26,9 +26,7 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
 }
 
 
-
-
-pub async fn capture_compliance_snapshot(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation using Strict Policy methodology...");
 
     // 1. Update TEST stats
@@ -63,51 +61,81 @@ pub async fn capture_compliance_snapshot(pool: &SqlitePool) -> Result<(), sqlx::
     // 3. Update POLICY stats (Strict Scoped Binary)
     sqlx::query(r#"
         UPDATE policies SET
-            compliance_score = COALESCE((
-                SELECT
-                    (CAST(SUM(CASE WHEN policy_failures = 0 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+            /* 1. Calculate the raw counts first */
+            systems_passed = COALESCE((
+                SELECT SUM(CASE WHEN policy_failures = 0 THEN 1 ELSE 0 END)
                 FROM (
-                    SELECT
-                        s.id,
-                        (SELECT COUNT(*) FROM results r
-                         JOIN tests_in_policy tip ON r.test_id = tip.test_id
-                         WHERE r.system_id = s.id AND tip.policy_id = policies.id AND r.result = 'FAIL'
+                    SELECT s.id,
+                        (SELECT COUNT(*) FROM results r 
+                        JOIN tests_in_policy tip ON r.test_id = tip.test_id
+                        WHERE r.system_id = s.id AND tip.policy_id = policies.id AND r.result = 'FAIL'
                         ) as policy_failures
                     FROM systems s
                     JOIN systems_in_groups sig ON s.id = sig.system_id
                     JOIN systems_in_policy sip ON sig.group_id = sip.group_id
                     WHERE sip.policy_id = policies.id
                     GROUP BY s.id
-                ) as scoped_results
+                )
+            ), 0),
+            systems_failed = COALESCE((
+                SELECT SUM(CASE WHEN policy_failures > 0 THEN 1 ELSE 0 END)
+                FROM (
+                    SELECT s.id,
+                        (SELECT COUNT(*) FROM results r 
+                        JOIN tests_in_policy tip ON r.test_id = tip.test_id
+                        WHERE r.system_id = s.id AND tip.policy_id = policies.id AND r.result = 'FAIL'
+                        ) as policy_failures
+                    FROM systems s
+                    JOIN systems_in_groups sig ON s.id = sig.system_id
+                    JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+                    WHERE sip.policy_id = policies.id
+                    GROUP BY s.id
+                )
+            ), 0),
+            /* 2. Calculate the score based on those counts */
+            compliance_score = COALESCE((
+                SELECT (CAST(SUM(CASE WHEN policy_failures = 0 THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+                FROM (
+                    SELECT s.id,
+                        (SELECT COUNT(*) FROM results r 
+                        JOIN tests_in_policy tip ON r.test_id = tip.test_id
+                        WHERE r.system_id = s.id AND tip.policy_id = policies.id AND r.result = 'FAIL'
+                        ) as policy_failures
+                    FROM systems s
+                    JOIN systems_in_groups sig ON s.id = sig.system_id
+                    JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+                    WHERE sip.policy_id = policies.id
+                    GROUP BY s.id
+                )
             ), 0.0)
     "#).execute(pool).await?;
 
-    // 4. Gather metrics for history
+    info!("Current compliance status synchronized with latest results.");
+    Ok(())
+}
+
+
+pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    // 1. Simply fetch the ALREADY CALCULATED averages from the tables
     let sys_stats = sqlx::query("SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM systems")
         .fetch_one(pool).await?;
     let pol_stats = sqlx::query("SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM policies")
         .fetch_one(pool).await?;
 
     let systems_score = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-    let total_systems = sys_stats.try_get::<i32, _>("total").unwrap_or(0);
-
     let policies_score = pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
+    let total_systems = sys_stats.try_get::<i32, _>("total").unwrap_or(0);
     let total_policies = pol_stats.try_get::<i32, _>("total").unwrap_or(0);
 
-    // 5. Record History with full context
+    // 2. Insert into history
     sqlx::query(
         r#"
         INSERT INTO compliance_history (
-            systems_score,
-            policies_score,
-            total_systems,
-            failed_systems,
-            total_policies,
-            failed_policies
+            systems_score, policies_score, total_systems, 
+            total_policies, failed_systems, failed_policies
         )
-        VALUES (?, ?, ?,
+        VALUES (?, ?, ?, ?, 
             (SELECT COUNT(*) FROM systems WHERE compliance_score < 100),
-            ?,
             (SELECT COUNT(*) FROM policies WHERE compliance_score < 100)
         )
         "#
@@ -118,9 +146,7 @@ pub async fn capture_compliance_snapshot(pool: &SqlitePool) -> Result<(), sqlx::
     .bind(total_policies)
     .execute(pool).await?;
 
-    info!("Snapshot saved: {} Systems ({}% avg), {} Policies ({}% avg)",
-        total_systems, systems_score, total_policies, policies_score);
-
+    info!("Compliance trend snapshot recorded: Sys {}%, Pol {}%", systems_score, policies_score);
     Ok(())
 }
 
@@ -131,11 +157,18 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
     // 1. Initial Startup Snapshot
     let startup_pool = pool.clone();
     tokio::spawn(async move {
-        info!("Initiating startup compliance snapshot...");
-        if let Err(e) = capture_compliance_snapshot(&startup_pool).await {
-            error!("Startup compliance snapshot failed: {}", e);
+        info!("Initiating startup compliance synchronization...");
+        // 1. Refresh the 'current state' (Tests, Systems, Policies)
+        if let Err(e) = recalculate_current_compliance(&startup_pool).await {
+            error!("Startup compliance recalculation failed: {}", e);
+        } else {
+            info!("Compliance status successfully synchronized on startup.");
         }
+
+        // 2. DO NOT record history here unless it's been a long time.
+        // Let the background scheduler handle the trend points.
     });
+
 
     // 2. The Main "Heartbeat" Loop (Every 60 Seconds)
     let mut interval = time::interval(Duration::from_secs(60));
@@ -194,7 +227,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             // Triggered whenever the minute is 00 (once per hour)
             if now.minute() == 0 && current_hour != last_snapshot_hour {
                 info!("Running hourly compliance aggregation snapshot for trend graph...");
-                if let Err(e) = capture_compliance_snapshot(&loop_pool).await {
+                if let Err(e) = record_compliance_history(&loop_pool).await {
                     error!("Hourly compliance snapshot failed: {}", e);
                 } else {
                     // Update guard variable to ensure we don't run again until next hour

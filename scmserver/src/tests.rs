@@ -372,7 +372,7 @@ pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extensio
     // 3. RECALCULATE GLOBAL SCORES
     // We call the scheduler's snapshot function to update the 'tests' table
     // and 'compliance_history' now that one system's data is gone.
-    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
         // We log the error but don't stop the redirect,
         // as the system was already successfully deleted.
         error!("Failed to update compliance scores after test deletion: {}", e);
@@ -671,7 +671,7 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::capture_compliance_snapshot(&pool).await {
+    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
         // We log the error but don't stop the redirect, 
         // as the system was already successfully deleted.
         error!("Failed to update compliance scores after system deletion: {}", e);
