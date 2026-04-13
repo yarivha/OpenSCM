@@ -86,11 +86,15 @@
                     
                     <td class="text-right">
                       {% if system.status == "pending" %}
-                        <a class="btn btn-success btn-sm" onclick="return confirm('Approve this system?')" href="/systems/approve/{{ system.id }}">
-                          <i class="fas fa-check mr-1"></i> Approve
+                        <a class="btn btn-success btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+			   onclick="{% if is_editor %}return confirm('Approve this system?'){% else %}return false;{% endif %}" 
+			   href="{% if is_editor %}/systems/approve/{{ system.id }}{% else %}#{% endif %}">
+                          <i class="fas {% if is_editor %}fa-check{% else %}fa-lock{% endif %}"></i> Approve
                         </a>
-                        <a class="btn btn-danger btn-sm ml-1" onclick="return confirm('Reject system?')" href="/systems/delete/{{ system.id }}">
-                          <i class="fas fa-trash"></i>
+                        <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+			   onclick="{% if is_editor %}return confirm('Reject system?'){% else %}return false;{% endif %}" 
+			   href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}">
+                          <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                         </a>
                       {% else %}
                         <button type="button" 
