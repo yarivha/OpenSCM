@@ -1,6 +1,7 @@
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
+use tokio::sync::mpsc;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
@@ -329,7 +330,7 @@ pub async fn tests_add_save(
 
 
 // tests_delete
-pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) 
+pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>,) 
     -> impl IntoResponse  {
 
      // check authorization
@@ -370,14 +371,8 @@ pub async fn tests_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extensio
     }
 
     // 3. RECALCULATE GLOBAL SCORES
-    // We call the scheduler's snapshot function to update the 'tests' table
-    // and 'compliance_history' now that one system's data is gone.
-    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
-        // We log the error but don't stop the redirect,
-        // as the system was already successfully deleted.
-        error!("Failed to update compliance scores after test deletion: {}", e);
-    }
-
+    let _ = sync_tx.send(()).await;
+    info!("Test id {} was deleted succesfully",&id);
 
     Redirect::to("/tests").into_response()
 }
@@ -512,7 +507,7 @@ pub async fn tests_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<S
 
 
 // tests_edit_save
-pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) 
+pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>, raw_form: RawForm) 
     -> impl IntoResponse {
     
      // check authorization
@@ -671,13 +666,7 @@ pub async fn tests_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extens
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
-        // We log the error but don't stop the redirect, 
-        // as the system was already successfully deleted.
-        error!("Failed to update compliance scores after system deletion: {}", e);
-    }
-
-    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+    let _ = sync_tx.send(()).await;
 
 
     Redirect::to("/tests").into_response()

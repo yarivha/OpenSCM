@@ -15,6 +15,8 @@ mod scheduler;
 
 use tera::Tera;
 use axum::{Extension, Router, response::{Response, IntoResponse}, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
+use tokio::sync::mpsc;
+use std::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use tracing::{info, debug, warn, error};
 use std::{sync::Arc, str::FromStr, net::SocketAddr, path::PathBuf, error::Error};
@@ -116,18 +118,43 @@ async fn main() -> Result<(), Box<dyn Error>> {
     initialize_database(&pool).await?;
 
     // ---------------------------------------------------------
-    // 4. Background Scheduler Initialization
+    // 4. Batch Compliance Worker (The Debouncer)
     // ---------------------------------------------------------
-    // Start the background worker for daily compliance snapshots
-    // This allows the dashboard trend graph to populate automatically.
+    // This channel allows handlers to "ping" the worker to recalculate
+    let (sync_tx, mut sync_rx) = mpsc::channel::<()>(100);
+    let worker_pool = pool.clone();
+
+    tokio::spawn(async move {
+        info!("Compliance Sync Worker: Online and listening.");
+        
+        while let Some(_) = sync_rx.recv().await {
+            // DEBOUNCE: Wait 10 seconds after the first signal arrives
+            // This captures the other 99 systems if they report at once
+            tokio::time::sleep(Duration::from_secs(10)).await;
+
+            // DRAIN: Clear out all other pings that happened during the wait
+            while sync_rx.try_recv().is_ok() {}
+
+            info!("Compliance Sync Worker: Starting batch recalculation...");
+            // Replace 'reports' with the actual module where your function lives
+            if let Err(e) = crate::scheduler::recalculate_current_compliance(&worker_pool).await {
+                error!("Compliance Sync Worker: Batch recalculation failed: {}", e);
+            } else {
+                info!("Compliance Sync Worker: Batch recalculation successful.");
+            }
+        }
+    });
+
+
+    // 5. Background Scheduler (Keep existing)
     crate::scheduler::start_background_scheduler(pool.clone()).await;
 
-    // 5. Template Engine
+    // 6. Template Engine
     info!("Loading Server Templates");
     let tera = Arc::new(init_tera()?);
     let config = Arc::new(config);
 
-    // 6. Routes
+    // 7. Routes
     let app = Router::new()
         .route("/", get(dashboard))
         .route("/login", get(login).post(login_submit))

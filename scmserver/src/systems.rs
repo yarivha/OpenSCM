@@ -1,6 +1,7 @@
 use axum::response::{Html, IntoResponse, Redirect};
 use axum::http::StatusCode;
 use axum::extract::{RawForm, Extension, Query, Path};
+use tokio::sync::mpsc; 
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
@@ -165,6 +166,7 @@ pub async fn systems_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
     // 1. Check authorization
@@ -185,18 +187,15 @@ pub async fn systems_delete(
         return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
     }
 
-    // 3. RECALCULATE GLOBAL SCORES
-    // We call the scheduler's snapshot function to update the 'tests' table 
-    // and 'compliance_history' now that one system's data is gone.
-    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
-        // We log the error but don't stop the redirect, 
-        // as the system was already successfully deleted.
-        error!("Failed to update compliance scores after system deletion: {}", e);
-    }
 
-    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+    // 3. SIGNAL RECALCULATION
+    // Instead of 'awaiting' the heavy math, we send a 1-microsecond signal to the worker.
+    // The worker will wait 10s (debounce) and then run the "Final Boss" SQL once.
+    let _ = sync_tx.send(()).await; 
 
-    // Success: redirect back to systems page
+    info!("System ID {} deleted. Compliance update signaled to background worker.", id);
+
+    // Success: The user is redirected immediately!
     Redirect::to("/systems").into_response()
 }
 
@@ -295,7 +294,7 @@ pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension
     render_template(&tera, Some(&pool), "systems_edit.html",context, Some(auth)).await.into_response()
 }
 
-// scmserver/src/systems.rs
+// systems_edit_save
 pub async fn systems_edit_save(
     auth: AuthSession, 
     Path(id): Path<i32>,
@@ -361,6 +360,9 @@ pub async fn systems_edit_save(
         let error_message = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
         return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
     }
+
+    // recalculate compliance
+    let _ = sync_tx.send(()).await;
 
     Redirect::to("/systems?success_message=System+groups+updated+successfully").into_response()
 }
@@ -613,7 +615,7 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
 
 
 // system_groups_delete
-pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) 
+pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>,Extension(sync_tx): Extension<mpsc::Sender<()>>,) 
     -> impl IntoResponse {
     
     // check authorization
@@ -670,13 +672,9 @@ pub async fn system_groups_delete(auth: AuthSession, Path(id): Path<i32>, pool: 
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
-        // We log the error but don't stop the redirect, 
-        // as the system was already successfully deleted.
-        error!("Failed to update compliance scores after system deletion: {}", e);
-    }
+    let _ = sync_tx.send(()).await;
 
-    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+    info!("Group ID {} deleted successfully. Compliance scores recalculated.", id);
 
 
 
@@ -770,7 +768,7 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
 
 
 // system_groups_edit_save
-    pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, raw_form: RawForm) 
+    pub async fn system_groups_edit_save(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>, raw_form: RawForm) 
         -> impl IntoResponse {
     
 
@@ -870,14 +868,8 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
-        // We log the error but don't stop the redirect, 
-        // as the system was already successfully deleted.
-        error!("Failed to update compliance scores after system deletion: {}", e);
-    }
+    let _ = sync_tx.send(()).await;
 
-    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
-    
 
     Redirect::to("/system_groups").into_response()
 }

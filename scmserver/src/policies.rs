@@ -1,6 +1,7 @@
 use axum::response::{Html, Response, IntoResponse, Redirect};
 use axum::http::{StatusCode,header} ;
 use axum::extract::{RawForm, Extension, Query, Path};
+use tokio::sync::mpsc;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
@@ -429,7 +430,8 @@ pub async fn policies_edit(
 pub async fn policies_edit_save(
     auth: AuthSession, 
     Path(id): Path<i32>, 
-    Extension(pool): Extension<SqlitePool>, 
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
     RawForm(raw_form): RawForm
 ) -> impl IntoResponse {
     
@@ -519,11 +521,7 @@ pub async fn policies_edit_save(
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
-        // We log the error but don't stop the redirect, 
-        // as the system was already successfully deleted.
-        error!("Failed to update compliance scores after system deletion: {}", e);
-    }
+    let _ = sync_tx.send(()).await;
 
     info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
 
@@ -534,7 +532,7 @@ pub async fn policies_edit_save(
 
 
 // policies_delete
-pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>) ->  impl IntoResponse{
+pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Extension<SqlitePool>, Extension(sync_tx): Extension<mpsc::Sender<()>>,) ->  impl IntoResponse{
     
      // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -575,11 +573,7 @@ pub async fn policies_delete(auth: AuthSession, Path(id): Path<i32>, pool: Exten
 
 
     // RECALCULATE GLOBAL SCORES
-    if let Err(e) = crate::scheduler::recalculate_current_compliance(&pool).await {
-        // We log the error but don't stop the redirect, 
-        // as the system was already successfully deleted.
-        error!("Failed to update compliance scores after system deletion: {}", e);
-    }
+    let _ = sync_tx.send(()).await;
 
     info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
 
