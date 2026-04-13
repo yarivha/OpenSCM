@@ -197,8 +197,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .fallback(not_found)
         .layer(Extension(pool))
         .layer(Extension(tera))
-        .layer(Extension(config.clone()));
-
+        .layer(Extension(config.clone()))
+        .layer(Extension(sync_tx));
     // Pull port from config (default 8000)
     let port: u16 = config.server.port.as_deref()
     .unwrap_or("8000")
