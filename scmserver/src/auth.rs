@@ -1,6 +1,6 @@
 use axum::response::{Html, Redirect, IntoResponse, Response};
-use axum::extract::{FromRequestParts, Query, Extension, Form};
-use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite};
+use axum::extract::{FromRef, FromRequestParts, Query, Extension, Form};
+use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite, SignedCookieJar, Key};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use std::sync::Arc;
@@ -40,19 +40,26 @@ pub struct AuthSession {
     pub role: String,
 }
 
+
 impl<S> FromRequestParts<S> for AuthSession
 where
     S: Send + Sync + 'static,
+    Key: FromRef<S>, // This tells the extractor to look for Key in the State
 {
     type Rejection = Redirect;
 
     fn from_request_parts<'a, 'b>(
         parts: &'a mut Parts,
-        _state: &'b S,
-    ) -> impl Future<Output = Result<Self, <Self as FromRequestParts<S>>::Rejection>> + Send {
-        async move {
-            let jar = CookieJar::from_headers(&parts.headers);
+        state: &'b S, // We use the state argument here!
+    ) -> impl Future<Output = Result<Self, Self::Rejection>> + Send {
+        // Extract the key from the state immediately
+        let key = Key::from_ref(state); 
 
+        async move {
+            let jar = SignedCookieJar::from_headers(&parts.headers, key);
+            
+
+            // 3. jar.get() now ONLY returns the cookie if the signature is valid
             if let Some(cookie) = jar.get("session") {
                 if let Ok(session_json) = serde_json::from_str::<Value>(cookie.value()) {
                     if let (Some(username), Some(userid), Some(role)) = (
@@ -64,10 +71,11 @@ where
                             username: username.to_string(),
                             userid: userid.parse::<i32>().unwrap_or(0),
                             role: role.to_string(),
-                        });
+                                                                                                                                        });
                     }
                 }
             }
+
             Err(Redirect::to("/login"))
         }
     }
@@ -90,41 +98,45 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
 }
 
 pub async fn login_submit(
-    jar: CookieJar,
-    Extension(pool): Extension<SqlitePool>,
-    Form(form): Form<LoginForm>,
-) -> (CookieJar, Redirect) {
+        jar: SignedCookieJar,           
+        Extension(pool): Extension<SqlitePool>,
+        Form(form): Form<LoginForm>,
+) -> (SignedCookieJar, Redirect) {
+
+
     let row = sqlx::query("SELECT password, username, id, role FROM users WHERE username = ?")
         .bind(&form.username)
         .fetch_optional(&pool)
         .await;
 
+    // 1. Check if the database query succeeded AND found a user
     if let Ok(Some(row)) = row {
         let password_hash: String = row.get("password");
         let username: String = row.get("username");
         let userid_raw: i32 = row.get("id");
         let userid =  userid_raw.to_string();
         let role: String = row.get("role");
-
+        
+        // 2. Verify the password
         if verify(&form.password, &password_hash).unwrap_or(false) {
-            let session_data = json!({ "username": username, "userid": userid,  "role": role }).to_string();
-            let mut cookie = Cookie::new("session", session_data);
+            let session_data = json!({ 
+                "username": username, 
+                "userid": userid,  
+                "role": role 
+            }).to_string();
+
+        let mut cookie = Cookie::new("session", session_data);
             cookie.set_path("/");
             cookie.set_http_only(true);
             cookie.set_same_site(SameSite::Lax);
 
+            // SUCCESS 
             return (jar.add(cookie), Redirect::to("/"));
         }
-    }
-
-    // Auth failure logging & notification
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let message = format!("User {} failed authentication", form.username);
-    let _ = sqlx::query("INSERT INTO notify (type, timestamp, message) VALUES (?, ?, ?)")
-        .bind("auth").bind(now).bind(message).execute(&pool).await;
-
-    (jar, Redirect::to("/login?error_message=Invalid%20Credentials"))
+    } 
+    (jar,Redirect::to("/login?error_message=Invalid%20Credentials"))
 }
+
 
 pub async fn logout(jar: CookieJar) -> (CookieJar, Redirect) {
     (jar.remove(Cookie::from("session")), Redirect::to("/login"))

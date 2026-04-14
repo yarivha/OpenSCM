@@ -15,11 +15,14 @@ mod scheduler;
 
 use tera::Tera;
 use axum::{Extension, Router, response::{Response, IntoResponse}, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
+use axum_extra::extract::cookie::Key;
 use tokio::sync::mpsc;
+use base64::{Engine as _, engine::general_purpose};
 use std::time::Duration;
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use tracing::{info, debug, warn, error};
 use std::{sync::Arc, str::FromStr, net::SocketAddr, path::PathBuf, error::Error};
+use std::fs;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use include_dir::{include_dir, Dir};
 
@@ -34,7 +37,7 @@ use crate::policies::*;
 use crate::reports::*;
 use crate::users::*;
 //use crate::settings::*;
-use crate::scheduler::*;
+//use crate::scheduler::*;
 
 
 // Embedded templates/static files
@@ -94,6 +97,25 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let loglevel = config.server.loglevel.as_deref().unwrap_or("info");
     let _ = reload_handle.reload(EnvFilter::new(loglevel));
     debug!("Log level set to '{}'", loglevel);
+
+    // Load private key
+    let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or(""));
+    let priv_file = config.key.private_key.as_deref().unwrap_or("scmserver.key");
+    let priv_path = key_dir.join(priv_file);
+
+    let priv_base64 = fs::read_to_string(&priv_path)?;
+    let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim())?;
+
+    // 1. Create a 64-byte buffer (filled with zeros)
+    let mut expanded_key = [0u8; 64];
+
+    // 2. Fill the buffer by repeating your 32-byte key twice
+    // This is deterministic: it will always result in the same 64-bytes
+    expanded_key[..32].copy_from_slice(&priv_bytes);
+    expanded_key[32..].copy_from_slice(&priv_bytes);
+   
+    // 3. Now pass the 64-byte array to Key::from
+    let cookie_key = axum_extra::extract::cookie::Key::from(&expanded_key);
 
     // 3. Database Initialization
     info!("Connecting database at '{}'...", config.database.path);
@@ -198,7 +220,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .layer(Extension(pool))
         .layer(Extension(tera))
         .layer(Extension(config.clone()))
-        .layer(Extension(sync_tx));
+        .layer(Extension(sync_tx))
+        .with_state(cookie_key);
     // Pull port from config (default 8000)
     let port: u16 = config.server.port.as_deref()
     .unwrap_or("8000")
