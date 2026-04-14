@@ -8,36 +8,15 @@ use std::future::Future;
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use bcrypt::verify;
-use serde::{Deserialize, Serialize};
+use serde::Deserialize;
 use serde_json::{json, Value};
 use tera::{Tera, Context};
 use tracing::{debug, info, warn, error};
 
 use crate::models::ErrorQuery;
 use crate::handlers::render_template;
+use crate::models::UserRole;
 
-// --- 1. ROLE HIERARCHY ---
-
-#[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord, Serialize, Deserialize)]
-pub enum UserRole {
-    Viewer = 0,
-    Runner = 1,
-    Editor = 2,
-    Admin = 3,
-}
-
-impl From<&str> for UserRole {
-    fn from(s: &str) -> Self {
-        match s.to_lowercase().as_str() {
-            "admin" => UserRole::Admin,
-            "editor" => UserRole::Editor,
-            "runner" => UserRole::Runner,
-            _ => UserRole::Viewer,
-        }
-    }
-}
-
-// --- 2. AUTHORIZATION HELPER ---
 
 /// Checks if the current role meets the required level.
 /// Returns None if authorized, or a Redirect if unauthorized.

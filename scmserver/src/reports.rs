@@ -1,4 +1,4 @@
-use axum::response::{Html, Response, IntoResponse, Redirect};
+use axum::response::{Response, IntoResponse, Redirect};
 use axum::http::{StatusCode, header};
 use axum::extract::{Extension, Query, Path};
 use tera::{Tera, Context};
@@ -10,14 +10,16 @@ use serde_json;
 use std::collections::HashMap;
 use genpdf::{fonts, elements, style, Element};
 
-use crate::auth::{self, UserRole, AuthSession};
+use crate::auth::{self, AuthSession};
 use crate::handlers::render_template;
+use crate::models::UserRole;
 use crate::models::ReportData;
 use crate::models::TestMeta;
 use crate::models::SystemReport;
 use crate::models::IndividualResult;
 use crate::models::Report;
 use crate::models::ErrorQuery;
+
 
 //////////////////// Reports /////////////////////////
 // reports
@@ -435,14 +437,21 @@ pub async fn reports_download(
     doc.push(elements::Text::new("Report Details").styled(style::Style::new().bold()));
     let mut details_table = elements::TableLayout::new(vec![1, 3]);
     details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-    details_table.push_row(vec![
+    
+    if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Policy Name")),
         Box::new(elements::Text::new(format!(": {} v{}", report_data.policy_name, report_data.version))),
-    ]);
-    details_table.push_row(vec![
+    ])  {
+        error!("Failed to add summary row to PDF: {}", e);
+    }
+    
+    if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Description")),
         Box::new(elements::Text::new(format!(": {}", report_data.description))),
-    ]);
+    ]) {
+        error!("Failed to add summary row to PDF: {}", e);
+    }
+
     doc.push(details_table);
 
 
@@ -460,31 +469,46 @@ pub async fn reports_download(
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-        summary_table.push_row(vec![
+       
+        if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Compliance Status")),
             Box::new(elements::Text::new(if system.is_passed { ": Compliant" } else { ": Non-Compliant" })
                 .styled(style::Style::new().with_color(if system.is_passed { style::Color::Rgb(0, 128, 0) } else { style::Color::Rgb(200, 0, 0) }).bold())),
-        ]);
-        summary_table.push_row(vec![
+        ])  {
+            error!("Failed to add summary row to PDF: {}", e);
+        }
+        
+        if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Violation Rule Count")),
             Box::new(elements::Text::new(format!(": Critical - {}", violation_count))),
-        ]);
-        summary_table.push_row(vec![
+        ]) {
+            error!("Failed to add summary row to PDF: {}", e);
+        }
+
+        if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Compliant Rule Count")),
             Box::new(elements::Text::new(format!(": {}", compliant_count))),
-        ]);
+        ]) {
+            error!("Failed to add summary row to PDF: {}", e);
+        }
+
         doc.push(summary_table);
         doc.push(elements::Break::new(1.0));
 
         // Detailed Rules Breakdown
         doc.push(elements::Text::new("Audit Rules Detailed Breakdown").styled(style::Style::new().bold()));
         let mut rules_table = elements::TableLayout::new(vec![2, 1, 4]);
+        
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-        rules_table.push_row(vec![
+        
+        if let Err(e) = rules_table.push_row(vec![
             Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
             Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
             Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
-        ]);
+        ]) {
+            error!("Failed to add row to PDF table: {}", e);
+        }
+
 
         for res in &system.results {
             let desc = report_data.tests_metadata.iter()
@@ -501,11 +525,14 @@ pub async fn reports_download(
             };
 
 
-            rules_table.push_row(vec![
+            if let Err(e) = rules_table.push_row(vec![
                 Box::new(elements::Text::new(&res.test_name)),
                 Box::new(elements::Text::new(status_text).styled(style::Style::new().with_color(status_color).bold())),
                 Box::new(elements::Text::new(desc)),
-            ]);
+            ]) {
+                error!("Failed to add row to PDF table: {}", e);
+            }
+
         }
         doc.push(rules_table);
         doc.push(elements::PageBreak::new());

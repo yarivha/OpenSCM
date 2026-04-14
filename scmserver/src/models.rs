@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 use sqlx::FromRow;
-use chrono::{DateTime, Utc, NaiveDateTime};
+use chrono::{DateTime, Utc};
 
 
 
@@ -111,21 +111,6 @@ pub struct PolicySchedule {
 }
 
 
-#[derive(Debug, FromRow, Serialize, Deserialize)]
-pub struct ScheduledJob {
-    pub id: i32,
-    pub job_name: String,
-    pub job_type: String,
-    pub policy_id: i32,
-    pub policy_name: Option<String>, // Joined from policies table
-    pub frequency: String,
-    pub delivery_method: Option<String>,
-    pub recipients: Option<String>,
-    pub last_run: Option<NaiveDateTime>,
-    pub next_run: Option<NaiveDateTime>,
-    pub is_enabled: i32,
-}
-
 
 #[derive(sqlx::FromRow, serde::Serialize, Clone)]
 pub struct ComplianceHistoryRow {
@@ -195,14 +180,6 @@ pub struct ComplianceResult {
     pub result: String,
 }
 
-#[derive(Serialize, Deserialize, FromRow)]
-pub struct SystemCompliance {
-    pub system_name: String,
-    pub os: String,
-    pub compliance: f64,
-    pub tests_passed: i64,
-    pub tests_failed: i64,
-}
 
 #[derive(FromRow, Serialize, Deserialize)]
 pub struct PolicyCompliance {

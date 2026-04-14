@@ -1,5 +1,4 @@
-use axum::response::{Html, IntoResponse, Redirect};
-use axum::http::StatusCode;
+use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path};
 use tokio::sync::mpsc; 
 use tera::{Tera, Context};
@@ -16,7 +15,8 @@ use crate::models::ErrorQuery;
 use crate::models::System;
 use crate::models::SystemGroup;
 use crate::models::SystemInsideGroup;
-use crate::auth::{self, UserRole, AuthSession};
+use crate::models::UserRole;
+use crate::auth::{self, AuthSession};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 

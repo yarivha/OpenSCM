@@ -10,7 +10,7 @@ mod tests;
 mod policies;
 mod reports;
 mod users;
-mod settings;
+//mod settings;
 mod scheduler;
 
 use tera::Tera;
@@ -33,7 +33,7 @@ use crate::tests::*;
 use crate::policies::*;
 use crate::reports::*;
 use crate::users::*;
-use crate::settings::*;
+//use crate::settings::*;
 use crate::scheduler::*;
 
 

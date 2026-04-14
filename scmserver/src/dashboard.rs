@@ -1,16 +1,11 @@
-use axum::response::{Html, IntoResponse};
+use axum::response::IntoResponse;
 use axum::http::StatusCode;
 use axum::extract::{Extension, Query};
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
-use sqlx::Row;
-use std::collections::HashMap;
 use std::sync::Arc;
 use tracing::error;
 
-use crate::models::ErrorQuery;
-use crate::models::SystemCompliance;
-use crate::models::PolicyCompliance;
 use crate::models::ComplianceHistoryRow;
 use crate::models::PolicyFailRow;
 use crate::models::SystemFailRow;
