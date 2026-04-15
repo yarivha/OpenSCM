@@ -8,14 +8,29 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     info!("Init Database......");
 
+
+    //  Tenants Table
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS tenants (
+            id TEXT PRIMARY KEY, -- Store UUID/ULID as TEXT
+            name TEXT NOT NULL UNIQUE,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+
     // Create notify table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS notify (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             type TEXT,
             timestamp TEXT,
             owner_id INTEGER,
-            message TEXT NOT NULL
+            message TEXT NOT NULL,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -25,11 +40,14 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            username TEXT NOT NULL UNIQUE,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            username TEXT NOT NULL ,
             password TEXT NOT NULL,
             name TEXT,
             email TEXT,
-            role TEXT
+            role TEXT,
+            UNIQUE(username, tenant_id),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -39,6 +57,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS systems (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             name TEXT,
             ver TEXT,
             key TEXT,
@@ -54,7 +73,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             compliance_score REAL DEFAULT 0.0,
             tests_passed INTEGER DEFAULT 0,
             tests_failed INTEGER DEFAULT 0,
-            total_tests INTEGER DEFAULT 0
+            total_tests INTEGER DEFAULT 0,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -65,8 +85,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS system_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            description TEXT
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            name TEXT NOT NULL,
+            description TEXT,
+            UNIQUE(name, tenant_id),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -75,9 +98,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Create systems_in_groups table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS systems_in_groups (
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             system_id INTEGER,
             group_id INTEGER,
-            PRIMARY KEY (system_id, group_id),
+            PRIMARY KEY (tenant_id, system_id, group_id),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
             FOREIGN KEY (group_id) REFERENCES system_groups (id) ON DELETE CASCADE
         )",
@@ -89,6 +114,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             name TEXT NOT NULL,
             description TEXT,
             rational TEXT,
@@ -122,7 +148,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             sinput_5 TEXT,
             compliance_score REAL DEFAULT 0.0,
             systems_passed INTEGER DEFAULT 0,
-            systems_failed INTEGER DEFAULT 0
+            systems_failed INTEGER DEFAULT 0,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -134,12 +161,14 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS policies (
            id INTEGER PRIMARY KEY AUTOINCREMENT,
+           tenant_id TEXT NOT NULL DEFAULT 'default',
            name TEXT NOT NULL,
            description TEXT,
            version TEXT,
            compliance_score REAL DEFAULT 0.0,
            systems_passed INTEGER DEFAULT 0,
-           systems_failed INTEGER DEFAULT 0
+           systems_failed INTEGER DEFAULT 0,
+           FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -151,6 +180,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS policy_schedules (
         id INTEGER PRIMARY KEY AUTOINCREMENT,
+        tenant_id TEXT NOT NULL DEFAULT 'default',
         policy_id INTEGER NOT NULL UNIQUE, -- This UNIQUE keyword is the fix
         enabled BOOLEAN NOT NULL DEFAULT 1,
         frequency TEXT NOT NULL,
@@ -158,7 +188,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         next_run DATETIME NOT NULL,
         last_run DATETIME,
         created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE
+        FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
+        FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -175,9 +206,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Create tests_in_policy table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tests_in_policy (
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             policy_id INTEGER,
             test_id INTEGER,
-            PRIMARY KEY (policy_id, test_id),
+            PRIMARY KEY (tenant_id, policy_id, test_id),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
         )",
@@ -189,9 +222,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Create systems_in_policy table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS systems_in_policy (
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             policy_id INTEGER,
             group_id INTEGER,
-            PRIMARY KEY (policy_id, group_id),
+            PRIMARY KEY (tenant_id, policy_id, group_id),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
             FOREIGN KEY (group_id) REFERENCES system_groups (id) ON DELETE CASCADE
         )",
@@ -203,9 +238,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Create commands table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS commands (
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             system_id INTEGER,
 	    test_id INTEGER,
-            PRIMARY KEY (system_id, test_id),
+            PRIMARY KEY (tenant_id, system_id, test_id),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
         )", 
@@ -217,11 +254,13 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Create results table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS results (
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             system_id INTEGER,
             test_id INTEGER,
             result TEXT,
             last_updated TEXT,
-            PRIMARY KEY (system_id, test_id),
+            PRIMARY KEY (tenant_id,system_id, test_id),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems(id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests(id) ON DELETE CASCADE
         )",
@@ -234,13 +273,15 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             submission_date DATETIME DEFAULT CURRENT_TIMESTAMP,
             policy_name TEXT NOT NULL,
             policy_version TEXT,
             policy_description TEXT,
             submitter_name TEXT,
             tests_metadata TEXT NOT NULL, 
-            report_results TEXT NOT NULL
+            report_results TEXT NOT NULL,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -248,36 +289,38 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
 
     // Create scheduler table
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS scheduler (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            job_name TEXT NOT NULL,
-            job_type TEXT NOT NULL,      -- 'command' or 'report'
-            policy_id INTEGER NOT NULL,  -- The policy to execute or report on
-            frequency TEXT NOT NULL,     -- 'daily', 'weekly', 'monthly', 'yearly'
-            delivery_method TEXT,        -- 'save', 'email', or 'both' (for reports)
-            recipients TEXT,             -- Comma-separated emails
-            last_run DATETIME,           -- Timestamp of last execution
-            next_run DATETIME,           -- Calculated next run time
-            is_enabled INTEGER DEFAULT 1, -- 1 for active, 0 for paused
-            FOREIGN KEY (policy_id) REFERENCES policies(id)
-        )",
-    )
-    .execute(pool)
-    .await?;
+    //sqlx::query(
+    //    "CREATE TABLE IF NOT EXISTS scheduler (
+    //        id INTEGER PRIMARY KEY AUTOINCREMENT,
+    //        job_name TEXT NOT NULL,
+    //        job_type TEXT NOT NULL,      -- 'command' or 'report'
+    //        policy_id INTEGER NOT NULL,  -- The policy to execute or report on
+    //        frequency TEXT NOT NULL,     -- 'daily', 'weekly', 'monthly', 'yearly'
+    //        delivery_method TEXT,        -- 'save', 'email', or 'both' (for reports)
+    //        recipients TEXT,             -- Comma-separated emails
+    //        last_run DATETIME,           -- Timestamp of last execution
+    //        next_run DATETIME,           -- Calculated next run time
+    //        is_enabled INTEGER DEFAULT 1, -- 1 for active, 0 for paused
+    //        FOREIGN KEY (policy_id) REFERENCES policies(id)
+    //    )",
+    //)
+    //.execute(pool)
+    //.await?;
 
 
     // Create compliance history table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS compliance_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
             check_date DATE DEFAULT CURRENT_TIMESTAMP,
             systems_score REAL DEFAULT 0.0,
             policies_score REAL DEFAULT 0.0,
             total_systems INTEGER,
             failed_systems INTEGER,
             total_policies INTEGER,
-            failed_policies INTEGER
+            failed_policies INTEGER,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -321,12 +364,18 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
 
+
+    // Insert the default CE tenant
+    sqlx::query("INSERT OR IGNORE INTO tenants (id, name) VALUES ('default', 'Default Tenant')")
+        .execute(pool)
+        .await?;
+
     // Insert default admin user if it doesn't exist
     let hashed_password = hash("admin", DEFAULT_COST).unwrap();
 
     sqlx::query(
-    "INSERT OR IGNORE INTO users (id, username, password, name, email, role)
-     VALUES (1, 'admin', ?, 'Admin User', 'admin@example.com', 'admin')",
+    "INSERT OR IGNORE INTO users (id, tenant_id,username, password, name, email, role)
+     VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'admin')",
     )
     .bind(hashed_password)
     .execute(pool)
@@ -354,7 +403,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Selements
     // --------------------
     let selements = vec![
-        ("Exists"), ("Not Exists"),("Open"),("Close"),("Content"),("Version"),("Permission"),("Owner"),("SHA1"),("SHA256"),
+        ("Exists"), ("Not Exists"),("Content"),("Version"),("Permission"),("Owner"),("SHA1"),("SHA256"),
     ];
 
     for name in selements {
@@ -371,7 +420,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Conditions
     // --------------------
     let conditions = vec![
-        ("Contains"),("Not Contains"),("Equals"),("Not Equals"),("More Than"),("Less Than")
+        ("Contains"),("Not Contains"),("Equals"),("Not Equals"),("More Than"),("Less Than"),("Regular Expression")
     ];
 
     for name in conditions {
@@ -387,3 +436,6 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     Ok(())
 } 
+
+
+
