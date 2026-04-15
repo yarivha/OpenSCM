@@ -15,7 +15,6 @@ mod scheduler;
 
 use tera::Tera;
 use axum::{Extension, Router, response::{Response, IntoResponse}, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
-use axum_extra::extract::cookie::Key;
 use tokio::sync::mpsc;
 use base64::{Engine as _, engine::general_purpose};
 use std::time::Duration;
