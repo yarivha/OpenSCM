@@ -92,6 +92,7 @@ Section "Install"
     # We update the environment but the agent will still look for 
     # its old hashed ID files based on the URL.
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL" "$ServerURL"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Tenant_id" "default"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$APPDATA\OpenSCM\Client\keys"
