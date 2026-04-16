@@ -10,7 +10,6 @@ mod tests;
 mod policies;
 mod reports;
 mod users;
-//mod settings;
 mod scheduler;
 
 use tera::Tera;
@@ -24,19 +23,56 @@ use std::{sync::Arc, str::FromStr, net::SocketAddr, path::PathBuf, error::Error}
 use std::fs;
 use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
 use include_dir::{include_dir, Dir};
+use hkdf::Hkdf;
+use sha2::Sha256;
 
-use crate::handlers::*;
-use crate::schema::*;
-use crate::auth::*;
-use crate::client::*;
-use crate::dashboard::*;
-use crate::systems::*;
-use crate::tests::*;
-use crate::policies::*;
-use crate::reports::*;
-use crate::users::*;
-//use crate::settings::*;
-//use crate::scheduler::*;
+
+// Handlers (shared utilities)
+use crate::handlers::{not_found};
+
+// Schema
+use crate::schema::initialize_database;
+
+// Auth
+use crate::auth::{login, login_submit, logout};
+
+// Dashboard
+use crate::dashboard::{dashboard};
+
+// Systems
+use crate::systems::{
+    systems, systems_approve, systems_delete, systems_edit, systems_edit_save,
+    systems_pending, system_groups, system_groups_add, system_groups_add_save,
+    system_groups_delete, system_groups_edit, system_groups_edit_save,
+};
+
+// Tests
+use crate::tests::{
+    tests, tests_add, tests_add_save, tests_delete, tests_edit, tests_edit_save,
+};
+
+// Policies
+use crate::policies::{
+    policies, policies_add, policies_add_save, policies_edit, policies_edit_save,
+    policies_delete, policies_run, policies_report, policies_report_download,
+};
+
+// Reports
+use crate::reports::{
+    reports, reports_save, reports_view, reports_delete, reports_download,
+};
+
+// Users
+use crate::users::{
+    users, users_add, users_add_save,
+    users_delete, users_edit, users_edit_save, change_password,
+};
+
+// Client (API endpoints)
+use crate::client::{send, receive_result};
+
+// Scheduler
+use crate::scheduler::{recalculate_current_compliance, start_background_scheduler};
 
 
 // Embedded templates/static files
@@ -44,17 +80,23 @@ static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates
 static STATIC_FILES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/static");
 
 // Initialize Tera from embedded templates
-pub fn init_tera() -> Result<Tera, tera::Error> {
+pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
     let mut tera = Tera::default();
     for file in TEMPLATES_DIR.files() {
-        let path = file.path().to_str().unwrap();
-        let content = String::from_utf8_lossy(file.contents()).into_owned();
+        let path = file.path().to_str()
+            .ok_or_else(|| format!("Template path is not valid UTF-8: {:?}", file.path()))?;
+        
+        let content = std::str::from_utf8(file.contents())
+            .map_err(|e| format!("Template '{}' contains invalid UTF-8: {}", path, e))?
+            .to_owned();
+
         tera.add_raw_template(path, &content)?;
     }
     tera.build_inheritance_chains()?;
     tera.check_macro_files()?;
     Ok(tera)
 }
+
 
 // Serve embedded static files
 async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
@@ -97,24 +139,42 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let _ = reload_handle.reload(EnvFilter::new(loglevel));
     debug!("Log level set to '{}'", loglevel);
 
-    // Load private key
+
+    // Load server private key
+    info!("Load server private key ...");
     let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or(""));
     let priv_file = config.key.private_key.as_deref().unwrap_or("scmserver.key");
     let priv_path = key_dir.join(priv_file);
 
-    let priv_base64 = fs::read_to_string(&priv_path)?;
-    let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim())?;
+    let priv_base64 = fs::read_to_string(&priv_path).map_err(|e| {
+        error!("Failed to read private key from '{}': {}", priv_path.display(), e);
+        e
+    })?;
+    let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim()).map_err(|e| {
+        error!("Failed to decode private key (invalid base64): {}", e);
+        e
+    })?;
 
-    // 1. Create a 64-byte buffer (filled with zeros)
-    let mut expanded_key = [0u8; 64];
+    // Validate key length
+    if priv_bytes.len() != 32 {
+        error!("Private key must be 32 bytes, got {}", priv_bytes.len());
+        return Err("Invalid private key length".into());
+    }
 
-    // 2. Fill the buffer by repeating your 32-byte key twice
-    // This is deterministic: it will always result in the same 64-bytes
-    expanded_key[..32].copy_from_slice(&priv_bytes);
-    expanded_key[32..].copy_from_slice(&priv_bytes);
-   
-    // 3. Now pass the 64-byte array to Key::from
-    let cookie_key = axum_extra::extract::cookie::Key::from(&expanded_key);
+    // Derive a separate cookie signing key from the server private key using HKDF.
+    // This is cryptographically isolated from the Ed25519 signing key — safe to derive,
+    // deterministic, and requires no extra key file.
+    info!("Generate cookie key ...");
+    let hk = Hkdf::<Sha256>::new(None, &priv_bytes);
+    let mut cookie_key_bytes = [0u8; 64];
+    hk.expand(b"oscm-cookie-signing-v1", &mut cookie_key_bytes)
+        .map_err(|e| {
+            error!("HKDF key derivation failed: {}", e);
+            format!("HKDF expand failed: {}", e)
+        })?;
+
+    let cookie_key = axum_extra::extract::cookie::Key::from(&cookie_key_bytes);
+
 
     // 3. Database Initialization
     info!("Connecting database at '{}'...", config.database.path);
@@ -158,7 +218,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
             info!("Compliance Sync Worker: Starting batch recalculation...");
             // Replace 'reports' with the actual module where your function lives
-            if let Err(e) = crate::scheduler::recalculate_current_compliance(&worker_pool).await {
+            if let Err(e) = recalculate_current_compliance(&worker_pool).await {
                 error!("Compliance Sync Worker: Batch recalculation failed: {}", e);
             } else {
                 info!("Compliance Sync Worker: Batch recalculation successful.");
@@ -168,11 +228,15 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 
     // 5. Background Scheduler (Keep existing)
-    crate::scheduler::start_background_scheduler(pool.clone()).await;
+    start_background_scheduler(pool.clone()).await;
 
     // 6. Template Engine
     info!("Loading Server Templates");
-    let tera = Arc::new(init_tera()?);
+    let tera = Arc::new(init_tera().map_err(|e| {
+        error!("Failed to initialize template engine: {}", e);
+        e
+    })?); 
+    
     let config = Arc::new(config);
 
     // 7. Routes
@@ -221,11 +285,19 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .layer(Extension(config.clone()))
         .layer(Extension(sync_tx))
         .with_state(cookie_key);
+    
     // Pull port from config (default 8000)
-    let port: u16 = config.server.port.as_deref()
-    .unwrap_or("8000")
-    .parse()
-    .unwrap_or(8000);
+    let port: u16 = match config.server.port.as_deref().unwrap_or("8000").parse() {
+        Ok(p) => p,
+        Err(_) => {
+            warn!(
+                "Invalid port '{}' in config, falling back to 8000",
+                config.server.port.as_deref().unwrap_or("8000")
+            );
+            8000
+        }
+    };
+
 
     let addr = SocketAddr::from(([0, 0, 0, 0], port));
     
