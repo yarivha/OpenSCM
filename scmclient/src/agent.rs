@@ -27,6 +27,7 @@ fn get_url_namespace(url: &str) -> String {
 async fn process_compliance_tests(
     tests: Vec<Test>,
     client_id: &str,
+    tenant_id: &Option<String>,
     signing_key: &SigningKey,
     http_client: &reqwest::Client,
     result_url: &str
@@ -65,6 +66,7 @@ async fn process_compliance_tests(
 
         let payload = ComplianceResult {
             client_id: client_id.parse().unwrap_or(0),
+            tenant_id: tenant_id.clone(),
             test_id,
             result: final_result,
         };
@@ -210,7 +212,7 @@ pub async fn send_system_info(
             Some("TEST") => {
                 if let Some(tests_val) = inner_json.get("data") {
                     let tests: Vec<Test> = serde_json::from_value(tests_val.clone())?;
-                    process_compliance_tests(tests, &current_id, &signing_key, &client, &result_url).await;
+                    process_compliance_tests(tests, &current_id, &config.server.tenant_id, &signing_key, &client, &result_url).await;
                 }
             },
             _ => debug!("Heartbeat OK."),

@@ -1,7 +1,8 @@
-use tracing::error;
+use tracing::{ debug, error};
 use std::path::Path;
 use std::fs;
 use semver::Version;
+use sysinfo::{System, Process};
 use std::process::Command;
 use std::net::{TcpStream, ToSocketAddrs};
 
@@ -45,6 +46,15 @@ fn check_group_exists(group: &str) -> bool {
     Command::new("net").args(["localgroup", group]).status().map(|s| s.success()).unwrap_or(false)
 }
 
+
+#[cfg(unix)]
+fn is_user_in_group(user: &str, group: &str) -> bool {
+    use std::process::Command;
+    let output = Command::new("id").args(["-Gn", user]).output().ok();
+    output.map(|o| String::from_utf8_lossy(&o.stdout).split_whitespace().any(|g| g == group)).unwrap_or(false)
+}
+
+
 fn check_port_open(port: &str) -> bool {
     let addr = format!("127.0.0.1:{}", port);
     TcpStream::connect_timeout(&addr.parse().unwrap(), std::time::Duration::from_millis(500)).is_ok()
@@ -52,17 +62,129 @@ fn check_port_open(port: &str) -> bool {
 
 #[cfg(unix)]
 fn check_package_exists(package: &str) -> bool {
-    // Check for Debian/Ubuntu or RHEL/CentOS
-    let dpkg = Command::new("dpkg").args(["-s", package]).status().map(|s| s.success()).unwrap_or(false);
-    let rpm = Command::new("rpm").args(["-q", package]).status().map(|s| s.success()).unwrap_or(false);
-    dpkg || rpm
+    use std::process::Stdio;
+
+    // Check Debian/Ubuntu (dpkg)
+    // We add .stdout(Stdio::null()) and .stderr(Stdio::null()) to keep the console clean
+    let dpkg = Command::new("dpkg-query")
+        .args(["-W", "-f='${Status}'", package])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+
+    if dpkg { return true; }
+
+    // Check RHEL/CentOS/Fedora (rpm)
+    Command::new("rpm")
+        .args(["-q", package])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
 }
+
 
 #[cfg(windows)]
 fn check_package_exists(package: &str) -> bool {
     let output = Command::new("powershell").args(["-Command", &format!("Get-Package -Name {}", package)]).output().ok();
     output.map(|o| o.status.success()).unwrap_or(false)
 }
+
+
+
+#[cfg(unix)]
+fn get_package_version(package: &str) -> Option<String> {
+    use std::process::Command;
+
+    // 1. Try Debian/Ubuntu (dpkg)
+    let output = Command::new("dpkg-query")
+        .args(["-W", "-f=${Version}", package])
+        .output()
+        .ok();
+
+    if let Some(o) = output {
+        if o.status.success() {
+            let ver = String::from_utf8_lossy(&o.stdout).trim().to_string();
+            // Optional: Strip epoch (e.g., '1:2.0' -> '2.0')
+            return Some(ver.split(':').last().unwrap_or(&ver).to_string());
+        }
+    }
+
+    // 2. Try RHEL/CentOS/Fedora (rpm)
+    let output_rpm = Command::new("rpm")
+        .args(["-q", "--queryformat", "%{VERSION}", package])
+        .output()
+        .ok();
+
+    if let Some(o) = output_rpm {
+        if o.status.success() {
+            return Some(String::from_utf8_lossy(&o.stdout).trim().to_string());
+        }
+    }
+
+    None
+}
+
+#[cfg(windows)]
+fn get_package_version(package: &str) -> Option<String> {
+    let cmd = format!("(Get-Package -Name {}).Version", package);
+    let output = Command::new("powershell")
+        .args(["-Command", &cmd])
+        .output()
+        .ok();
+
+    output.and_then(|o| {
+        if o.status.success() {
+            Some(String::from_utf8_lossy(&o.stdout).trim().to_string())
+        } else { None }
+    })
+}
+
+
+fn get_system_domain() -> Option<String> {
+    #[cfg(unix)]
+    {
+        use std::process::Command;
+        // 1. Try 'hostname -d' (DNS domain)
+        if let Ok(output) = Command::new("hostname").arg("-d").output() {
+            if output.status.success() {
+                let d = String::from_utf8_lossy(&output.stdout).trim().to_string();
+                if !d.is_empty() && d != "(none)" { return Some(d); }
+            }
+        }
+        // 2. Fallback: Parse /etc/resolv.conf for 'domain' or 'search'
+        if let Ok(content) = std::fs::read_to_string("/etc/resolv.conf") {
+            for line in content.lines() {
+                let trimmed = line.trim();
+                if trimmed.starts_with("domain ") || trimmed.starts_with("search ") {
+                    return trimmed.split_whitespace().nth(1).map(|s| s.to_string());
+                }
+            }
+        }
+        None
+    }
+
+    #[cfg(windows)]
+    {
+        use std::process::Command;
+        // Use PowerShell to get the specific Domain/Workgroup field
+        let output = Command::new("powershell")
+            .args(["-Command", "(Get-WmiObject Win32_ComputerSystem).Domain"])
+            .output()
+            .ok();
+
+        output.and_then(|o| {
+            if o.status.success() {
+                let d = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                if !d.is_empty() { Some(d) } else { None }
+            } else { None }
+        })
+    }
+}
+
 
 
 fn calculate_sha1(path: &str) -> Result<String, std::io::Error> {
@@ -204,12 +326,27 @@ pub fn evaluate(
         // =========================================================
         "domain" => match selement_l.as_str() {
             "content" => {
-                // Placeholder: In a real agent, you'd pull this from sysinfo or netapi32
-                let actual = "local"; 
-                actual.contains(sinput_trim)
+                // 1. Get the actual domain from the system
+                let actual = get_system_domain().unwrap_or_else(|| "local".to_string());
+        
+                // 2. Perform case-insensitive comparison
+                match condition_l.as_str() {
+                    "contains" => actual.to_lowercase().contains(&sinput_trim.to_lowercase()),
+                    "not contains" => !actual.to_lowercase().contains(&sinput_trim.to_lowercase()),
+                    "equals" | "equal" => actual.to_lowercase() == sinput_trim.to_lowercase(),
+                    _ => {
+                        error!("Unsupported domain condition: {}", condition);
+                        false
+                    }
+                }
             },
-            _ => false,
+            _ => {
+                error!("Unsupported domain selement: {}", selement);
+                false
+            }
         },
+
+
 
         // =========================================================
         // FILE: The heavy lifter for security configuration
@@ -250,10 +387,92 @@ pub fn evaluate(
                 }
                 #[cfg(windows)] { false }
             },
-            "sha1" => calculate_sha1(input).map(|h| h.to_lowercase() == sinput_trim.to_lowercase()).unwrap_or(false),
-            "sha2" => calculate_sha2(input).map(|h| h.to_lowercase() == sinput_trim.to_lowercase()).unwrap_or(false),
-            _ => false,
+
+            "sha1" => {
+                match calculate_sha1(input) {
+                    Ok(actual_hash) => {
+                        let actual = actual_hash.to_lowercase();
+                        let expected = sinput_trim.to_lowercase();
+
+                        debug!("SHA1 Check - File: {}", input);
+                        debug!("  -> Actual:   {}", actual);
+                        debug!("  -> Expected: {}", expected);
+
+                        match condition_l.as_str() {
+                            "equals" | "equal" => {
+                                // Exact match: Strings must be identical
+                                actual == expected
+                            }
+                            "not equals" | "not equal" => {
+                                // Exact mismatch
+                                actual != expected
+                            }
+                            "contains" => {
+                                // Partial match: Handles "HASH filename" format
+                                expected.contains(&actual)
+                            }
+                            "not contains" => {
+                                // Partial mismatch
+                                !expected.contains(&actual)
+                            }
+                            _ => {
+                                error!("Unsupported SHA1 condition: {}", condition);
+                                false
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to calculate SHA1 for {}: {}", input, e);
+                        false
+                    }
+                }
+            },
+
+            "sha2" => {
+                match calculate_sha2(input) {
+                    Ok(actual_hash) => {
+                        let actual = actual_hash.to_lowercase();
+                        let expected = sinput_trim.to_lowercase();
+
+                        debug!("SHA2 Check - File: {}", input);
+                        debug!("  -> Actual:   {}", actual);
+                        debug!("  -> Expected: {}", expected);
+
+                        match condition_l.as_str() {
+                            "equals" | "equal" => {
+                                // Exact match
+                                actual == expected
+                            }
+                            "not equals" | "not equal" => {
+                                // Exact mismatch
+                                actual != expected
+                            }
+                            "contains" => {
+                                // Partial match: Useful for "sha256sum" console output
+                                expected.contains(&actual)
+                            }
+                            "not contains" => {
+                                // Partial mismatch
+                                !expected.contains(&actual)
+                            }
+                            _ => {
+                                error!("Unsupported SHA2 condition: {}", condition);
+                                false
+                            }
+                        }
+                    }
+                    Err(e) => {
+                        error!("Failed to calculate SHA2 for {}: {}", input, e);
+                        false
+                    }
+                }
+            },
+            _ => {
+                error!("Unsupported file selement: {}", selement);
+                false
+            }
         },
+
 
         // =========================================================
         // GROUP: Local system groups
@@ -262,9 +481,8 @@ pub fn evaluate(
             "exists" => check_group_exists(input),
             "not exists" => !check_group_exists(input),
             "content" => {
-                // Logic to check if sinput (user) is a member of input (group)
-                // This usually requires shell command 'id -Gn <user>' or similar
-                false 
+                #[cfg(unix)] { is_user_in_group(sinput_trim, input) }
+                #[cfg(windows)] { false } // Placeholder for net localgroup logic
             },
             _ => false,
         },
@@ -309,11 +527,42 @@ pub fn evaluate(
             "exists" => check_package_exists(input),
             "not exists" => !check_package_exists(input),
             "version" => {
-                // Requires executing 'dpkg -s' or 'rpm -q' and parsing the version string
-                false
+                // 1. Get the actual version installed on the system
+                if let Some(actual_ver_str) = get_package_version(input) {
+                    // 2. Normalize both to SemVer for a fair comparison
+                    let actual_v = parse_to_semver(&actual_ver_str);
+                    let target_v = parse_to_semver(sinput_trim);
+
+                    if let (Some(a), Some(t)) = (actual_v, target_v) {
+                        match condition_l.as_str() {
+                            "equal" | "equals" | "==" => a == t,
+                            "not equal" | "!=" => a != t,
+                            "more than" | "greater than" | ">" => a > t,
+                            "less than" | "<" => a < t,
+                            _ => {
+                                error!("Unsupported package version condition: {}", condition);
+                                false
+                            }
+                        }
+                    } else {
+                        // Fallback: If SemVer fails, do a simple string comparison
+                        match condition_l.as_str() {
+                            "equal" | "equals" => actual_ver_str == sinput_trim,
+                            "contains" => actual_ver_str.contains(sinput_trim),
+                            _ => false
+                        }
+                    }
+                } else {
+                    // Package isn't even installed, so version check fails
+                    false
+                }
             },
-            _ => false,
+            _ => {
+                error!("Unsupported package selement: {}", selement);
+                false
+            }
         },
+
 
         // =========================================================
         // PORT & PROCESS
@@ -323,18 +572,55 @@ pub fn evaluate(
             "not exists" => !check_port_open(input),
             _ => false,
         },
-        "process" => match selement_l.as_str() {
-            "exists" => {
-                // Typically uses the 'sysinfo' crate to iterate processes
-                false 
-            },
-            "not exists" => true,
-            _ => false,
+
+        "process" => {
+
+            let mut s = System::new();
+            s.refresh_processes();
+            
+            let is_running = s.processes().values().any(|p: &Process| {
+                p.name().to_lowercase().contains(&input.to_lowercase())
+            });
+
+            match selement_l.as_str() {
+                "exists" => {
+                    is_running
+                }
+                "not exists" => {
+                    !is_running
+                }
+                _ => {
+                    error!("Unsupported process check: element=process, selement={}", selement);
+                    false
+                }
+            }
         },
+
 
         // =========================================================
         // REGISTRY (Windows Only)
         // =========================================================
+        "registry" => match selement_l.as_str() {
+    "content" => {
+        #[cfg(windows)] {
+            // Logic to get registry value via PowerShell
+            let cmd = format!("(Get-ItemProperty -Path 'HKLM:\\{}').{}", input, "ValueName"); // You'll need a way to pass ValueName
+            let output = Command::new("powershell").args(["-Command", &cmd]).output().ok();
+            output.map(|o| {
+                let actual = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                match condition_l.as_str() {
+                    "equals" => actual == sinput_trim,
+                    "contains" => actual.contains(sinput_trim),
+                    _ => false
+                }
+            }).unwrap_or(false)
+        }
+        #[cfg(unix)] { false }
+    },
+    _ => false,
+},
+
+
         "registry" => match selement_l.as_str() {
             "exists" => {
                 #[cfg(windows)] {
@@ -343,9 +629,25 @@ pub fn evaluate(
                 }
                 #[cfg(unix)] { false }
             },
-            "content" => false, // Requires 'Get-ItemProperty' logic
+            "content" => {
+                #[cfg(windows)] {
+                // Logic to get registry value via PowerShell
+                let cmd = format!("(Get-ItemProperty -Path 'HKLM:\\{}').{}", input, "ValueName"); // You'll need a way to pass ValueName
+                let output = Command::new("powershell").args(["-Command", &cmd]).output().ok();
+                output.map(|o| {
+                    let actual = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                    match condition_l.as_str() {
+                        "equals" => actual == sinput_trim,
+                        "contains" => actual.contains(sinput_trim),
+                        _ => false
+                    }
+                }).unwrap_or(false)
+            }
+            #[cfg(unix)] { false }
+            },
             _ => false,
         },
+
 
         // =========================================================
         // USER

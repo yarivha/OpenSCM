@@ -63,6 +63,7 @@ pub struct Test {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ComplianceResult {
     pub client_id: i64,
+    pub tenant_id: Option<String>,
     pub test_id: i64,
     pub result: String, // "true", "false", "NA"
 }
