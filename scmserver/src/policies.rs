@@ -523,7 +523,7 @@ pub async fn policies_edit_save(
     // RECALCULATE GLOBAL SCORES
     let _ = sync_tx.send(()).await;
 
-    info!("System ID {} deleted successfully. Compliance scores recalculated.", id);
+    info!("System ID {} updated successfully. Compliance scores recalculated.", id);
 
 
     Redirect::to("/policies").into_response()

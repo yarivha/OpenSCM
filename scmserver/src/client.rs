@@ -1,6 +1,6 @@
 use axum::{extract::Extension,http::StatusCode,response::IntoResponse,Json,};
 use tokio::sync::mpsc;
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
@@ -57,7 +57,12 @@ pub async fn send(
     let mut response_data = serde_json::json!({});
     
     // Fallback to 'default' for old clients
-    let tenant_id = payload.tenant_id.as_deref().unwrap_or("default");
+    let tenant_id = if payload.tenant_id.is_empty() { 
+        "default" 
+    } else { 
+        &payload.tenant_id 
+    };
+
 
     let id = match payload.id.parse::<i64>() {
         Ok(val) => val,
@@ -226,9 +231,15 @@ pub async fn receive_result(
     Json(signed_req): Json<SignedResult>,
 ) -> impl IntoResponse {
     let payload = &signed_req.payload;
-    let tenant_id = payload.tenant_id.as_deref().unwrap_or("default");
+    
+    // If the string is empty, we treat it as "default", otherwise use the string itself
+    let tenant_id = if payload.tenant_id.is_empty() { 
+        "default" 
+    } else { 
+        &payload.tenant_id 
+    };
 
-    info!("Result received from Agent ID: {} (Test ID: {})", payload.client_id, payload.test_id);
+    info!("Result received from Agent ID: {} , Tenant: {}  (Test ID: {})", payload.client_id, payload.tenant_id,payload.test_id);
 
     // 1. Auth Check
     let db_pubkey = match sqlx::query_scalar::<_, String>("SELECT key FROM systems WHERE id = ?")
