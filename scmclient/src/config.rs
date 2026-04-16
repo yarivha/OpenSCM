@@ -71,7 +71,9 @@ impl Config {
             
             // Note: We no longer save ClientID here.
             key.set_value("ServerURL", &self.server.url)?;
-            if let Some(ti) = &self.server.tenant_id { key.set_value("Tenant_id", ti)?; }
+            let tenant_to_save = self.server.tenant_id.as_deref().unwrap_or("default");
+            key.set_value("Tenant_id", &tenant_to_save.to_string())?;
+
             if let Some(hb) = &self.client.heartbeat { key.set_value("Heartbeat", hb)?; }
             if let Some(ll) = &self.client.loglevel { key.set_value("LogLevel", ll)?; }
             if let Some(kp) = &self.key.key_path { key.set_value("KeyPath", kp)?; }
