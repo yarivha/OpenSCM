@@ -114,19 +114,26 @@ fn get_config_path() -> PathBuf {
     PathBuf::from("/etc/openscm/scmclient.config")
 }
 
+
+
 #[cfg(target_os = "windows")]
 fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
     let mut needs_repair = false;
+    
+    // Updated closure to clean registry data
     let mut get_val = |name: &str, default: &str| {
-        key.get_value(name).unwrap_or_else(|_| {
+        let val: String = key.get_value(name).unwrap_or_else(|_| {
             needs_repair = true; 
             default.to_string()
-        })
+        });
+        
+        // CRITICAL: Remove null terminators (\0) and surrounding whitespace
+        // This prevents "hidden" character mismatches in signatures
+        val.trim_matches(char::from(0)).trim().to_string()
     };
-
 
     let config = Config {
         server: ServerConfig {
@@ -138,6 +145,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
             loglevel: Some(get_val("LogLevel", "info")),
         },
         key: KeyPair {
+            // Trim paths too to avoid invalid path errors on Windows
             key_path: Some(get_val("KeyPath", r"C:\ProgramData\OpenSCM\Client\keys")),
         },
     };
@@ -147,13 +155,15 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         config.save()?; 
     }
 
-    // Ensure directory exists
     if let Some(path) = &config.key.key_path {
         fs::create_dir_all(path)?;
     }
 
     Ok(config)
 }
+
+
+
 
 #[cfg(not(target_os = "windows"))]
 fn bootstrap_default_config(path: &Path) -> Result<(), Box<dyn Error>> {
