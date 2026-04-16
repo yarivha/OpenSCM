@@ -126,10 +126,17 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         })
     };
 
+    let raw_tenant = get_val("Tenant_id", "default");
+    let tenant_id = if raw_tenant == "default" || raw_tenant.is_empty() {
+        None 
+    } else {
+        Some(raw_tenant)
+    };
+
     let config = Config {
         server: ServerConfig {
             url: get_val("ServerURL", "http://localhost:8000"),
-            tenant_id: Some(get_val("Tenant_id","default")),
+            tenant_id,
         },
         client: ClientConfig {
             heartbeat: Some(get_val("Heartbeat", "300")),
