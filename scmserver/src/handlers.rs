@@ -16,6 +16,7 @@ use crate::auth::AuthSession;
 
 
 //////////////////////////////// Helper Functions ///////////////////////////////////
+
 pub async fn render_template(
     tera: &Tera,
     pool: Option<&SqlitePool>,
@@ -23,91 +24,95 @@ pub async fn render_template(
     mut context: Context,
     auth: Option<AuthSession>,
 ) -> Result<Html<String>, StatusCode> {
-    // Add common context values
+    // 1. GLOBAL CONTEXT
+    // These values are inserted for every request, regardless of login status
     context.insert("version", env!("CARGO_PKG_VERSION"));
-    if let Some(session) = &auth {
-        context.insert("username", &session.username);
-         context.insert("userid", &session.userid);
-        context.insert("role", &session.role);
-    }
 
-    if let Some(pool) = pool {
+    // 2. DATABASE LOGIC (If a pool is provided)
+    if let Some(db_pool) = pool {
         
-        // Add notify count
-        let notify_row = sqlx::query("SELECT COUNT(*) as count FROM notify")
-                  .fetch_one(pool)
-                  .await
-                  .map_err(|e| {
-                    error!("DB error getting notify count: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                  })?;
-
-        let notify_count: i64 = notify_row.get("count");
-        context.insert("notify_count", &notify_count);
-
-        // Add notify list
-        let notifications = sqlx::query("SELECT id, type, timestamp, message FROM notify ORDER BY timestamp DESC LIMIT 10")
-            .map(|row: sqlx::sqlite::SqliteRow| Notification {
-                id: row.get("id"),
-                r#type: row.get("type"),
-                timestamp: row.get("timestamp"),
-                message: row.get("message"),
-            })
-            .fetch_all(pool)
+        // --- Global Database Query ---
+        // Guests and logged-in users both need to see this
+        let pending_count: i64 = sqlx::query("SELECT COUNT(*) as count FROM systems WHERE status = 'pending'")
+            .fetch_one(db_pool)
             .await
-            .map_err(|e| {
-                error!("Failed to fetch notifications: {}", e);
-                StatusCode::INTERNAL_SERVER_ERROR
-            })?;
-        context.insert("notifications", &notifications);
-
-        // Add pending registrations count 
-        let pending_row = sqlx::query("SELECT COUNT(*) as count FROM systems WHERE status = 'pending'")
-                  .fetch_one(pool)
-                  .await
-                  .map_err(|e| {
-                    error!("DB error getting pending count: {}", e);
-                    StatusCode::INTERNAL_SERVER_ERROR
-                  })?;
-
-        let pending_count: i64 = pending_row.get("count");
+            .map(|row| row.get::<i64, _>("count"))
+            .unwrap_or(0);
+        
         context.insert("pending_count", &pending_count);
+
+        // --- User-Specific Database Query ---
+        // We only "reach in" for these if a session exists
+        if let Some(session) = &auth {
+            // Get notification count
+            let notify_count: i64 = sqlx::query(
+                "SELECT COUNT(*) as count FROM notify WHERE owner_id = ? AND tenant_id = ?"
+            )
+            .bind(&session.userid)
+            .bind(&session.tenant_id) // Standardized on "default" string
+            .fetch_one(db_pool)
+            .await
+            .map(|row| row.get::<i64, _>("count"))
+            .unwrap_or(0);
+
+            context.insert("notify_count", &notify_count);
+
+            // Get notification list (Top 10)
+            let notifications = sqlx::query_as::<_, Notification>(
+                "SELECT id, type, timestamp, message FROM notify WHERE owner_id = ? AND tenant_id = ? ORDER BY timestamp DESC LIMIT 10"
+            )
+            .bind(&session.userid)
+            .bind(&session.tenant_id)
+            .fetch_all(db_pool)
+            .await
+            .unwrap_or_default();
+
+            context.insert("notifications", &notifications);
+        } else {
+            // Guest defaults for DB-related fields
+            context.insert("notify_count", &0);
+            context.insert("notifications", &Vec::<Notification>::new());
+        }
+    } else {
+        // Fallback if no pool is available at all
+        context.insert("pending_count", &0);
+        context.insert("notify_count", &0);
     }
-   
-    // Add authorization functions
+
+    // 3. AUTHORIZATION & SESSION CONTEXT
+    // This populates the UI permissions and user info
     if let Some(session) = &auth {
-        // 2. Now 'session' is the actual AuthSession, so we can access .role
         let role_enum = UserRole::from(session.role.as_str());
 
-        // 3. Insert the specific strings for the template
         context.insert("username", &session.username);
+        context.insert("userid", &session.userid);
+        context.insert("tenant_id", &session.tenant_id);
         context.insert("role", &session.role);
 
-        // 4. Calculate permissions based on your hierarchy
+        // Permissions hierarchy
         context.insert("is_admin", &(role_enum >= UserRole::Admin));
         context.insert("is_editor", &(role_enum >= UserRole::Editor));
         context.insert("is_runner", &(role_enum >= UserRole::Runner));
         context.insert("is_viewer", &(role_enum >= UserRole::Viewer));
-
     } else {
-        // Optional: Logic for when NO user is logged in (Guest mode)
+        // Guest defaults for UI
+        context.insert("username", "Guest");
+        context.insert("role", "Guest");
         context.insert("is_admin", &false);
         context.insert("is_editor", &false);
         context.insert("is_runner", &false);
         context.insert("is_viewer", &false);
     }
 
-
-    // Render template with detailed error reporting
+    // 4. FINAL RENDER
     let rendered = tera.render(template_name, &context).map_err(|e| {
-        // The {:?} is critical here to see the "Caused by" chain from Tera
         error!("Template render error ({}): {:?}", template_name, e);
         StatusCode::INTERNAL_SERVER_ERROR
     })?;
 
     Ok(Html(rendered))
-
 }
+
 
 
 // Helper function to parse URL-encoded form data

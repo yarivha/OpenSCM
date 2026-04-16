@@ -132,9 +132,10 @@ pub struct SystemInsidePolicy {
     pub group_id:  i32,
 }
 
-#[derive(Debug, serde::Serialize)]
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Notification {
     pub id: i64,
+    pub tenant_id: String,
     pub r#type: String,
     pub timestamp: String,
     pub message: String,
