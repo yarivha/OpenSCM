@@ -71,6 +71,7 @@ impl Config {
             
             // Note: We no longer save ClientID here.
             key.set_value("ServerURL", &self.server.url)?;
+            if let Some(ti) = &self.server.tenant_id { key.set_value("Tenant_id", ti)?; }
             if let Some(hb) = &self.client.heartbeat { key.set_value("Heartbeat", hb)?; }
             if let Some(ll) = &self.client.loglevel { key.set_value("LogLevel", ll)?; }
             if let Some(kp) = &self.key.key_path { key.set_value("KeyPath", kp)?; }
@@ -128,6 +129,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let config = Config {
         server: ServerConfig {
             url: get_val("ServerURL", "http://localhost:8000"),
+            tenant_id: Some(get_val("Tenant_id","default")),
         },
         client: ClientConfig {
             heartbeat: Some(get_val("Heartbeat", "300")),
