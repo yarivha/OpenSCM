@@ -23,6 +23,7 @@ pub struct Config {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ServerConfig {
     pub url: String, // Mandatory: Agent can't run without it
+    pub tenant_id: Option<String>
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -48,6 +49,7 @@ impl Default for Config {
         Self {
             server: ServerConfig {
                 url: "http://localhost:8000".to_string(),
+                tenant_id: Some("default".to_string()),
             },
             client: ClientConfig {
                 heartbeat: Some("300".to_string()),

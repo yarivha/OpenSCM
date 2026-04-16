@@ -7,6 +7,7 @@ use serde::{Serialize, Deserialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UnsignedPayload {
     pub id: String,
+    pub tenant_id: Option<String>,
     pub hostname: String,
     pub ver: String,
     pub ip: String,

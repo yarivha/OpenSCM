@@ -92,7 +92,7 @@ pub async fn send_system_info(
     // 1. DERIVE NAMESPACED PATHS
     let namespace = get_url_namespace(&config.server.url);
     let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or("."));
-    
+
     // Identity is now stored in files like 'client_a1b2c3d4.id'
     let id_path = key_dir.join(format!("client_{}.id", namespace));
     let priv_path = key_dir.join(format!("client_{}.key", namespace));
@@ -146,6 +146,7 @@ pub async fn send_system_info(
 
         let unsigned_payload = UnsignedPayload {
             id: current_id.clone(),
+            tenant_id: config.server.tenant_id.clone(),
             hostname: my_hostname.clone(),
             ver: my_ver.clone(),
             ip: my_local_ip.clone(),
