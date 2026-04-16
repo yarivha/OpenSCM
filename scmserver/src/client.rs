@@ -257,10 +257,11 @@ pub async fn receive_result(
     // 3. Store Individual Result
     let now = chrono::Utc::now().to_string();
     let db_res = sqlx::query(
-        r#"INSERT INTO results (system_id, test_id, result, last_updated) 
-           VALUES (?, ?, ?, ?) 
-           ON CONFLICT(system_id, test_id) DO UPDATE SET result=excluded.result, last_updated=excluded.last_updated"#
+        r#"INSERT INTO results (tenant_id, system_id, test_id, result, last_updated) 
+           VALUES (?, ?, ?, ?, ?) 
+           ON CONFLICT(tenant_id,system_id, test_id) DO UPDATE SET result=excluded.result, last_updated=excluded.last_updated"#
     )
+    .bind(tenant_id)
     .bind(payload.client_id)
     .bind(payload.test_id)
     .bind(&payload.result)
