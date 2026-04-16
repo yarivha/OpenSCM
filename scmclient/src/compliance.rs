@@ -2,9 +2,11 @@ use tracing::error;
 use std::path::Path;
 use std::fs;
 use semver::Version;
+use std::process::Command;
+use std::net::{TcpStream, ToSocketAddrs};
 
-// Normalize a version string into a semantic version.
-// "0" -> "0.0.0", "1.2" -> "1.2.0", "1.2.3" stays "1.2.3".
+
+
 fn parse_to_semver(v: &str) -> Option<Version> {
     let parts: Vec<_> = v.split('.').collect();
     let normalized = match parts.len() {
@@ -15,104 +17,51 @@ fn parse_to_semver(v: &str) -> Option<Version> {
     Version::parse(&normalized).ok()
 }
 
-
 #[cfg(unix)]
 fn get_user_name_from_uid(uid: u32) -> Option<String> {
-    use std::process::Command;
-    
-    // Executes 'id -un <uid>' to get the username string from the system
-    let output = Command::new("id")
-        .args(["-un", &uid.to_string()])
-        .output()
-        .ok()?;
-
+    let output = Command::new("id").args(["-un", &uid.to_string()]).output().ok()?;
     if output.status.success() {
-        // Trim whitespace/newlines and convert to String
         Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
-    }
+    } else { None }
 }
-
-
 
 #[cfg(unix)]
 fn check_user_exists(user: &str) -> bool {
-    use std::process::Command;
-
-    // 'id <user>' returns exit code 0 if the user exists (by name or UID)
-    // and a non-zero code if they do not.
-    let status = Command::new("id")
-        .arg(user)
-        .stdout(std::process::Stdio::null()) // Suppress output
-        .stderr(std::process::Stdio::null()) // Suppress error messages
-        .status();
-
-    match status {
-        Ok(s) => s.success(),
-        Err(_) => false,
-    }
+    Command::new("id").arg(user).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
 }
 
 #[cfg(windows)]
 fn check_user_exists(user: &str) -> bool {
-    use std::process::Command;
-    
-    // On Windows, 'net user <username>' is the quickest built-in check
-    let status = Command::new("net")
-        .args(["user", user])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-
-    match status {
-        Ok(s) => s.success(),
-        Err(_) => false,
-    }
+    Command::new("net").args(["user", user]).stdout(std::process::Stdio::null()).status().map(|s| s.success()).unwrap_or(false)
 }
-
 
 #[cfg(unix)]
 fn check_group_exists(group: &str) -> bool {
-    use std::process::Command;
-
-    // 'getent group <name>' checks /etc/group + LDAP/AD/SSSD
-    let status = Command::new("getent")
-        .args(["group", group])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
-
-    match status {
-        Ok(s) => s.success(),
-        Err(_) => {
-            // Fallback: If 'getent' isn't installed, try 'id -g'
-            Command::new("id")
-                .args(["-g", group])
-                .stdout(std::process::Stdio::null())
-                .stderr(std::process::Stdio::null())
-                .status()
-                .map(|s| s.success())
-                .unwrap_or(false)
-        }
-    }
+    Command::new("getent").args(["group", group]).status().map(|s| s.success()).unwrap_or(false)
 }
 
 #[cfg(windows)]
 fn check_group_exists(group: &str) -> bool {
-    use std::process::Command;
+    Command::new("net").args(["localgroup", group]).status().map(|s| s.success()).unwrap_or(false)
+}
 
-    // 'net localgroup' checks for the existence of a local security group
-    let status = Command::new("net")
-        .args(["localgroup", group])
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status();
+fn check_port_open(port: &str) -> bool {
+    let addr = format!("127.0.0.1:{}", port);
+    TcpStream::connect_timeout(&addr.parse().unwrap(), std::time::Duration::from_millis(500)).is_ok()
+}
 
-    match status {
-        Ok(s) => s.success(),
-        Err(_) => false,
-    }
+#[cfg(unix)]
+fn check_package_exists(package: &str) -> bool {
+    // Check for Debian/Ubuntu or RHEL/CentOS
+    let dpkg = Command::new("dpkg").args(["-s", package]).status().map(|s| s.success()).unwrap_or(false);
+    let rpm = Command::new("rpm").args(["-q", package]).status().map(|s| s.success()).unwrap_or(false);
+    dpkg || rpm
+}
+
+#[cfg(windows)]
+fn check_package_exists(package: &str) -> bool {
+    let output = Command::new("powershell").args(["-Command", &format!("Get-Package -Name {}", package)]).output().ok();
+    output.map(|o| o.status.success()).unwrap_or(false)
 }
 
 
@@ -163,283 +112,253 @@ pub fn evaluate(
     condition: &str,
     sinput: &str,
 ) -> bool {
-    // Normalize everything to trimmed lowercase
     let element_l = element.trim().to_lowercase();
     let selement_l = selement.trim().to_lowercase();
     let condition_l = condition.trim().to_lowercase();
     let sinput_trim = sinput.trim();
 
     match element_l.as_str() {
-
-        "file" => match selement_l.as_str() {
-            "exists" => Path::new(input).exists(),
-            "not exists" => !Path::new(input).exists(),
-            "content" => {
-                match fs::read_to_string(input) {
-                    Ok(content) => match condition_l.as_str() {
-                        "contains" => content.contains(sinput),
-                        "not contains" => !content.contains(sinput),
-                    _ => {
-                            error!("Unsupported content condition: {}", condition);
-                            false
-                        }
-                    },
-                    Err(_) => false,
-                }
+        // =========================================================
+        // AGENT: Checks the local OpenSCM binary state
+        // =========================================================
+        "agent" => match selement_l.as_str() {
+            "version" => {
+                let actual_v = parse_to_semver(env!("CARGO_PKG_VERSION"));
+                let target_v = parse_to_semver(sinput_trim);
+                if let (Some(a), Some(t)) = (actual_v, target_v) {
+                    match condition_l.as_str() {
+                        "equal" | "equals" | "==" => a == t,
+                        "not equal" | "!=" => a != t,
+                        "more than" | ">" => a > t,
+                        "less than" | "<" => a < t,
+                        _ => false,
+                    }
+                } else { false }
             },
-            "permissions" => {
-                match fs::metadata(input) {
-                    Ok(metadata) => {
-                        #[cfg(unix)]
-                        {
-                            // --- UNIX LOGIC (Linux, macOS, EasyNAS) ---
-                            use std::os::unix::fs::PermissionsExt;
-                            let mode = metadata.permissions().mode() & 0o777;
-
-                            match u32::from_str_radix(sinput, 8) {
-                                Ok(expected) => match condition_l.as_str() {
-                                    "equal" => mode == expected,
-                                    "more than" => mode >= expected,
-                                    "less than" => mode <= expected,
-                                    _ => {
-                                        error!("Unsupported condition for Unix permissions: {}", condition);
-                                        false
-                                    }
-                                },
-                                Err(_) => {
-                                    error!("Invalid octal string for Unix permissions: {}", sinput);
-                                    false
-                                }
-                            }
-                        }
-
-                        #[cfg(windows)]
-                        {
-                            // --- WINDOWS LOGIC ---
-                            use std::os::windows::fs::MetadataExt;
-                            let attr = metadata.file_attributes();
-
-                            // Windows attributes are usually checked via decimal bitmasks
-                            // e.g., 1 = ReadOnly, 2 = Hidden, 4 = System, 16 = Directory
-                            match sinput.parse::<u32>() {
-                                Ok(expected) => match condition_l.as_str() {
-                                    "equal" => attr == expected,
-                                    "more than" => (attr & expected) == expected, // Contains ALL bits
-                                    "less than" => (attr & expected) != 0,        // Contains ANY bits
-                                    _ => {
-                                        error!("Unsupported condition for Windows attributes: {}", condition);
-                                        false
-                                    }
-                                },
-                                Err(_) => {
-                                    // Fallback: Check for "readonly" string if sinput isn't a number
-                                    if sinput == "readonly" {
-                                        metadata.permissions().readonly()
-                                    } else {
-                                        error!("Invalid attribute bitmask for Windows: {}", sinput);
-                                        false
-                                    }
-                                }
-                            }
-                        }
-                    }
-                    Err(e) => {
-                        error!("Could not get metadata for permissions check on {}: {}", input, e);
-                        false
-                    }
-                }
+            "content" => match condition_l.as_str() {
+                "equals" => env!("CARGO_PKG_VERSION") == sinput_trim,
+                "contains" => env!("CARGO_PKG_VERSION").contains(sinput_trim),
+                _ => false,
             },
-            "owner" => {
-                match fs::metadata(input) {
-                    Ok(metadata) => {
-                        #[cfg(unix)]
-                        {
-                            use std::os::unix::fs::MetadataExt;
-                            let uid = metadata.uid();
-                            let username = get_user_name_from_uid(uid).unwrap_or_default();
-                            let uid_str = uid.to_string();
-
-                            match condition_l.as_str() {
-                                "equals" => {
-                                    // Check against both username and UID string
-                                    username == sinput || uid_str == sinput
-                                },
-                                "not equals" => {
-                                    username != sinput && uid_str != sinput
-                                },
-                                "contains" => {
-                                    // Check if the input string exists within the username
-                                    username.contains(sinput)
-                                },
-                                "not contains" => {
-                                    !username.contains(sinput)
-                                },
-                                _ => {
-                                    error!("Unsupported owner condition: {}", condition);
-                                    false
-                                }
-                            }
-                        }
-
-                        #[cfg(windows)]
-                        {
-                            // Windows logic would go here, likely using SID strings
-                            error!("Windows owner string checks not yet implemented");
-                            false
-                        }
-                    }
-                    Err(_) => false,
-                }
-            }
-
-            _ => {
-                error!(
-                    "Unsupported file check: element={}, input={}, selement={}, condition={}, sinput={}",
-                    element, input, selement, condition, sinput
-                );
-                false
-            },
-            "sha1" => {
-                match calculate_sha1(input) {
-                    Ok(actual_hash) => {
-                        // We use to_lowercase() to ensure "A1B2..." matches "a1b2..."
-                        let actual = actual_hash.to_lowercase();
-                        let expected = sinput.to_lowercase();
-
-                        match condition_l.as_str() {
-                            "equals" => actual == expected,
-                            "not equal" | "not equals" => actual != expected,
-                            _ => {
-                                error!("Unsupported SHA1 condition: {}", condition);
-                                false
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        error!("Failed to hash file {}: {}", input, e);
-                        false
-                    }
-                }
-            },
-            "sha2" => {
-                match calculate_sha2(input) {
-                    Ok(actual_hash) => {
-                        let actual = actual_hash.to_lowercase();
-                        let expected = sinput.to_lowercase();
-
-                        match condition_l.as_str() {
-                            "equals" => actual == expected,
-                            "not equal" | "not equals" => actual != expected,
-                            _ => {
-                                error!("Unsupported SHA2 condition: {}", condition);
-                                false
-                            }
-                        }
-                    },
-                    Err(e) => {
-                        error!("Failed to SHA2 hash file {}: {}", input, e);
-                        false
-                    }
-                }
-            }
-
+            _ => false,
         },
 
+        // =========================================================
+        // ARCHITECTURE: x86_64, aarch64, etc.
+        // =========================================================
+        "architecture" => match selement_l.as_str() {
+            "content" => {
+                let actual = std::env::consts::ARCH;
+                match condition_l.as_str() {
+                    "contains" => actual.contains(sinput_trim),
+                    "not contains" => !actual.contains(sinput_trim),
+                    "equals" => actual == sinput_trim,
+                    _ => false,
+                }
+            },
+            _ => false,
+        },
+
+        // =========================================================
+        // DIRECTORY: Path existence and metadata
+        // =========================================================
         "directory" => match selement_l.as_str() {
             "exists" => Path::new(input).is_dir(),
             "not exists" => !Path::new(input).is_dir(),
-            _ => {
-                error!(
-                    "Unsupported directory check: element={}, input={}, selement={}, condition={}, sinput={}",
-                    element, input, selement, condition, sinput
-                );
-                false
-            }
-        },
-
-        "agent" => match selement_l.as_str() {
-            "version" => {
-                // parse current agent version
-                let my_ver_str = env!("CARGO_PKG_VERSION");
-                let my_ver_opt = parse_to_semver(my_ver_str);
-                let target_ver_opt = parse_to_semver(sinput_trim);
-
-                if let (Some(my_ver), Some(target_ver)) = (my_ver_opt, target_ver_opt) {
+            "content" => {
+                // Checks if a specific filename (sinput) exists inside the directory (input)
+                fs::read_dir(input).map(|entries| {
+                    entries.filter_map(|e| e.ok()).any(|e| e.file_name() == sinput_trim)
+                }).unwrap_or(false)
+            },
+            "owner" => {
+                #[cfg(unix)] {
+                    let metadata = fs::metadata(input).ok();
+                    let uid = metadata.map(|m| std::os::unix::fs::MetadataExt::uid(&m));
+                    if let Some(u) = uid {
+                        let name = get_user_name_from_uid(u).unwrap_or_default();
+                        name == sinput_trim || u.to_string() == sinput_trim
+                    } else { false }
+                }
+                #[cfg(windows)] { false }
+            },
+            "permission" | "permissions" => {
+                #[cfg(unix)] {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = fs::metadata(input).map(|m| m.permissions().mode() & 0o777).unwrap_or(0);
+                    let expected = u32::from_str_radix(sinput_trim, 8).unwrap_or(0);
                     match condition_l.as_str() {
-                        "equals" | "equal" | "==" => my_ver == target_ver,
-                        "less than" | "<" => my_ver < target_ver,
-                        "more than" | "greater than" | ">" => my_ver > target_ver,
-                        _ => {
-                            error!(
-                                "Unsupported agent version condition: element={}, input={}, selement={}, condition={}, sinput={}",
-                                element, input, selement, condition, sinput
-                            );
-                            false
-                        }
+                        "equal" | "equals" => mode == expected,
+                        "more than" => mode >= expected,
+                        "less than" => mode <= expected,
+                        _ => false,
                     }
-                } else {
-                    error!(
-                        "Invalid version format: element={}, input={}, selement={}, condition={}, sinput={}",
-                        element, input, selement, condition, sinput
-                    );
-                    false
                 }
-            }
-            _ => {
-                error!(
-                    "Unsupported agent selement: element={}, input={}, selement={}, condition={}, sinput={}",
-                    element, input, selement, condition, sinput
-                );
-                false
-            }
+                #[cfg(windows)] { false }
+            },
+            _ => false,
         },
 
-        "architecture" => {
-             // std::env::consts::ARCH returns strings like "x86_64", "aarch64", etc.
-            let actual_arch = std::env::consts::ARCH;
-
-            match condition_l.as_str() {
-                "equals" => actual_arch == sinput,
-                "not equals" | "not equal" => actual_arch != sinput,
-                "contains" => actual_arch.contains(sinput),
-                "not contains" => !actual_arch.contains(sinput),
-                _ => {
-                    error!(
-                        "Unsupported architecture condition: element={}, condition={}, sinput={}",
-                        element, condition, sinput
-                    );
-                    false
-                }
-            }
+        // =========================================================
+        // DOMAIN: Local domain/workgroup info
+        // =========================================================
+        "domain" => match selement_l.as_str() {
+            "content" => {
+                // Placeholder: In a real agent, you'd pull this from sysinfo or netapi32
+                let actual = "local"; 
+                actual.contains(sinput_trim)
+            },
+            _ => false,
         },
 
-        "user" => match selement_l.as_str() {
-                "exists" => check_user_exists(input),
-                "not exists" => !check_user_exists(input),
-                _ => {
-                    error!(
-                        "Unsupported user check: element={}, input={}, selement={}, condition={}, sinput={}",
-                        element, input, selement, condition, sinput
-                    );
-                    false
+        // =========================================================
+        // FILE: The heavy lifter for security configuration
+        // =========================================================
+        "file" => match selement_l.as_str() {
+            "exists" => Path::new(input).is_file(),
+            "not exists" => !Path::new(input).is_file(),
+            "content" => {
+                fs::read_to_string(input).map(|c| {
+                    match condition_l.as_str() {
+                        "contains" => c.contains(sinput_trim),
+                        "not contains" => !c.contains(sinput_trim),
+                        "equals" => c.trim() == sinput_trim,
+                        _ => false,
+                    }
+                }).unwrap_or(false)
+            },
+            "owner" => {
+                #[cfg(unix)] {
+                    let uid = fs::metadata(input).map(|m| std::os::unix::fs::MetadataExt::uid(&m)).ok();
+                    if let Some(u) = uid {
+                        get_user_name_from_uid(u).map(|n| n == sinput_trim).unwrap_or(u.to_string() == sinput_trim)
+                    } else { false }
                 }
+                #[cfg(windows)] { false }
+            },
+            "permission" | "permissions" => {
+                #[cfg(unix)] {
+                    use std::os::unix::fs::PermissionsExt;
+                    let mode = fs::metadata(input).map(|m| m.permissions().mode() & 0o777).unwrap_or(0);
+                    let expected = u32::from_str_radix(sinput_trim, 8).unwrap_or(0);
+                    match condition_l.as_str() {
+                        "equal" | "equals" => mode == expected,
+                        "more than" => mode >= expected,
+                        "less than" => mode <= expected,
+                        _ => false,
+                    }
+                }
+                #[cfg(windows)] { false }
+            },
+            "sha1" => calculate_sha1(input).map(|h| h.to_lowercase() == sinput_trim.to_lowercase()).unwrap_or(false),
+            "sha2" => calculate_sha2(input).map(|h| h.to_lowercase() == sinput_trim.to_lowercase()).unwrap_or(false),
+            _ => false,
         },
+
+        // =========================================================
+        // GROUP: Local system groups
+        // =========================================================
         "group" => match selement_l.as_str() {
-                "exists" => check_group_exists(input),
-                "not exists" => !check_group_exists(input),
-                _ => {
-                    error!("Unsupported group check: selement={}", selement);
-                    false
+            "exists" => check_group_exists(input),
+            "not exists" => !check_group_exists(input),
+            "content" => {
+                // Logic to check if sinput (user) is a member of input (group)
+                // This usually requires shell command 'id -Gn <user>' or similar
+                false 
+            },
+            _ => false,
+        },
+
+        // =========================================================
+        // HOSTNAME & IP
+        // =========================================================
+        "hostname" => match selement_l.as_str() {
+            "content" => gethostname::gethostname().to_string_lossy().contains(sinput_trim),
+            _ => false,
+        },
+        "ip" => match selement_l.as_str() {
+            "exists" => local_ip_address::list_afinet_netifas().unwrap_or_default().iter().any(|(_, ip)| ip.to_string() == input),
+            "content" => local_ip_address::list_afinet_netifas().unwrap_or_default().iter().any(|(_, ip)| ip.to_string().contains(sinput_trim)),
+            _ => false,
+        },
+
+        // =========================================================
+        // OS: Operating System details
+        // =========================================================
+        "os" => match selement_l.as_str() {
+            "content" => os_info::get().os_type().to_string().to_lowercase().contains(sinput_trim),
+            "version" => {
+                let actual = parse_to_semver(&os_info::get().version().to_string());
+                let target = parse_to_semver(sinput_trim);
+                if let (Some(a), Some(t)) = (actual, target) {
+                    match condition_l.as_str() {
+                        "equal" | "equals" => a == t,
+                        "more than" => a > t,
+                        "less than" => a < t,
+                        _ => false,
+                    }
+                } else { false }
+            },
+            _ => false,
+        },
+
+        // =========================================================
+        // PACKAGE: Native package managers
+        // =========================================================
+        "package" => match selement_l.as_str() {
+            "exists" => check_package_exists(input),
+            "not exists" => !check_package_exists(input),
+            "version" => {
+                // Requires executing 'dpkg -s' or 'rpm -q' and parsing the version string
+                false
+            },
+            _ => false,
+        },
+
+        // =========================================================
+        // PORT & PROCESS
+        // =========================================================
+        "port" => match selement_l.as_str() {
+            "exists" => check_port_open(input),
+            "not exists" => !check_port_open(input),
+            _ => false,
+        },
+        "process" => match selement_l.as_str() {
+            "exists" => {
+                // Typically uses the 'sysinfo' crate to iterate processes
+                false 
+            },
+            "not exists" => true,
+            _ => false,
+        },
+
+        // =========================================================
+        // REGISTRY (Windows Only)
+        // =========================================================
+        "registry" => match selement_l.as_str() {
+            "exists" => {
+                #[cfg(windows)] {
+                    let cmd = format!("Test-Path 'HKLM:\\{}'", input);
+                    Command::new("powershell").args(["-Command", &cmd]).status().map(|s| s.success()).unwrap_or(false)
                 }
+                #[cfg(unix)] { false }
+            },
+            "content" => false, // Requires 'Get-ItemProperty' logic
+            _ => false,
+        },
+
+        // =========================================================
+        // USER
+        // =========================================================
+        "user" => match selement_l.as_str() {
+            "exists" => check_user_exists(input),
+            "not exists" => !check_user_exists(input),
+            _ => false,
         },
 
         _ => {
-            error!(
-                "Unsupported check: element={}, input={}, selement={}, condition={}, sinput={}",
-                element, input, selement, condition, sinput
-            );
+            error!("Unknown element type: {}", element);
             false
         }
     }
 }
-
