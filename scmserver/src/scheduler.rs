@@ -6,7 +6,6 @@ use tracing::{info,warn,error};
 
 use crate::models::PolicySchedule;
 use crate::policies::execute_policy_run_logic;
-use crate::handlers::add_notification;
 
 
 /// Internal helper for date math
@@ -221,7 +220,6 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                     Err(e) => {
                         error!("Scheduled execution failed for policy {}: {}", schedule.policy_id, e);
                         let msg = format!("Automation Error: Failed to run Policy ID {}. Error: {}", schedule.policy_id, e);
-                        add_notification(&loop_pool, "error", 0, &msg).await;
                     }
                 }
             }
