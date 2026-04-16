@@ -2,7 +2,7 @@
 use sqlx::SqlitePool;
 use bcrypt::{hash, DEFAULT_COST};
 use tracing::{info, debug, warn, error};
-use ed25519_dalek::{SigningKey, Signature, Signer};
+use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use base64::{engine::general_purpose, Engine as _};
 
