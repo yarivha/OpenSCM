@@ -2,6 +2,9 @@
 use sqlx::SqlitePool;
 use bcrypt::{hash, DEFAULT_COST};
 use tracing::{info, debug, warn, error};
+use ed25519_dalek::{SigningKey, Signature, Signer};
+use rand::rngs::OsRng;
+use base64::{engine::general_purpose, Engine as _};
 
 /// Initialize the database schema
 pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
@@ -12,13 +15,29 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     //  Tenants Table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tenants (
-            id TEXT PRIMARY KEY, -- Store UUID/ULID as TEXT
+            id TEXT PRIMARY KEY, 
             name TEXT NOT NULL UNIQUE,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
     )
     .execute(pool)
     .await?;
+
+    // 2. FIX: The Tenant Keys Table (Created as a separate table)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS tenant_keys (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL,
+            public_key TEXT NOT NULL,
+            private_key TEXT NOT NULL,
+            is_active INTEGER DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+
 
 
     // Create notify table
@@ -432,6 +451,32 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .await?;
     }
 
+
+
+    // Create key pair is does not exits 
+    let existing_key = sqlx::query("SELECT id FROM tenant_keys WHERE tenant_id = 'default' LIMIT 1")
+        .fetch_optional(pool)
+        .await?;
+
+    if existing_key.is_none() {
+        info!("Generating new Ed25519 pair for default tenant...");
+        let mut csprng = OsRng;
+        let signing_key = SigningKey::generate(&mut csprng);
+        let verifying_key = signing_key.verifying_key();
+
+        let public_base64 = general_purpose::STANDARD.encode(verifying_key.as_bytes());
+        let private_base64 = general_purpose::STANDARD.encode(signing_key.to_bytes());
+
+        sqlx::query(
+            "INSERT INTO tenant_keys (tenant_id, public_key, private_key) VALUES ('default', ?, ?)"
+        )
+        .bind(public_base64)
+        .bind(private_base64)
+        .execute(pool)
+        .await?;
+
+         info!("Default keys generated and secured in database.");
+    }
 
 
     Ok(())

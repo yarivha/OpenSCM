@@ -144,6 +144,7 @@ pub struct Notification {
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UnsignedPayload {
     pub id: String,
+    pub tenant_id: Option<String>,
     pub hostname: String,
     pub ver: String,
     pub ip: String,
@@ -176,6 +177,7 @@ pub struct SignedResponse {
 #[derive(Serialize, Deserialize)]
 pub struct ComplianceResult {
     pub client_id: i64,
+    pub tenant_id: Option<String>,
     pub test_id: i64,
     pub result: String,
 }
