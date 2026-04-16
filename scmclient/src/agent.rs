@@ -27,7 +27,7 @@ fn get_url_namespace(url: &str) -> String {
 async fn process_compliance_tests(
     tests: Vec<Test>,
     client_id: &str,
-    tenant_id: &Option<String>,
+    tenant_id: &str,
     signing_key: &SigningKey,
     http_client: &reqwest::Client,
     result_url: &str
@@ -66,7 +66,7 @@ async fn process_compliance_tests(
 
         let payload = ComplianceResult {
             client_id: client_id.parse().unwrap_or(0),
-            tenant_id: tenant_id.clone(),
+            tenant_id: tenant_id.to_string(),
             test_id,
             result: final_result,
         };
@@ -113,7 +113,7 @@ pub async fn send_system_info(
     }
 
     // 3. LOAD IDENTITY
-    let current_id = if id_path.exists() {
+    let mut current_id = if id_path.exists() {
         fs::read_to_string(&id_path)?.trim().to_string()
     } else {
         "0".to_string()
@@ -205,7 +205,9 @@ pub async fn send_system_info(
         match inner_json.get("command").and_then(|c| c.as_str()) {
             Some("REGISTER") => {
                 if let Some(new_id) = inner_json.get("id").and_then(|id| id.as_i64()) {
+                    let new_id_str = new_id.to_string();
                     fs::write(&id_path, new_id.to_string())?;
+                    current_id = new_id_str;
                     info!("Registered as ID: {} for {}", new_id, base_url);
                 }
             },

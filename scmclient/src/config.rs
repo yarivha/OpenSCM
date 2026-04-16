@@ -23,7 +23,7 @@ pub struct Config {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ServerConfig {
     pub url: String, // Mandatory: Agent can't run without it
-    pub tenant_id: Option<String>
+    pub tenant_id: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -49,7 +49,7 @@ impl Default for Config {
         Self {
             server: ServerConfig {
                 url: "http://localhost:8000".to_string(),
-                tenant_id: Some("default".to_string()),
+                tenant_id: "default".to_string(),
             },
             client: ClientConfig {
                 heartbeat: Some("300".to_string()),
@@ -71,8 +71,7 @@ impl Config {
             
             // Note: We no longer save ClientID here.
             key.set_value("ServerURL", &self.server.url)?;
-            let tenant_to_save = self.server.tenant_id.as_deref().unwrap_or("default");
-            key.set_value("Tenant_id", &tenant_to_save.to_string())?;
+            key.set_value("Tenant_id", &self.server.tenant_id)?;
 
             if let Some(hb) = &self.client.heartbeat { key.set_value("Heartbeat", hb)?; }
             if let Some(ll) = &self.client.loglevel { key.set_value("LogLevel", ll)?; }
@@ -128,17 +127,11 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         })
     };
 
-    let raw_tenant = get_val("Tenant_id", "default");
-    let tenant_id = if raw_tenant == "default" || raw_tenant.is_empty() {
-        None 
-    } else {
-        Some(raw_tenant)
-    };
 
     let config = Config {
         server: ServerConfig {
             url: get_val("ServerURL", "http://localhost:8000"),
-            tenant_id,
+            tenant_id: get_val("Tenant_id", "default"),
         },
         client: ClientConfig {
             heartbeat: Some(get_val("Heartbeat", "300")),
