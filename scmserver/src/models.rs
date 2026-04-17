@@ -102,6 +102,7 @@ pub struct Policy {
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PolicySchedule {
     pub id: i32,
+    pub tenant_id: String,
     pub policy_id: i32,
     pub enabled: bool, // sqlx handles SQLite 0/1 to bool automatically
     pub frequency: String, // "daily", "weekly", "monthly", "custom"
