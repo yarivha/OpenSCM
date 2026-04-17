@@ -246,8 +246,9 @@ pub struct Condition {
 #[derive(Serialize, Deserialize)]
 pub struct ReportData {
     // Page 1: Policy Header Info
-    pub policy_id: i32,
+    pub policy_id: Option<i32>,
     pub policy_name: String,
+    pub report_id: Option<i32>,
     pub version: String,
     pub description: String,
     pub submission_date: String,

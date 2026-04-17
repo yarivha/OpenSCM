@@ -828,6 +828,7 @@ pub async fn policies_report(
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
+        report_id: None,
         version: policy_row.get("version"),
         description: policy_row
             .get::<Option<String>, _>("description")
@@ -960,6 +961,7 @@ pub async fn policies_report_download(
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
+        report_id: None,
         version: policy_row.get("version"),
         description: policy_row
             .get::<Option<String>, _>("description")

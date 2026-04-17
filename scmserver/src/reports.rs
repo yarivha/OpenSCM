@@ -284,8 +284,9 @@ pub async fn reports_view(
     let fail_count = system_reports.iter().filter(|s| !s.is_passed).count();
 
     let report_data = ReportData {
-        policy_id: row.get("id"),
+        policy_id: None,
         policy_name: row.get("policy_name"),
+        report_id: row.get("id"), 
         version: row.get("policy_version"),
         description: row
             .get::<Option<String>, _>("policy_description")
@@ -381,8 +382,9 @@ pub async fn reports_download(
     };
 
     let report_data = ReportData {
-        policy_id: row.get("id"),
+        policy_id:  None,
         policy_name: row.get("policy_name"),
+        report_id:  row.get("id"),
         version: row.get("policy_version"),
         description: row
             .get::<Option<String>, _>("policy_description")
