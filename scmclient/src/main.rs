@@ -6,19 +6,18 @@ mod compliance;
 use tokio::time::{sleep, Duration};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use tracing::{debug, info, warn, error};
-use std::sync::Arc;
 
 #[tokio::main]
 async fn main() {
-    // We call a separate run function so we can use '?' and Result
     if let Err(e) = run().await {
-        eprintln!("Fatal Error: {}", e);
+        error!("Fatal Error: {}", e);
         std::process::exit(1);
     }
 }
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. LOGGING SETUP (Initial)
+
+    // 1. Logging setup
     let env_filter = EnvFilter::new("info");
     let (reload_layer, reload_handle) = reload::Layer::new(env_filter);
 
@@ -27,11 +26,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with(fmt::layer())
         .init();
 
-    // 2. VERSION & CLI ARGS
+    // 2. Version and CLI args
     let version = env!("CARGO_PKG_VERSION");
     let args: Vec<String> = std::env::args().collect();
 
-    // Handle early-exit flags
     for arg in &args {
         match arg.as_str() {
             "-h" | "--help" => {
@@ -46,32 +44,39 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
-    // 3. LOAD CONFIG
+    // 3. Load config
     info!("Loading configuration...");
     let mut config = config::get_config().map_err(|e| {
         error!("Configuration error: {}", e);
         e
     })?;
 
-    // 4. HANDLE URL OVERRIDE
+    // 4. Handle URL override
     let mut config_changed = false;
-    for i in 0..args.len() {
+    let mut i = 0;
+    while i < args.len() {
         if args[i] == "--url" && i + 1 < args.len() {
             let new_url = args[i + 1].clone();
-            info!("CLI Override: Setting Server URL to {}", new_url);
+            info!("CLI Override: Setting Server URL to '{}'", new_url);
             config.server.url = new_url;
             config_changed = true;
+            i += 2; // skip the value too
+        } else {
+            i += 1;
         }
     }
 
     if config_changed {
-        config.save()?;
-        info!("New configuration persisted to registry/file.");
+        config.save().map_err(|e| {
+            error!("Failed to persist config: {}", e);
+            e
+        })?;
+        info!("New configuration persisted.");
     }
 
-    // 5. STARTUP INFO
-    let server_url = &config.server.url;
-    let log_level = config.client.loglevel.as_deref().unwrap_or("info");
+    // 5. Startup info
+    let server_url  = &config.server.url;
+    let log_level   = config.client.loglevel.as_deref().unwrap_or("info");
     let heartbeat_secs = config.client.heartbeat
         .as_deref()
         .and_then(|s| s.parse::<u64>().ok())
@@ -87,27 +92,34 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Apply log level from config
     let _ = reload_handle.reload(EnvFilter::new(log_level));
 
-    // 6. MAIN HEARTBEAT LOOP
+    // Track last applied log level to avoid redundant reloads
+    let mut last_log_level = log_level.to_string();
+
+    // 6. Main heartbeat loop
     loop {
         debug!("Starting heartbeat cycle");
 
-        // Note: Passing &mut config so agent can update state (like IDs)
         match agent::send_system_info(&mut config).await {
-            Ok(_) => debug!("Heartbeat completed successfully"),
+            Ok(_)  => debug!("Heartbeat completed successfully"),
             Err(e) => warn!("Heartbeat failed: {}", e),
         }
 
-        // Re-calculate heartbeat and log level in case they changed during the cycle
+        // Recalculate heartbeat interval in case config changed
         let current_heartbeat = config.client.heartbeat
             .as_deref()
             .and_then(|s| s.parse::<u64>().ok())
             .unwrap_or(300);
 
+        // Only reload log level if it actually changed
         if let Some(level) = &config.client.loglevel {
-            let _ = reload_handle.reload(EnvFilter::new(level));
+            if *level != last_log_level {
+                let _ = reload_handle.reload(EnvFilter::new(level));
+                info!("Log level changed to '{}'", level);
+                last_log_level = level.clone();
+            }
         }
 
-        // Apply Jitter (0-9 seconds)
+        // Apply jitter (0-9 seconds) to prevent thundering herd
         let jitter = rand::random::<u64>() % 10;
         let sleep_time = current_heartbeat + jitter;
 
