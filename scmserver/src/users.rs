@@ -74,6 +74,7 @@ pub async fn users(
 
 
 pub async fn users_add(
+    Query(query): Query<ErrorQuery>,
     auth: AuthSession,
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
@@ -83,7 +84,14 @@ pub async fn users_add(
         return redir;
     }
 
-    let context = Context::new();
+    let mut context = Context::new();
+    if let Some(msg) = query.error_message {
+        context.insert("error_message", &msg);
+    }
+    if let Some(msg) = query.success_message {
+        context.insert("success_message", &msg);
+    }
+
     render_template(&tera, Some(&pool), "users_add.html", context, Some(auth))
         .await
         .into_response()
@@ -122,17 +130,17 @@ pub async fn users_add_save(
     // Validate required fields
     let username = match form_data.get("username").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
         Some(v) => v.to_string(),
-        None => return Redirect::to("/users?error_message=Username+is+required").into_response(),
+        None => return Redirect::to("/users/add?error_message=Username+is+required").into_response(),
     };
 
     let password = match form_data.get("password").and_then(|v| v.first()).filter(|s| s.len() >= 8) {
         Some(v) => v.to_string(),
-        None => return Redirect::to("/users?error_message=Password+must+be+at+least+8+characters").into_response(),
+        None => return Redirect::to("/users/add?error_message=Password+must+be+at+least+8+characters").into_response(),
     };
 
     let role = match form_data.get("role").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
         Some(v) => v.to_string(),
-        None => return Redirect::to("/users?error_message=Role+is+required").into_response(),
+        None => return Redirect::to("/users/add?error_message=Role+is+required").into_response(),
     };
 
     let name = form_data
