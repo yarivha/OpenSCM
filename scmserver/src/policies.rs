@@ -19,22 +19,7 @@ use crate::models::{
     UserRole, AuthSession,
 };
 use crate::auth::{self};
-use crate::handlers::render_template;
-use crate::handlers::parse_form_data;
-
-
-// ============================================================
-// HELPERS
-// ============================================================
-
-/// Normalize result status strings to a consistent "PASS" or "FAIL".
-/// Handles legacy formats: "true", "1", "pass", "PASS".
-fn normalize_status(raw: &str) -> &'static str {
-    match raw.to_lowercase().as_str() {
-        "pass" | "true" | "1" => "PASS",
-        _ => "FAIL",
-    }
-}
+use crate::handlers::{render_template, parse_form_data, normalize_status};
 
 
 // ============================================================

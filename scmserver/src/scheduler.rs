@@ -263,6 +263,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                         for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
                             add_notification(
                                 &loop_pool,
+                                &schedule.tenant_id,
                                 "info",
                                 owner_id,
                                 &format!(
@@ -284,6 +285,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                         for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
                             add_notification(
                                 &loop_pool,
+                                &schedule.tenant_id,
                                 "warning",
                                 owner_id,
                                 &format!(

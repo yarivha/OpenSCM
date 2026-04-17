@@ -174,16 +174,22 @@ pub async fn login_submit(
     } else {
         warn!("Failed login attempt for user: '{}'", form.username);
 
-        // If user exists but password was wrong, notify them of the failed attempt
+        // If user exists but password was wrong, notify them
         if let Some(row) = maybe_row {
             let userid_raw: i32 = row.get("id");
+            let tenant_id: String = row.try_get::<String, _>("tenant_id")
+                .unwrap_or_else(|_| "default".to_string());
+
             add_notification(
                 &pool,
+                &tenant_id,
                 "warning",
                 userid_raw,
                 &format!("Failed login attempt for user '{}'", form.username),
             ).await;
         }
+
+
     }
 
     (jar, Redirect::to("/login?error_message=Invalid%20Credentials"))
