@@ -307,25 +307,6 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
 
-    // Create scheduler table
-    //sqlx::query(
-    //    "CREATE TABLE IF NOT EXISTS scheduler (
-    //        id INTEGER PRIMARY KEY AUTOINCREMENT,
-    //        job_name TEXT NOT NULL,
-    //        job_type TEXT NOT NULL,      -- 'command' or 'report'
-    //        policy_id INTEGER NOT NULL,  -- The policy to execute or report on
-    //        frequency TEXT NOT NULL,     -- 'daily', 'weekly', 'monthly', 'yearly'
-    //        delivery_method TEXT,        -- 'save', 'email', or 'both' (for reports)
-    //        recipients TEXT,             -- Comma-separated emails
-    //        last_run DATETIME,           -- Timestamp of last execution
-    //        next_run DATETIME,           -- Calculated next run time
-    //        is_enabled INTEGER DEFAULT 1, -- 1 for active, 0 for paused
-    //        FOREIGN KEY (policy_id) REFERENCES policies(id)
-    //    )",
-    //)
-    //.execute(pool)
-    //.await?;
-
 
     // Create compliance history table
     sqlx::query(
@@ -390,10 +371,15 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .await?;
 
     // Insert default admin user if it doesn't exist
-    let hashed_password = hash("admin", DEFAULT_COST).unwrap();
+    let hashed_password = hash("admin", DEFAULT_COST)
+    .map_err(|e| {
+        error!("Failed to hash default admin password: {}", e);
+        sqlx::Error::Protocol(e.to_string())
+    })?;
+
 
     sqlx::query(
-    "INSERT OR IGNORE INTO users (id, tenant_id,username, password, name, email, role)
+    "INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
      VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'admin')",
     )
     .bind(hashed_password)
@@ -417,7 +403,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .await?;
     }
 
-    
+   
     // --------------------
     // Selements
     // --------------------
