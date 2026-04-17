@@ -12,12 +12,9 @@ use bcrypt::{hash, DEFAULT_COST};
 use serde::Deserialize;
 
 
-use crate::models::ErrorQuery;
-use crate::models::User;
-use crate::models::UserRole;
-use crate::auth::{self, AuthSession};
-use crate::handlers::render_template;
-use crate::handlers::parse_form_data;
+use crate::models::{ErrorQuery, User, UserRole, AuthSession};
+use crate::auth::{self};
+use crate::handlers::{render_template, parse_form_data};
 
 
 

@@ -13,20 +13,11 @@ use chrono::Local;
 use genpdf::{fonts, elements, style, Element};
 
 
-use crate::models::ErrorQuery;
-use crate::models::SystemGroup;
-use crate::models::Test;
-use crate::models::Policy;
-use crate::models::PolicySchedule;
-use crate::models::SystemInsidePolicy;
-use crate::models::TestInsidePolicy;
-use crate::models::PolicyCompliance;
-use crate::models::ReportData;
-use crate::models::TestMeta;
-use crate::models::SystemReport;
-use crate::models::IndividualResult;
-use crate::models::UserRole;
-use crate::auth::{self, AuthSession};
+use crate::models::{ErrorQuery, SystemGroup, Test, Policy, PolicySchedule,
+                    SystemInsidePolicy, TestInsidePolicy, PolicyCompliance, 
+                    ReportData, TestMeta, SystemReport, IndividualResult, 
+                    UserRole, AuthSession};
+use crate::auth::{self};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 

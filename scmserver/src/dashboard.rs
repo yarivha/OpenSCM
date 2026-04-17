@@ -6,10 +6,7 @@ use sqlx::sqlite::SqlitePool;
 use std::sync::Arc;
 use tracing::error;
 
-use crate::models::ComplianceHistoryRow;
-use crate::models::PolicyFailRow;
-use crate::models::SystemFailRow;
-use crate::auth::AuthSession;
+use crate::models::{ComplianceHistoryRow, PolicyFailRow, SystemFailRow, AuthSession};
 use crate::handlers::render_template;
 
 

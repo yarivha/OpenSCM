@@ -10,9 +10,7 @@ use urlencoding::decode;
 use tracing::{info,warn,error};
 
 
-use crate::models::Notification;
-use crate::models::UserRole;
-use crate::auth::AuthSession;
+use crate::models::{Notification, UserRole, AuthSession};
 
 
 //////////////////////////////// Helper Functions ///////////////////////////////////

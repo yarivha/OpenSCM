@@ -11,12 +11,8 @@ use tracing::{info, warn, error};
 use bytes::Bytes;
 use chrono::{DateTime,Utc};
 
-use crate::models::ErrorQuery;
-use crate::models::System;
-use crate::models::SystemGroup;
-use crate::models::SystemInsideGroup;
-use crate::models::UserRole;
-use crate::auth::{self, AuthSession};
+use crate::models::{ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession};
+use crate::auth::{self};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 

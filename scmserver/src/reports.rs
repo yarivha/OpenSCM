@@ -10,15 +10,9 @@ use serde_json;
 use std::collections::HashMap;
 use genpdf::{fonts, elements, style, Element};
 
-use crate::auth::{self, AuthSession};
+use crate::auth::{self};
 use crate::handlers::render_template;
-use crate::models::UserRole;
-use crate::models::ReportData;
-use crate::models::TestMeta;
-use crate::models::SystemReport;
-use crate::models::IndividualResult;
-use crate::models::Report;
-use crate::models::ErrorQuery;
+use crate::models::{UserRole, ReportData, TestMeta, SystemReport, IndividualResult, Report, ErrorQuery, AuthSession};
 
 
 //////////////////// Reports /////////////////////////

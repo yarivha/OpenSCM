@@ -290,6 +290,16 @@ pub struct Report {
 }
 
 
+
+#[derive(Debug, Clone)]
+pub struct AuthSession {
+    pub username: String,
+    pub userid: i32,
+    pub tenant_id: String,
+    pub role: String,
+}
+
+
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UserRole {
     Viewer = 0,

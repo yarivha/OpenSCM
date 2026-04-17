@@ -9,13 +9,8 @@ use urlencoding;
 use tracing::{info, warn,error};
 use bytes::Bytes;
 
-use crate::models::ErrorQuery;
-use crate::models::Test;
-use crate::models::Element;
-use crate::models::SElement;
-use crate::models::Condition;
-use crate::models::UserRole;
-use crate::auth::{self, AuthSession};
+use crate::models::{ErrorQuery, Test, Element, SElement, Condition, UserRole, AuthSession};
+use crate::auth::{self};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 
