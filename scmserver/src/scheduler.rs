@@ -1,11 +1,11 @@
 use sqlx::{SqlitePool, Row};
 use tokio::time::{self, Duration};
 use chrono::{Utc, Timelike};
-use tracing::{info,warn,error};
-
+use tracing::{info, error};
 
 use crate::models::PolicySchedule;
 use crate::policies::execute_policy_run_logic;
+use crate::handlers::add_notification;
 
 
 /// Internal helper for date math
@@ -14,62 +14,84 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
         .unwrap_or_else(|_| Utc::now().naive_utc());
 
     let next = match frequency {
-        "daily" => current + chrono::Duration::days(1),
-        "weekly" => current + chrono::Duration::weeks(1),
+        "daily"    => current + chrono::Duration::days(1),
+        "weekly"   => current + chrono::Duration::weeks(1),
         "biweekly" => current + chrono::Duration::days(14),
-        "monthly" => current + chrono::Duration::days(30),
-        _ => current + chrono::Duration::days(1),
+        "monthly"  => current + chrono::Duration::days(30),
+        _          => current + chrono::Duration::days(1),
     };
 
     next.format("%Y-%m-%dT%H:%M").to_string()
 }
 
 
+/// Fetch all admin user IDs for a given tenant to notify on scheduled events.
+async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
+    sqlx::query(
+        "SELECT id FROM users WHERE tenant_id = ? AND role = 'admin'",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|row| row.get("id"))
+    .collect()
+}
+
 
 pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation (Active Systems Only)...");
 
-    // 0. Start a Transaction to ensure atomicity
     let mut tx = pool.begin().await?;
 
-    // 1. Update TEST stats (Only counting results from Active Systems)
+    // 1. Update TEST stats (only counting results from active systems)
     sqlx::query(r#"
         UPDATE tests SET
             systems_passed = (
-                SELECT COUNT(*) FROM results r 
-                JOIN systems s ON r.system_id = s.id 
+                SELECT COUNT(*) FROM results r
+                JOIN systems s ON r.system_id = s.id
                 WHERE r.test_id = tests.id AND r.result = 'PASS' AND s.status = 'active'
             ),
             systems_failed = (
-                SELECT COUNT(*) FROM results r 
-                JOIN systems s ON r.system_id = s.id 
+                SELECT COUNT(*) FROM results r
+                JOIN systems s ON r.system_id = s.id
                 WHERE r.test_id = tests.id AND r.result = 'FAIL' AND s.status = 'active'
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN 100.0
                 ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END FROM results r 
-                JOIN systems s ON r.system_id = s.id 
+                END FROM results r
+                JOIN systems s ON r.system_id = s.id
                 WHERE r.test_id = tests.id AND s.status = 'active'
             )
-    "#).execute(&mut *tx).await?;
+    "#)
+    .execute(&mut *tx)
+    .await?;
 
-    // 2. Update SYSTEM stats (Only for systems marked as 'active')
+    // 2. Update SYSTEM stats (only for active systems)
     sqlx::query(r#"
         UPDATE systems SET
-            tests_passed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'),
-            tests_failed = (SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'FAIL'),
-            total_tests  = (SELECT COUNT(*) FROM results WHERE system_id = systems.id),
+            tests_passed = (
+                SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'
+            ),
+            tests_failed = (
+                SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'FAIL'
+            ),
+            total_tests = (
+                SELECT COUNT(*) FROM results WHERE system_id = systems.id
+            ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN 0.0
                 ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
                 END FROM results WHERE system_id = systems.id
             )
         WHERE status = 'active'
-    "#).execute(&mut *tx).await?;
+    "#)
+    .execute(&mut *tx)
+    .await?;
 
-        
-    // 3. Update POLICY stats (The most robust version)
+    // 3. Update POLICY stats
     sqlx::query(r#"
         UPDATE policies
         SET
@@ -91,7 +113,6 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
             JOIN systems_in_groups sig ON sip.group_id = sig.group_id
             JOIN systems s ON sig.system_id = s.id
             LEFT JOIN (
-                /* Pre-calculate failures per system per policy */
                 SELECT
                     r.system_id,
                     tip.policy_id,
@@ -105,79 +126,77 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
             GROUP BY p.id
         ) AS subquery
         WHERE policies.id = subquery.policy_id
-    "#).execute(&mut *tx).await?;
+    "#)
+    .execute(&mut *tx)
+    .await?;
 
-
-    // 4. Commit the Transaction
     tx.commit().await?;
 
-    info!("Compliance recalculation complete. All metrics isolated to active systems.");
+    info!("Compliance recalculation complete.");
     Ok(())
 }
 
 
-
 pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    // 1. Simply fetch the ALREADY CALCULATED averages from the tables
-    let sys_stats = sqlx::query("SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM systems")
-        .fetch_one(pool).await?;
-    let pol_stats = sqlx::query("SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM policies")
-        .fetch_one(pool).await?;
+    let sys_stats = sqlx::query(
+        "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM systems",
+    )
+    .fetch_one(pool)
+    .await?;
 
-    let systems_score = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
+    let pol_stats = sqlx::query(
+        "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM policies",
+    )
+    .fetch_one(pool)
+    .await?;
+
+    let systems_score  = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
     let policies_score = pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-    let total_systems = sys_stats.try_get::<i32, _>("total").unwrap_or(0);
+    let total_systems  = sys_stats.try_get::<i32, _>("total").unwrap_or(0);
     let total_policies = pol_stats.try_get::<i32, _>("total").unwrap_or(0);
 
-    // 2. Insert into history
-    sqlx::query(
-        r#"
+    sqlx::query(r#"
         INSERT INTO compliance_history (
-            systems_score, policies_score, total_systems, 
+            systems_score, policies_score, total_systems,
             total_policies, failed_systems, failed_policies
         )
-        VALUES (?, ?, ?, ?, 
+        VALUES (?, ?, ?, ?,
             (SELECT COUNT(*) FROM systems WHERE compliance_score < 100),
             (SELECT COUNT(*) FROM policies WHERE compliance_score < 100)
         )
-        "#
-    )
+    "#)
     .bind(systems_score)
     .bind(policies_score)
     .bind(total_systems)
     .bind(total_policies)
-    .execute(pool).await?;
+    .execute(pool)
+    .await?;
 
-    info!("Compliance trend snapshot recorded: Sys {}%, Pol {}%", systems_score, policies_score);
+    info!(
+        "Compliance trend snapshot recorded: Sys {}%, Pol {}%",
+        systems_score, policies_score
+    );
     Ok(())
 }
 
 
-
-// start_background_scheduler
 pub async fn start_background_scheduler(pool: SqlitePool) {
-    // 1. Initial Startup Snapshot
+    // Startup compliance sync
     let startup_pool = pool.clone();
     tokio::spawn(async move {
         info!("Initiating startup compliance synchronization...");
-        // 1. Refresh the 'current state' (Tests, Systems, Policies)
         if let Err(e) = recalculate_current_compliance(&startup_pool).await {
             error!("Startup compliance recalculation failed: {}", e);
         } else {
             info!("Compliance status successfully synchronized on startup.");
         }
-
-        // 2. DO NOT record history here unless it's been a long time.
-        // Let the background scheduler handle the trend points.
     });
 
-
-    // 2. The Main "Heartbeat" Loop (Every 60 Seconds)
+    // Main heartbeat loop — every 60 seconds
     let mut interval = time::interval(Duration::from_secs(60));
     let loop_pool = pool.clone();
 
     tokio::spawn(async move {
-        // Variable to prevent double-firing Task B within the same minute
         let mut last_snapshot_hour: i32 = -1;
 
         loop {
@@ -187,56 +206,107 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             let now_str = now.format("%Y-%m-%dT%H:%M").to_string();
             let current_hour = now.hour() as i32;
 
-            // --- TASK A: POLICY SCAN SCHEDULER (Every 60s) ---
-            let due_policies = sqlx::query_as::<_, PolicySchedule>(
-                "SELECT * FROM policy_schedules WHERE enabled = 1 AND next_run <= ?"
+            // --- TASK A: POLICY SCAN SCHEDULER (every 60s) ---
+            let due_policies = match sqlx::query_as::<_, PolicySchedule>(
+                "SELECT * FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
             )
             .bind(&now_str)
             .fetch_all(&loop_pool)
             .await
-            .unwrap_or_default();
+            {
+                Ok(policies) => policies,
+                Err(e) => {
+                    error!("Failed to fetch due policies from scheduler: {}", e);
+                    vec![]
+                }
+            };
 
             for schedule in due_policies {
-                info!("Scheduler: Triggering Policy ID {} ('{}')", schedule.policy_id, now_str);
+                info!(
+                    "Scheduler: Triggering Policy ID {} at '{}'",
+                    schedule.policy_id, now_str
+                );
 
-                match execute_policy_run_logic(schedule.policy_id, &loop_pool).await {
+                match execute_policy_run_logic(
+                    schedule.policy_id,
+                    &loop_pool,
+                    &schedule.tenant_id,
+                )
+                .await
+                {
                     Ok(_) => {
-                        let next_run_time = calculate_next_run(&schedule.frequency, &schedule.next_run);
-                        let update_res = sqlx::query(
-                            "UPDATE policy_schedules SET next_run = ?, last_run = ? WHERE id = ?"
+                        // Update next run time
+                        let next_run_time =
+                            calculate_next_run(&schedule.frequency, &schedule.next_run);
+
+                        if let Err(e) = sqlx::query(
+                            "UPDATE policy_schedules SET next_run = ?, last_run = ? WHERE id = ?",
                         )
                         .bind(&next_run_time)
                         .bind(&now_str)
                         .bind(schedule.id)
                         .execute(&loop_pool)
-                        .await;
-                    
-                        if let Err(e) = update_res {
-                            error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
+                        .await
+                        {
+                            error!(
+                                "Failed to update schedule for policy {}: {}",
+                                schedule.policy_id, e
+                            );
                         } else {
-                            info!("Scheduled scan successfully initiated for Policy ID: {}", schedule.policy_id);
+                            info!(
+                                "Scheduled scan successfully initiated for Policy ID: {}",
+                                schedule.policy_id
+                            );
                         }
-                    },
+
+                        // Notify all tenant admins of successful scheduled run
+                        for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
+                            add_notification(
+                                &loop_pool,
+                                "info",
+                                owner_id,
+                                &format!(
+                                    "Scheduled policy run completed for Policy ID {}.",
+                                    schedule.policy_id
+                                ),
+                            )
+                            .await;
+                        }
+                    }
+
                     Err(e) => {
-                        error!("Scheduled execution failed for policy {}: {}", schedule.policy_id, e);
-                        let msg = format!("Automation Error: Failed to run Policy ID {}. Error: {}", schedule.policy_id, e);
+                        error!(
+                            "Scheduled execution failed for policy {}: {}",
+                            schedule.policy_id, e
+                        );
+
+                        // Notify all tenant admins of failed scheduled run
+                        for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
+                            add_notification(
+                                &loop_pool,
+                                "warning",
+                                owner_id,
+                                &format!(
+                                    "Scheduled policy run FAILED for Policy ID {}. Error: {}",
+                                    schedule.policy_id, e
+                                ),
+                            )
+                            .await;
+                        }
                     }
                 }
             }
 
-            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT (For Trend Graphs) ---
-            // Triggered whenever the minute is 00 (once per hour)
+            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT (for trend graphs) ---
             if now.minute() == 0 && current_hour != last_snapshot_hour {
-                info!("Running hourly compliance aggregation snapshot for trend graph...");
+                info!("Running hourly compliance aggregation snapshot...");
                 if let Err(e) = record_compliance_history(&loop_pool).await {
                     error!("Hourly compliance snapshot failed: {}", e);
                 } else {
-                    // Update guard variable to ensure we don't run again until next hour
                     last_snapshot_hour = current_hour;
+                    info!("Hourly compliance snapshot recorded successfully.");
                 }
             }
         }
     });
 }
-
-
