@@ -1,45 +1,37 @@
 [package]
 name = "scmserver"
-version = "0.0.10"
-edition = "2024" 
+version = "0.0.99"
+edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "FSL-1.1-ALv2"
 description = "Server for Open Security Compliance Manager"
 
-
 [package.metadata]
-release = "8"
+release = "1"
 
 [dependencies]
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
 axum-server = "0.7"
-axum-extra = { version = "0.10", features = ["cookie","cookie-signed"] }
-tokio = { version = "1.34", features = ["full"] } 
-tower-http = { version = "0.5", features = ["fs"] }
-http-body-util = "0.1"
+axum-extra = { version = "0.10", features = ["cookie", "cookie-signed"] }
+tokio = { version = "1.34", features = ["full"] }
 sqlx = { version = "0.8", features = ["sqlite", "runtime-tokio-rustls", "chrono"] }
 serde = { version = "1.0", features = ["derive"] }
 serde_json = "1.0"
-serde_urlencoded = "0.7"
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["env-filter"] }
-tracing-log = "0.1"
 tera = "1.20"
 include_dir = "0.7"
 toml = "0.8.0"
 urlencoding = "2.1"
 mime_guess = "2.0"
 chrono = { version = "0.4", features = ["serde"] }
-bytes = "1.6" 
+bytes = "1.6"
 base64 = "0.21"
 rand = "0.8"
 ed25519-dalek = { version = "2", features = ["rand_core"] }
-uuid = { version = "1.17", features = ["v4", "serde"] }
 bcrypt = "0.17.0"
 time = "0.3"
-bincode = "1.3"
 genpdf = { version = "0.2.0", features = ["images"] }
-image = "0.23"
 hkdf = "0.12"
 sha2 = "0.10"
 
