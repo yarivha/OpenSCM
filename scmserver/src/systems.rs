@@ -1,6 +1,6 @@
 use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path};
-use tokio::sync::mpsc; 
+use tokio::sync::mpsc;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
@@ -9,7 +9,7 @@ use urlencoding;
 use std::collections::HashMap;
 use tracing::{info, warn, error};
 use bytes::Bytes;
-use chrono::{DateTime,Utc};
+use chrono::{DateTime, Utc};
 
 use crate::models::{ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession};
 use crate::auth::{self};
@@ -17,23 +17,24 @@ use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
 
 
+// ============================================================
+// SYSTEMS
+// ============================================================
 
-// systems
 pub async fn systems(
     auth: AuthSession,
     Query(params): Query<HashMap<String, String>>,
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
-    
-    // check authorization
+
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
 
     let filter = params.get("filter").map(|s| s.to_lowercase());
 
-    let rows = match filter.as_deref() {
+    let rows_result = match filter.as_deref() {
         Some("active") | Some("pending") => {
             sqlx::query(
                 r#"
@@ -48,25 +49,18 @@ pub async fn systems(
                     COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
                     COALESCE(s.created_date, '') AS created_date,
                     COALESCE(s.last_seen, '') AS last_seen
-                FROM
-                    systems AS s
-                LEFT JOIN
-                    systems_in_groups AS sig ON s.id = sig.system_id
-                LEFT JOIN
-                    system_groups AS sg ON sig.group_id = sg.id
-                WHERE
-                    s.status = ?
-                GROUP BY
-                    s.id
-                ORDER BY
-                    CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END,
-                    s.id ASC
-                "#
+                FROM systems AS s
+                LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
+                LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
+                WHERE s.status = ? AND s.tenant_id = ?
+                GROUP BY s.id
+                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC
+                "#,
             )
-            .bind(filter.unwrap())
+            .bind(filter.as_deref().unwrap_or("active"))
+            .bind(&auth.tenant_id)
             .fetch_all(&pool)
             .await
-            .unwrap()
         }
         _ => {
             sqlx::query(
@@ -82,42 +76,56 @@ pub async fn systems(
                     COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
                     COALESCE(s.created_date, '') AS created_date,
                     COALESCE(s.last_seen, '') AS last_seen
-                FROM
-                    systems AS s
-                LEFT JOIN
-                    systems_in_groups AS sig ON s.id = sig.system_id
-                LEFT JOIN
-                    system_groups AS sg ON sig.group_id = sg.id
-                GROUP BY
-                    s.id
-                ORDER BY
-                    CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END,
-                    s.id ASC
-                "#
+                FROM systems AS s
+                LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
+                LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
+                WHERE s.tenant_id = ?
+                GROUP BY s.id
+                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC
+                "#,
             )
+            .bind(&auth.tenant_id)
             .fetch_all(&pool)
             .await
-            .unwrap()
+        }
+    };
+
+    let rows = match rows_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Failed to fetch systems: {}", e);
+            let mut context = Context::new();
+            context.insert("error_message", "Failed to load systems.");
+            context.insert("systems", &Vec::<System>::new());
+            return render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
+                .await
+                .into_response();
         }
     };
 
     let systems: Vec<System> = rows
         .into_iter()
         .map(|row| System {
-            id: row.try_get("system_id").unwrap(),
-            name: row.try_get("system_name").unwrap(),
-            ver: row.try_get("system_ver").unwrap(),
-            ip: row.try_get("system_ip").unwrap(),
-            os: row.try_get("system_os").unwrap(),
-            arch: row.try_get("system_arch").unwrap(),
-            status: row.try_get("system_status").unwrap(),
-            groups: row.try_get("group_names").unwrap(),
+            id: row.try_get("system_id").unwrap_or(None),
+            name: row.try_get("system_name").unwrap_or_default(),
+            ver: row.try_get("system_ver").ok(),
+            ip: row.try_get("system_ip").ok(),
+            os: row.try_get("system_os").ok(),
+            arch: row.try_get("system_arch").ok(),
+            status: row.try_get("system_status").ok(),
+            groups: row.try_get("group_names").ok(),
             auth_signature: None,
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: Some(row.try_get::<DateTime<Utc>, _>("created_date").unwrap_or_else(|_| Utc::now())),
-            last_seen: Some(row.try_get::<DateTime<Utc>, _>("last_seen").unwrap_or_else(|_| Utc::now())),
+            created_date: Some(
+                row.try_get::<DateTime<Utc>, _>("created_date")
+                    .unwrap_or_else(|_| Utc::now()),
+            ),
+            last_seen: Some(
+                row.try_get::<DateTime<Utc>, _>("last_seen")
+                    .unwrap_or_else(|_| Utc::now()),
+            ),
         })
         .collect();
 
@@ -126,38 +134,40 @@ pub async fn systems(
         context.insert("error_message", error_message);
     }
     context.insert("systems", &systems);
-    render_template(&tera, Some(&pool), "systems.html", context, Some(auth)).await.into_response()
+    render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
+        .await
+        .into_response()
 }
 
-// systems_approve
+
 pub async fn systems_approve(
     auth: AuthSession,
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
-    
-    // check authorization
+
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-    // Attempt to update the system status
-    if let Err(e) = sqlx::query("UPDATE systems SET status = 'active' WHERE id = ?")
-        .bind(id)
-        .execute(&pool)
-        .await
+    if let Err(e) = sqlx::query(
+        "UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .execute(&pool)
+    .await
     {
-        let error_message = format!("Error approving system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
+        error!("Failed to approve system {}: {}", id, e);
+        let encoded = urlencoding::encode(&format!("Error approving system: {}", e)).to_string();
+        return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
     }
 
-    // Success: redirect back to systems page
+    info!("System ID {} approved by '{}'.", id, auth.username);
     Redirect::to("/systems").into_response()
 }
 
 
-// systems_delete
 pub async fn systems_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -165,142 +175,141 @@ pub async fn systems_delete(
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
-    // 1. Check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-    // 2. Attempt to delete the system 
-    // (Note: ensure your DB schema has ON DELETE CASCADE on the results table)
-    if let Err(e) = sqlx::query("DELETE FROM systems WHERE id = ?")
+    // ON DELETE CASCADE handles related records automatically
+    if let Err(e) = sqlx::query("DELETE FROM systems WHERE id = ? AND tenant_id = ?")
         .bind(id)
+        .bind(&auth.tenant_id)
         .execute(&pool)
         .await
     {
-        error!("Database error during system deletion: {}", e);
-        let error_message = format!("Error deleting system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/systems?error_message={}", encoded_message)).into_response();
+        error!("Failed to delete system {}: {}", id, e);
+        let encoded = urlencoding::encode(&format!("Error deleting system: {}", e)).to_string();
+        return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
     }
 
-
-    // 3. SIGNAL RECALCULATION
-    // Instead of 'awaiting' the heavy math, we send a 1-microsecond signal to the worker.
-    // The worker will wait 10s (debounce) and then run the "Final Boss" SQL once.
-    let _ = sync_tx.send(()).await; 
-
-    info!("System ID {} deleted. Compliance update signaled to background worker.", id);
-
-    // Success: The user is redirected immediately!
+    let _ = sync_tx.send(()).await;
+    info!("System ID {} deleted by '{}'. Compliance update signaled.", id, auth.username);
     Redirect::to("/systems").into_response()
 }
 
 
-// systems_edit
-pub async fn systems_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
+pub async fn systems_edit(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
 
-    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-
-    // capture system
-    let row_result = sqlx::query("
-        SELECT id, name, ver, ip, os, arch, status 
-        FROM systems 
-        WHERE id = ? AND status = 'active'
-    ")
+    let row_result = sqlx::query(
+        "SELECT id, name, ver, ip, os, arch, status
+         FROM systems
+         WHERE id = ? AND tenant_id = ? AND status = 'active'",
+    )
     .bind(id)
+    .bind(&auth.tenant_id)
     .fetch_optional(&*pool)
     .await;
 
-    // Handle potential Database Errors AND missing rows
     let row = match row_result {
-        Ok(Some(r)) => r, // We found the group
-        Ok(None) => {     // The query worked, but no group found
-            return Redirect::to("/system?error_message=System+group+not+found").into_response();
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return Redirect::to("/systems?error_message=System+not+found").into_response();
         }
-        Err(e) => {      // Database error (connection lost, etc.)
-            error!("Database error: {}", e);
-            return Redirect::to("/system?error_message=Database+error").into_response();
+        Err(e) => {
+            error!("Database error fetching system {}: {}", id, e);
+            return Redirect::to("/systems?error_message=Database+error").into_response();
         }
     };
 
-
     let system = System {
-            id: row.try_get("id").unwrap(),
-            name: row.try_get("name").unwrap(),
-            ver: row.try_get("ver").unwrap(),
-            ip: row.try_get("ip").unwrap(),
-            os: row.try_get("os").unwrap(),
-            arch: row.try_get("arch").unwrap(),
-            status: row.try_get("status").unwrap(),
-            groups: None,
-            auth_signature: None,
-            auth_public_key: None,
-            trust_challenge: None,
-            trust_proof: None,
-            created_date: None,
-            last_seen: None,
-        };
-    
-    // capture groups list
-    let rows = sqlx::query("
-         SELECT
-                sg.id AS group_id,
-                sg.name AS group_name,
-                sg.description AS group_description
-            FROM
-                system_groups AS sg
-        ")
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
+        id: row.try_get("id").unwrap_or(None),
+        name: row.try_get("name").unwrap_or_default(),
+        ver: row.try_get("ver").ok(),
+        ip: row.try_get("ip").ok(),
+        os: row.try_get("os").ok(),
+        arch: row.try_get("arch").ok(),
+        status: row.try_get("status").ok(),
+        groups: None,
+        auth_signature: None,
+        auth_public_key: None,
+        trust_challenge: None,
+        trust_proof: None,
+        created_date: None,
+        last_seen: None,
+    };
 
-    let groups: Vec<SystemGroup> = rows.into_iter().map(|row| {
-        SystemGroup {
-            id: row.get("group_id"),
-            name: row.get("group_name"),
-            description: row.get("group_description"),
-            systems: None,
+    let groups_result = sqlx::query(
+        "SELECT sg.id AS group_id, sg.name AS group_name, sg.description AS group_description
+         FROM system_groups AS sg
+         WHERE sg.tenant_id = ?",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await;
+
+    let groups: Vec<SystemGroup> = match groups_result {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| SystemGroup {
+                id: row.get("group_id"),
+                name: row.get("group_name"),
+                description: row.get("group_description"),
+                systems: None,
+            })
+            .collect(),
+        Err(e) => {
+            error!("Failed to fetch groups for system edit {}: {}", id, e);
+            vec![]
         }
-    }).collect();
-    
+    };
 
-    // capture groups that has the system 
-    let rows = sqlx::query("
-         SELECT system_id,group_id from systems_in_groups where system_id=?")
-        .bind(id)
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
+    let sig_result = sqlx::query(
+        "SELECT system_id, group_id FROM systems_in_groups WHERE system_id = ?",
+    )
+    .bind(id)
+    .fetch_all(&*pool)
+    .await;
 
-    let systems_in_groups: Vec<SystemInsideGroup> = rows.into_iter().map(|row| {
-        SystemInsideGroup {
-            system_id: row.get("system_id"),
-            group_id: row.get("group_id"),
+    let systems_in_groups: Vec<SystemInsideGroup> = match sig_result {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| SystemInsideGroup {
+                system_id: row.get("system_id"),
+                group_id: row.get("group_id"),
+            })
+            .collect(),
+        Err(e) => {
+            error!("Failed to fetch group memberships for system {}: {}", id, e);
+            vec![]
         }
-    }).collect();
+    };
 
     let mut context = Context::new();
     context.insert("system", &system);
     context.insert("groups", &groups);
     context.insert("systems_in_groups", &systems_in_groups);
-    render_template(&tera, Some(&pool), "systems_edit.html",context, Some(auth)).await.into_response()
+    render_template(&tera, Some(&pool), "systems_edit.html", context, Some(auth))
+        .await
+        .into_response()
 }
 
-// systems_edit_save
-pub async fn systems_edit_save( 
+
+pub async fn systems_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,          // Added Extension() wrapper
-    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped together
-    raw_form: RawForm                                // Body consumer must be LAST
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    raw_form: RawForm,
 ) -> impl IntoResponse {
 
-
-    // 1. Auth check
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
@@ -308,72 +317,74 @@ pub async fn systems_edit_save(
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
-            let error_message = urlencoding::encode(&format!("Database error: {}", e)).to_string();
-            return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
+            let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+            return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
         }
     };
 
-    // 2. Parse the form
     let bytes: Bytes = raw_form.0;
-    let raw_string = String::from_utf8_lossy(&bytes); // Using lossy for extra safety
+    let raw_string = String::from_utf8_lossy(&bytes).to_string();
     let form_data = parse_form_data(&raw_string);
+    let selected_groups = form_data.get("groups").cloned();
 
-    // 3. Extract ONLY the group assignments
-    // Note: 'groups' comes as a Vec<String> from the multi-select
-    let selected_groups = form_data.get("groups").cloned(); 
-
-    // --- NO MORE UPDATE systems SET ... ---
-    // We are trusting the agent for those fields.
-
-    // 4. Update Group Assignments (Delete then Re-insert)
-    if let Err(e) = sqlx::query("DELETE FROM systems_in_groups WHERE system_id=?")
-        .bind(id)
-        .execute(&mut *tx)
-        .await {
-            let error_message = urlencoding::encode(&format!("Failed to clear old groups: {}", e)).to_string();
-            tx.rollback().await.ok();
-            return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
-        }
+    if let Err(e) = sqlx::query(
+        "DELETE FROM systems_in_groups WHERE system_id = ?",
+    )
+    .bind(id)
+    .execute(&mut *tx)
+    .await
+    {
+        let encoded = urlencoding::encode(&format!("Failed to clear old groups: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
+    }
 
     if let Some(group_ids) = selected_groups {
         for g_id_str in group_ids {
             if let Ok(g_id) = g_id_str.parse::<i32>() {
                 if let Err(e) = sqlx::query(
-                    "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)"
+                    "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)",
                 )
                 .bind(id)
                 .bind(g_id)
                 .execute(&mut *tx)
-                .await {
-                    let error_message = urlencoding::encode(&format!("Failed to link group {}: {}", g_id, e)).to_string();
+                .await
+                {
+                    let encoded =
+                        urlencoding::encode(&format!("Failed to link group {}: {}", g_id, e))
+                            .to_string();
                     tx.rollback().await.ok();
-                    return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
+                    return Redirect::to(&format!("/systems?error_message={}", encoded))
+                        .into_response();
                 }
             }
         }
     }
 
-    // 5. Commit
     if let Err(e) = tx.commit().await {
-        let error_message = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
-        return Redirect::to(&format!("/systems?error_message={}", error_message)).into_response();
+        let encoded = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
+        return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
     }
 
-    // recalculate compliance
     let _ = sync_tx.send(()).await;
-
+    info!("System ID {} groups updated by '{}'.", id, auth.username);
     Redirect::to("/systems?success_message=System+groups+updated+successfully").into_response()
 }
 
 
-// systems_pending
-pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) -> impl IntoResponse {
-    // check authorization
+pub async fn systems_pending(
+    auth: AuthSession,
+    Query(query): Query<ErrorQuery>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
 
-    let rows = sqlx::query("
+    let rows_result = sqlx::query(
+        r#"
         SELECT
             s.id AS system_id,
             COALESCE(s.name, 'NA') AS system_name,
@@ -385,144 +396,189 @@ pub async fn systems_pending(auth: AuthSession, Query(query): Query<ErrorQuery>,
             COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
             COALESCE(s.created_date, '') AS created_date,
             COALESCE(s.last_seen, '') AS last_seen
-        FROM
-            systems AS s
-        LEFT JOIN
-            systems_in_groups AS sig ON s.id = sig.system_id
-        LEFT JOIN
-            system_groups AS sg ON sig.group_id = sg.id
-        WHERE
-            s.status = 'pending'
-        GROUP BY
-            s.id")        
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
+        FROM systems AS s
+        LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
+        LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
+        WHERE s.status = 'pending' AND s.tenant_id = ?
+        GROUP BY s.id
+        "#,
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await;
 
-    let systems: Vec<System> = rows.into_iter().map(|row| {
-        System {
-            id: row.try_get("system_id").unwrap(),
-            name: row.try_get("system_name").unwrap(),
-            ver: row.try_get("system_ver").unwrap(),
-            ip: row.try_get("system_ip").unwrap(),
-            os: row.try_get("system_os").unwrap(),
-            arch: row.try_get("system_arch").unwrap(),
-            status: row.try_get("system_status").unwrap(),
-            groups: row.try_get("group_names").unwrap(),
+    let rows = match rows_result {
+        Ok(r) => r,
+        Err(e) => {
+            error!("Failed to fetch pending systems: {}", e);
+            let mut context = Context::new();
+            context.insert("error_message", "Failed to load pending systems.");
+            context.insert("systems", &Vec::<System>::new());
+            return render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
+                .await
+                .into_response();
+        }
+    };
+
+    let systems: Vec<System> = rows
+        .into_iter()
+        .map(|row| System {
+            id: row.try_get("system_id").unwrap_or(None),
+            name: row.try_get("system_name").unwrap_or_default(),
+            ver: row.try_get("system_ver").ok(),
+            ip: row.try_get("system_ip").ok(),
+            os: row.try_get("system_os").ok(),
+            arch: row.try_get("system_arch").ok(),
+            status: row.try_get("system_status").ok(),
+            groups: row.try_get("group_names").ok(),
             auth_signature: None,
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: Some(row.try_get::<DateTime<Utc>, _>("created_date").unwrap_or_else(|_| Utc::now())),
-            last_seen: Some(row.try_get::<DateTime<Utc>, _>("last_seen").unwrap_or_else(|_| Utc::now())),
-        }
-    }).collect();
+            created_date: Some(
+                row.try_get::<DateTime<Utc>, _>("created_date")
+                    .unwrap_or_else(|_| Utc::now()),
+            ),
+            last_seen: Some(
+                row.try_get::<DateTime<Utc>, _>("last_seen")
+                    .unwrap_or_else(|_| Utc::now()),
+            ),
+        })
+        .collect();
 
-    // Prepare handler-specific context
     let mut context = Context::new();
-    if let Some(error_message) = query.error_message {
-        context.insert("error_message", &error_message);
+    if let Some(msg) = query.error_message {
+        context.insert("error_message", &msg);
     }
     context.insert("systems", &systems);
-    render_template(&tera,Some(&pool), "systems.html", context, Some(auth)).await.into_response()
+    render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
+        .await
+        .into_response()
 }
 
 
+// ============================================================
+// SYSTEM GROUPS
+// ============================================================
 
+pub async fn system_groups(
+    auth: AuthSession,
+    Query(query): Query<ErrorQuery>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
 
-
-
-// system_groups
-pub async fn system_groups(auth: AuthSession, Query(query): Query<ErrorQuery>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) -> impl IntoResponse {
-    
-    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
 
-   let rows = sqlx::query("
+    let rows_result = sqlx::query(
+        r#"
         SELECT
             sg.id,
             sg.name,
             sg.description,
-            GROUP_CONCAT(s.name) AS systems -- Returns NULL if no systems, perfect for Option<String>
-        FROM
-            system_groups AS sg
-        LEFT JOIN
-            systems_in_groups AS sig ON sg.id = sig.group_id
-        LEFT JOIN
-            systems AS s ON sig.system_id = s.id
-        GROUP BY
-            sg.id, sg.name, sg.description
-    ")
+            GROUP_CONCAT(s.name) AS systems
+        FROM system_groups AS sg
+        LEFT JOIN systems_in_groups AS sig ON sg.id = sig.group_id
+        LEFT JOIN systems AS s ON sig.system_id = s.id
+        WHERE sg.tenant_id = ?
+        GROUP BY sg.id, sg.name, sg.description
+        "#,
+    )
+    .bind(&auth.tenant_id)
     .fetch_all(&*pool)
-    .await
-    .unwrap();
+    .await;
 
-    let system_groups: Vec<SystemGroup> = rows.into_iter().map(|row| {
-        SystemGroup {
-            id: Some(row.get("id")),
-            name: row.get("name"),
-            description: row.get("description"), // sqlx handles NULL -> None automatically
-            systems: row.get("systems"),         // sqlx handles NULL -> None automatically
+    let system_groups: Vec<SystemGroup> = match rows_result {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| SystemGroup {
+                id: Some(row.get("id")),
+                name: row.get("name"),
+                description: row.get("description"),
+                systems: row.get("systems"),
+            })
+            .collect(),
+        Err(e) => {
+            error!("Failed to fetch system groups: {}", e);
+            let mut context = Context::new();
+            context.insert("error_message", "Failed to load system groups.");
+            context.insert("system_groups", &Vec::<SystemGroup>::new());
+            return render_template(&tera, Some(&pool), "system_groups.html", context, Some(auth))
+                .await
+                .into_response();
         }
-    }).collect();
+    };
 
-
-    // Prepare handler-specific context
     let mut context = Context::new();
-    if let Some(error_message) = query.error_message {
-        context.insert("error_message", &error_message);
+    if let Some(msg) = query.error_message {
+        context.insert("error_message", &msg);
     }
     context.insert("system_groups", &system_groups);
-    render_template(&tera,Some(&pool), "system_groups.html", context, Some(auth)).await.into_response()
+    render_template(&tera, Some(&pool), "system_groups.html", context, Some(auth))
+        .await
+        .into_response()
 }
 
 
-// system_groups_add
-pub async fn system_groups_add(auth: AuthSession, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
-    -> impl IntoResponse {
-    
-    // check authorization
+pub async fn system_groups_add(
+    auth: AuthSession,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-    let rows = sqlx::query("
-        SELECT id,name,status from systems where status='active'")
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
+    let rows_result = sqlx::query(
+        "SELECT id, name, status FROM systems WHERE status = 'active' AND tenant_id = ?",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await;
 
-    let systems: Vec<System> = rows.into_iter().map(|row| {
-        System {
-            id: row.get("id"), // Use try_get for Option and handle potential errors
-            name: row.get("name"),
-            ver: None,
-            ip: None,
-            os: None, 
-            arch: None,
-            status: row.get("status"),
-            groups: None,
-            auth_signature: None,
-            auth_public_key: None,
-            trust_challenge: None,
-            trust_proof: None,
-            created_date: None,
-            last_seen: None,
-    }
-    }).collect();
+    let systems: Vec<System> = match rows_result {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| System {
+                id: row.get("id"),
+                name: row.get("name"),
+                ver: None,
+                ip: None,
+                os: None,
+                arch: None,
+                status: row.get("status"),
+                groups: None,
+                auth_signature: None,
+                auth_public_key: None,
+                trust_challenge: None,
+                trust_proof: None,
+                created_date: None,
+                last_seen: None,
+            })
+            .collect(),
+        Err(e) => {
+            error!("Failed to fetch systems for group add: {}", e);
+            vec![]
+        }
+    };
 
     let mut context = Context::new();
     context.insert("systems", &systems);
-    render_template(&tera,Some(&pool), "system_groups_add.html", context, Some(auth)).await.into_response()
+    render_template(&tera, Some(&pool), "system_groups_add.html", context, Some(auth))
+        .await
+        .into_response()
 }
 
-//system_groups_add_save
-pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePool>, raw_form: RawForm) 
-    -> impl IntoResponse {
-    
-    // check authorization
+
+pub async fn system_groups_add_save(
+    auth: AuthSession,
+    pool: Extension<SqlitePool>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
@@ -530,9 +586,8 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
-            let error_message = format!("Database error: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+            let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
         }
     };
 
@@ -540,247 +595,246 @@ pub async fn system_groups_add_save(auth : AuthSession, pool: Extension<SqlitePo
     let raw_string = match String::from_utf8(bytes.to_vec()) {
         Ok(s) => s,
         Err(e) => {
-            let error_message = format!("Error converting bytes to string: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+            let encoded =
+                urlencoding::encode(&format!("Invalid form encoding: {}", e)).to_string();
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded))
+                .into_response();
         }
     };
 
-    // Parse the URL-encoded string
     let form_data = parse_form_data(&raw_string);
 
-    // Extract name and description (with error handling)
-    let name = form_data.get("name").and_then(|v| v.first()).map(|s| s.to_string());
-    let description = form_data.get("description").and_then(|v| v.first()).map(|s| s.to_string());
+    // Validate required fields
+    let name = match form_data.get("name").and_then(|v| v.first()).filter(|s| !s.is_empty()) {
+        Some(n) => n.clone(),
+        None => {
+            return Redirect::to("/system_groups?error_message=Group+name+is+required")
+                .into_response();
+        }
+    };
+
+    let description = match form_data
+        .get("description")
+        .and_then(|v| v.first())
+        .filter(|s| !s.is_empty())
+    {
+        Some(d) => d.clone(),
+        None => {
+            return Redirect::to("/system_groups?error_message=Description+is+required")
+                .into_response();
+        }
+    };
+
     let systems: Option<Vec<String>> = form_data.get("systems").cloned();
 
-    // if name is empty
-    if name.is_none() || description.is_none() {
-        let error_message = "Missing 'name' or 'description' in form data.";
-        let encoded_message = urlencoding::encode(error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
-    }
-
     let result = sqlx::query(
-        "INSERT INTO system_groups (name, description) VALUES (?, ?)"
+        "INSERT INTO system_groups (tenant_id, name, description) VALUES (?, ?, ?)",
     )
-    .bind(name.as_ref().unwrap(), ) // Unwrap after checking for None
-    .bind(description.as_ref().unwrap()) // Unwrap after checking for None
+    .bind(&auth.tenant_id)
+    .bind(&name)
+    .bind(&description)
     .execute(&mut *tx)
     .await;
 
     let group_id = match result {
         Ok(res) => res.last_insert_rowid(),
         Err(e) => {
-            let error_message = format!("Database error: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+            let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded))
+                .into_response();
         }
     };
 
-    if let Some(systems) = systems {
-        for system_id_str in systems {
-            if let Ok(system_id) = system_id_str.parse::<i32>() {
-                if let Err(e) = sqlx::query(
-                    "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)"
-                )
-                .bind(system_id)
-                .bind(group_id)
-                .execute(&mut *tx)
-                .await
-                {
-                    let error_message = format!("Database error: {}", e);
-                    let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+    if let Some(system_ids) = systems {
+        for system_id_str in system_ids {
+            match system_id_str.parse::<i32>() {
+                Ok(system_id) => {
+                    if let Err(e) = sqlx::query(
+                        "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)",
+                    )
+                    .bind(system_id)
+                    .bind(group_id)
+                    .execute(&mut *tx)
+                    .await
+                    {
+                        let encoded =
+                            urlencoding::encode(&format!("Failed to add system to group: {}", e))
+                                .to_string();
+                        tx.rollback().await.ok();
+                        return Redirect::to(&format!(
+                            "/system_groups?error_message={}",
+                            encoded
+                        ))
+                        .into_response();
+                    }
                 }
-            } else {
-                let error_message = format!("Invalid system ID: {}", system_id_str);
-                let encoded_message = urlencoding::encode(&error_message);
-                return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+                Err(_) => {
+                    let encoded =
+                        urlencoding::encode(&format!("Invalid system ID: {}", system_id_str))
+                            .to_string();
+                    tx.rollback().await.ok();
+                    return Redirect::to(&format!("/system_groups?error_message={}", encoded))
+                        .into_response();
+                }
             }
         }
     }
 
-    // Commit the transaction
     if let Err(e) = tx.commit().await {
-        let error_message = format!("Database error: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+        let encoded = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
+    info!("System group '{}' created by '{}'.", name, auth.username);
     Redirect::to("/system_groups").into_response()
 }
 
 
-// system_groups_delete
 pub async fn system_groups_delete(
-    auth: AuthSession, 
-    Path(id): Path<i32>, 
-    Extension(pool): Extension<SqlitePool>,          // Added Extension() wrapper
-    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped Extensions
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
-    
-    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-
-    let mut tx = match pool.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            let error_message = format!("Database error: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
-        }
-    };
-
-    // Delete records from the relationship table first
-    let delete_relationship_result = sqlx::query(
-        "DELETE FROM systems_in_groups WHERE group_id=?"
+    // ON DELETE CASCADE handles systems_in_groups automatically
+    if let Err(e) = sqlx::query(
+        "DELETE FROM system_groups WHERE id = ? AND tenant_id = ?",
     )
-    .bind(&id)
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = delete_relationship_result {
-        let error_message = format!("Error deleting relationship: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .execute(&pool)
+    .await
+    {
+        error!("Failed to delete system group {}: {}", id, e);
+        let encoded =
+            urlencoding::encode(&format!("Error deleting system group: {}", e)).to_string();
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
-    // Now delete the system_group
-    let delete_group_result = sqlx::query(
-        "DELETE FROM system_groups WHERE id=?"
-    )
-    .bind(&id)
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = delete_group_result {
-        let error_message = format!("Error deleting system group: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok(); // Ensure the transaction is rolled back
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response().into_response();
-    }
-
-    // Commit the transaction if all queries were successful
-    if let Err(e) = tx.commit().await {
-        let error_message = format!("Error committing transaction: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
-    }
-
-
-    // RECALCULATE GLOBAL SCORES
     let _ = sync_tx.send(()).await;
-
-    info!("Group ID {} deleted successfully. Compliance scores recalculated.", id);
-
-
-
+    info!("System group ID {} deleted by '{}'. Compliance update signaled.", id, auth.username);
     Redirect::to("/system_groups").into_response()
 }
 
 
-// system_group_edit
-pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Extension<SqlitePool>,tera: Extension<Arc<Tera>>) -> impl IntoResponse  {
+pub async fn system_groups_edit(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
 
-    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
 
-    // capture system
-    let row_result = sqlx::query("
-                SELECT id,name,description from system_groups where id=?")
+    let row_result = sqlx::query(
+        "SELECT id, name, description FROM system_groups WHERE id = ? AND tenant_id = ?",
+    )
     .bind(id)
+    .bind(&auth.tenant_id)
     .fetch_optional(&*pool)
     .await;
 
-    // Handle potential Database Errors AND missing rows
     let row = match row_result {
-        Ok(Some(r)) => r, // We found the group
-        Ok(None) => {     // The query worked, but no group found
-            return Redirect::to("/system_groups?error_message=System+group+not+found").into_response();
+        Ok(Some(r)) => r,
+        Ok(None) => {
+            return Redirect::to(
+                "/system_groups?error_message=System+group+not+found",
+            )
+            .into_response();
         }
-        Err(e) => {      // Database error (connection lost, etc.)
-            error!("Database error: {}", e);
+        Err(e) => {
+            error!("Database error fetching group {}: {}", id, e);
             return Redirect::to("/system_groups?error_message=Database+error").into_response();
         }
     };
 
-
     let group = SystemGroup {
-            id: row.try_get("id").unwrap(),
-            name: row.try_get("name").unwrap(),
-            description: row.try_get("description").unwrap(),
-            systems: None,
+        id: row.try_get("id").unwrap_or(None),
+        name: row.try_get("name").unwrap_or_default(),
+        description: row.try_get("description").unwrap_or(None),
+        systems: None,
     };
-    
-    // capture system list
-    let rows = sqlx::query("
-         SELECT id, name, status from systems where status='active' ")
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
 
-    let systems: Vec<System> = rows.into_iter().map(|row| {
-        System {
-            id: row.get("id"), // Use try_get for Option and handle potential errors
-            name: row.get("name"),
-            ver: None,
-            ip: None,
-            os: None, 
-            arch: None,
-            status: row.get("status"),
-            groups: None,
-            auth_signature: None,
-            auth_public_key: None,
-            trust_challenge: None,
-            trust_proof: None,
-            created_date: None,
-            last_seen: None,
+    let systems_result = sqlx::query(
+        "SELECT id, name, status FROM systems WHERE status = 'active' AND tenant_id = ?",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await;
+
+    let systems: Vec<System> = match systems_result {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| System {
+                id: row.get("id"),
+                name: row.get("name"),
+                ver: None,
+                ip: None,
+                os: None,
+                arch: None,
+                status: row.get("status"),
+                groups: None,
+                auth_signature: None,
+                auth_public_key: None,
+                trust_challenge: None,
+                trust_proof: None,
+                created_date: None,
+                last_seen: None,
+            })
+            .collect(),
+        Err(e) => {
+            error!("Failed to fetch systems for group edit {}: {}", id, e);
+            vec![]
         }
-        }).collect();
-    
+    };
 
-    // capture groups that has the system 
-    let rows = sqlx::query("
-         SELECT system_id,group_id from systems_in_groups where group_id=?")
-        .bind(id)
-        .fetch_all(&*pool)
-        .await
-        .unwrap();
+    let sig_result = sqlx::query(
+        "SELECT system_id, group_id FROM systems_in_groups WHERE group_id = ?",
+    )
+    .bind(id)
+    .fetch_all(&*pool)
+    .await;
 
-    let systems_in_groups: Vec<SystemInsideGroup> = rows.into_iter().map(|row| {
-        SystemInsideGroup {
-            system_id: row.get("system_id"),
-            group_id: row.get("group_id"),
+    let systems_in_groups: Vec<SystemInsideGroup> = match sig_result {
+        Ok(rows) => rows
+            .into_iter()
+            .map(|row| SystemInsideGroup {
+                system_id: row.get("system_id"),
+                group_id: row.get("group_id"),
+            })
+            .collect(),
+        Err(e) => {
+            error!("Failed to fetch group memberships for group {}: {}", id, e);
+            vec![]
         }
-    }).collect();
+    };
 
     let mut context = Context::new();
     context.insert("group", &group);
     context.insert("systems", &systems);
     context.insert("systems_in_groups", &systems_in_groups);
-    render_template(&tera, Some(&pool), "system_groups_edit.html", context, Some(auth)).await.into_response()
+    render_template(&tera, Some(&pool), "system_groups_edit.html", context, Some(auth))
+        .await
+        .into_response()
 }
 
 
-// system_groups_edit_save
-    pub async fn system_groups_edit_save(
-    auth: AuthSession, 
-    Path(id): Path<i32>, 
-    Extension(pool): Extension<SqlitePool>,          // Added Extension() wrapper
-    Extension(sync_tx): Extension<mpsc::Sender<()>>, // Grouped extensions together
-    raw_form: RawForm                                // Body consumer stays LAST
+pub async fn system_groups_edit_save(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    raw_form: RawForm,
 ) -> impl IntoResponse {
-    
 
-    // check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
@@ -788,9 +842,9 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
-            let error_message = format!("Database error: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+            let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded))
+                .into_response();
         }
     };
 
@@ -798,88 +852,100 @@ pub async fn system_groups_edit(auth: AuthSession, Path(id): Path<i32>,pool: Ext
     let raw_string = match String::from_utf8(bytes.to_vec()) {
         Ok(s) => s,
         Err(e) => {
-            let error_message = format!("Error converting bytes to string: {}", e);
-            let encoded_message = urlencoding::encode(&error_message);
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+            let encoded =
+                urlencoding::encode(&format!("Invalid form encoding: {}", e)).to_string();
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded))
+                .into_response();
         }
     };
 
-    // Parse the URL-encoded string
     let form_data = parse_form_data(&raw_string);
 
-    // Extract name and description (with error handling)
-    let name = form_data.get("name").and_then(|v| v.first()).map(|s| s.to_string());
-    let description = form_data.get("description").and_then(|v| v.first()).map(|s| s.to_string());
-    let systems: Option<Vec<String>> = form_data.get("systems").cloned(); 
+    // Validate required fields
+    let name = match form_data.get("name").and_then(|v| v.first()).filter(|s| !s.is_empty()) {
+        Some(n) => n.clone(),
+        None => {
+            return Redirect::to("/system_groups?error_message=Group+name+is+required")
+                .into_response();
+        }
+    };
 
-    // Update system
-    let update_group_result = sqlx::query(
-        "UPDATE system_groups SET name=?, description=? WHERE id=?"
-    )
-    .bind(name.as_ref().unwrap()) // Unwrap after checking for None
-    .bind(description.as_ref().unwrap()) // Unwrap after checking for None
-    .bind(id)
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = update_group_result { 
-        let error_message = format!("Error updating system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        tx.rollback().await.ok(); 
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
-    }
-
-    // Remove all related groups
-    let remove_related_systems = sqlx::query(
-        "DELETE FROM systems_in_groups WHERE group_id=?"
-    )
-    .bind(id) 
-    .execute(&mut *tx)
-    .await;
-
-    if let Err(e) = remove_related_systems
+    let description = match form_data
+        .get("description")
+        .and_then(|v| v.first())
+        .filter(|s| !s.is_empty())
     {
-        let error_message = format!("Error updating system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
+        Some(d) => d.clone(),
+        None => {
+            return Redirect::to("/system_groups?error_message=Description+is+required")
+                .into_response();
+        }
+    };
+
+    let systems: Option<Vec<String>> = form_data.get("systems").cloned();
+
+    if let Err(e) = sqlx::query(
+        "UPDATE system_groups SET name = ?, description = ? WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(&name)
+    .bind(&description)
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .execute(&mut *tx)
+    .await
+    {
+        let encoded = urlencoding::encode(&format!("Error updating group: {}", e)).to_string();
         tx.rollback().await.ok();
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
+    if let Err(e) = sqlx::query("DELETE FROM systems_in_groups WHERE group_id = ?")
+        .bind(id)
+        .execute(&mut *tx)
+        .await
+    {
+        let encoded =
+            urlencoding::encode(&format!("Error clearing group members: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
+    }
 
-    // Assign selected systems
-    if let Some(systems) = systems {
-        for system_id_str in systems {
-            if let Ok(system_id) = system_id_str.parse::<i32>() {
-                if let Err(e) = sqlx::query(
-                    "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)"
-                )
-                .bind(system_id)
-                .bind(id)
-                .execute(&mut *tx)
-                .await
-                {
-                    let error_message = format!("Error updating system: {}", e);
-                    let encoded_message = urlencoding::encode(&error_message);
-                    return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+    if let Some(system_ids) = systems {
+        for system_id_str in system_ids {
+            match system_id_str.parse::<i32>() {
+                Ok(system_id) => {
+                    if let Err(e) = sqlx::query(
+                        "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)",
+                    )
+                    .bind(system_id)
+                    .bind(id)
+                    .execute(&mut *tx)
+                    .await
+                    {
+                        let encoded =
+                            urlencoding::encode(&format!("Error adding system to group: {}", e))
+                                .to_string();
+                        tx.rollback().await.ok();
+                        return Redirect::to(&format!(
+                            "/system_groups?error_message={}",
+                            encoded
+                        ))
+                        .into_response();
+                    }
+                }
+                Err(_) => {
+                    warn!("Invalid system ID in form: {}", system_id_str);
                 }
             }
         }
     }
 
-
-    // Commit the transaction
     if let Err(e) = tx.commit().await {
-        let error_message = format!("Error updating system: {}", e);
-        let encoded_message = urlencoding::encode(&error_message);
-        return Redirect::to(&format!("/system_groups?error_message={}", encoded_message)).into_response();
+        let encoded = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
-
-    // RECALCULATE GLOBAL SCORES
     let _ = sync_tx.send(()).await;
-
-
+    info!("System group ID {} updated by '{}'.", id, auth.username);
     Redirect::to("/system_groups").into_response()
 }
-
-
