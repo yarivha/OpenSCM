@@ -391,7 +391,8 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Elements
     // --------------------
     let elements = vec![
-        ("Agent"),("OS"),("Hostname"),("IP"),("Domain"),("Architecture"),("User"),("Group"),("File"),("Directory"),("Process"),("Package"),("Registry"),("Port"),
+        ("AGENT"),("OS"),("HOSTNAME"),("IP"),("DOMAIN"),("ARCHITECTURE"),("USER"),("GROUP"),("FILE"),
+        ("DIRECTORY"),("PROCESS"),("PACKAGE"),("REGISTRY"),("PORT"),
     ];
 
     for name in elements {
@@ -408,7 +409,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Selements
     // --------------------
     let selements = vec![
-        ("Exists"), ("Not Exists"),("Content"),("Version"),("Permission"),("Owner"),("SHA1"),("SHA256"),
+        ("EXISTS"), ("NOT EXISTS"),("CONTENT"),("VERSION"),("PERMISSION"),("OWNER"),("SHA1"),("SHA2"),
     ];
 
     for name in selements {
@@ -425,7 +426,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Conditions
     // --------------------
     let conditions = vec![
-        ("Contains"),("Not Contains"),("Equals"),("Not Equals"),("More Than"),("Less Than"),("Regular Expression")
+        ("CONTAINS"),("NOT CONTAINS"),("EQUALS"),("NOT EQUALS"),("MORE THAN"),("LESS THAN")
     ];
 
     for name in conditions {
