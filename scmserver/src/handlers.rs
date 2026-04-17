@@ -3,7 +3,6 @@ use axum::http::{StatusCode, header};
 use axum::body::Body;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
-use sqlx::Row;
 use std::collections::HashMap;
 use urlencoding::decode;
 use tracing::error;

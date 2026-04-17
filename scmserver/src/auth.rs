@@ -1,6 +1,6 @@
 use axum::response::{Html, Redirect, IntoResponse, Response};
 use axum::extract::{FromRef, FromRequestParts, Query, Extension, Form};
-use axum_extra::extract::cookie::{Cookie, CookieJar, SameSite, SignedCookieJar, Key};
+use axum_extra::extract::cookie::{Cookie, SameSite, SignedCookieJar, Key};
 use axum::http::request::Parts;
 use axum::http::StatusCode;
 use std::sync::Arc;
@@ -11,8 +11,7 @@ use bcrypt::verify;
 use serde::Deserialize;
 use serde_json::{json, Value};
 use tera::{Tera, Context};
-use tracing::{debug, info, warn, error};
-use time::Duration;
+use tracing::{info, warn, error};
 
 use crate::handlers::{render_template, add_notification};
 use crate::models::{UserRole, ErrorQuery, AuthSession};
