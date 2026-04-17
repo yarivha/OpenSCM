@@ -1,11 +1,12 @@
-use axum::response::{Html, Response, IntoResponse};
+use axum::response::{Html, Redirect, Response, IntoResponse};
 use axum::http::{StatusCode, header};
 use axum::body::Body;
+use axum::Extension;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use std::collections::HashMap;
 use urlencoding::decode;
-use tracing::error;
+use tracing::{info,error};
 
 use crate::models::{Notification, UserRole, AuthSession};
 
@@ -172,6 +173,29 @@ pub async fn add_notification(
     {
         error!("Failed to insert notification for user {}: {}", owner_id, e);
     }
+}
+
+
+// ============================================================
+// CLEAR NOTIFICATIONS
+// ============================================================
+pub async fn clear_notifications(
+    auth: AuthSession, // Extractor ensures only logged-in users get here
+    Extension(pool): Extension<SqlitePool>,
+) -> Redirect {
+    let result = sqlx::query("DELETE FROM notify WHERE owner_id = ? AND tenant_id = ?")
+        .bind(&auth.userid)
+        .bind(&auth.tenant_id)
+        .execute(&pool)
+        .await;
+
+    match result {
+        Ok(_) => info!("User {} cleared notifications for tenant {}", auth.userid, auth.tenant_id),
+        Err(e) => error!("Failed to clear notifications: {}", e),
+    }
+
+    // Redirect back to the dashboard or wherever they were
+    Redirect::to("/")
 }
 
 

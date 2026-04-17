@@ -71,14 +71,20 @@
         <div class="dropdown-menu dropdown-menu-lg dropdown-menu-right">
           <span class="dropdown-item dropdown-header">{{ notify_count | default(value=0) }} Notifications</span>
           <div class="dropdown-divider"></div>
-          {% for notify in notifications %}
+
+            {% for notify in notifications %}
             <a href="#" class="dropdown-item">
-              <i class="fas fa-envelope mr-2"></i> {{ notify.message }}
+              <i class="fas mr-2 
+                {% if notify.type == 'info' %}fa-info-circle text-info{% elif notify.type == 'warning' %}fa-exclamation-triangle text-warning{% else %}fa-bell{% endif %}">
+              </i> 
+              {{ notify.message }}
+              <span class="float-right text-muted text-sm">{{ notify.timestamp }}</span>
             </a>
-          {% endfor %}
-          <div class="dropdown-divider"></div>
-          <a href="#" class="dropdown-item dropdown-footer">See All Notifications</a>
-        </div>
+            {% endfor %}
+
+            <div class="dropdown-divider"></div>
+              <a href="/notifications/clear" class="dropdown-item dropdown-footer">Clear All Notifications</a>
+            </div>
       </li>
 
       <li class="nav-item dropdown">

@@ -28,7 +28,7 @@ use sha2::Sha256;
 
 
 // Handlers (shared utilities)
-use crate::handlers::{not_found};
+use crate::handlers::{not_found, clear_notifications};
 
 // Schema
 use crate::schema::initialize_database;
@@ -244,6 +244,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/", get(dashboard))
         .route("/login", get(login).post(login_submit))
         .route("/logout", get(logout))
+        .route("/notifications/clear", get(clear_notifications))
         .route("/users", get(users))
         .route("/users/add", get(users_add).post(users_add_save))
         .route("/users/delete/{id}", get(users_delete))
