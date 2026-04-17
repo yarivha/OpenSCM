@@ -15,6 +15,12 @@ use winreg::enums::*;
 #[cfg(target_os = "windows")]
 use winreg::RegKey;
 
+// --- Constants ---
+#[cfg(not(windows))]
+const CONFIG_PATH: &str = "/etc/openscm/scmserver.config";
+
+// --- Structs ---
+
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Config {
     pub server: ServerConfig,
@@ -40,6 +46,8 @@ pub struct KeyPair {
     pub private_key: Option<String>,
 }
 
+// --- Default ---
+
 impl Default for Config {
     fn default() -> Self {
         #[cfg(windows)]
@@ -64,117 +72,68 @@ impl Default for Config {
     }
 }
 
-impl Config {
-    /// The entry point for main.rs. It automatically finds the config.
-    pub fn load() -> Result<Self, Box<dyn Error>> {
-        #[cfg(target_os = "windows")]
-        {
-            info!("Loading configuration from Windows Registry...");
-            Self::load_from_registry()
-        }
+// --- Key Generation ---
 
-        #[cfg(not(target_os = "windows"))]
-        {
-            let path = PathBuf::from("/etc/openscm/scmserver.config");
-            info!("Loading configuration from {:?}...", path);
-            if !path.exists() {
-                warn!("Config file not found. Bootstrapping defaults at {:?}", path);
-                let mut default_cfg = Self::default();
-                validate_and_setup_keys(&mut default_cfg)?;
-                default_cfg.save()?;
-                return Ok(default_cfg);
-            }
-            Self::load_from_toml(&path)
-        }
+pub fn generate_keys_if_missing<P: AsRef<Path>>(
+    public_key_path: P,
+    private_key_path: P,
+) -> Result<(), Box<dyn Error>> {
+    let pub_path = public_key_path.as_ref();
+    let priv_path = private_key_path.as_ref();
+
+    if pub_path.exists() && priv_path.exists() {
+        return Ok(());
     }
 
-    #[cfg(target_os = "windows")]
-    fn load_from_registry() -> Result<Self, Box<dyn Error>> {
-        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        // We use the subkey defined in our Installer
-        let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
-
-        let mut needs_repair = false;
-        let mut get_val = |name: &str, default: &str| {
-            key.get_value(name).unwrap_or_else(|_| {
-                needs_repair = true;
-                default.to_string()
-            })
-        };
-
-        let mut config = Config {
-            server: ServerConfig {
-                port: Some(get_val("Port", "8000")),
-                loglevel: Some(get_val("LogLevel", "info")),
-            },
-            database: DatabaseConfig {
-                path: get_val("DB", r"C:\ProgramData\OpenSCM\Server\scm.db"),
-            },
-            key: KeyPair {
-                key_path: Some(get_val("KeyPath", r"C:\ProgramData\OpenSCM\Server\keys")),
-                public_key: Some(get_val("PubKeyFile", "scmserver.pub")),
-                private_key: Some(get_val("PrivKeyFile", "scmserver.key")),
-            },
-        };
-
-        if needs_repair {
-            warn!("Registry settings were missing. Performing self-repair...");
-            config.save()?;
-        }
-
-        validate_and_setup_keys(&mut config)?;
-        Ok(config)
+    if pub_path.exists() ^ priv_path.exists() {
+        warn!(
+            "Partial key pair detected! Only one key file exists. Regenerating both... pub={} priv={}",
+            pub_path.exists(),
+            priv_path.exists()
+        );
+    } else {
+        warn!(
+            "Server keys missing. Generating new Ed25519 pair at {:?}",
+            priv_path.parent().unwrap_or(priv_path)
+        );
     }
 
-    /// Persists current settings to the correct OS location
-    pub fn save(&self) -> Result<(), Box<dyn Error>> {
-        #[cfg(target_os = "windows")]
-        {
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
-            
-            if let Some(p) = &self.server.port { key.set_value("Port", p)?; }
-            if let Some(l) = &self.server.loglevel { key.set_value("LogLevel", l)?; }
-            key.set_value("DB", &self.database.path)?;
-            if let Some(kp) = &self.key.key_path { key.set_value("KeyPath", kp)?; }
-            if let Some(pk) = &self.key.public_key { key.set_value("PubKeyFile", pk)?; }
-            if let Some(sk) = &self.key.private_key { key.set_value("PrivKeyFile", sk)?; }
-            Ok(())
-        }
+    let mut csprng = OsRng;
+    let signing_key = SigningKey::generate(&mut csprng);
+    let verify_key = VerifyingKey::from(&signing_key);
 
-        #[cfg(not(target_os = "windows"))]
-        {
-            let path = PathBuf::from("/etc/openscm/scmserver.config");
-            self.save_to(path)
-        }
+    let priv_encoded = general_purpose::STANDARD.encode(signing_key.to_bytes());
+    let pub_encoded = general_purpose::STANDARD.encode(verify_key.to_bytes());
+
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::OpenOptionsExt;
+        let mut options = fs::OpenOptions::new();
+        options.create(true).write(true).truncate(true).mode(0o600);
+        let mut priv_file = options.open(priv_path)?;
+        priv_file.write_all(priv_encoded.as_bytes())?;
     }
 
-    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
-        let toml_string = toml::to_string_pretty(self)?;
-        if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, toml_string)?;
-        Ok(())
+    #[cfg(not(unix))]
+    {
+        fs::write(priv_path, &priv_encoded)?;
     }
 
-    #[cfg(not(target_os = "windows"))]
-    fn load_from_toml(path: &Path) -> Result<Self, Box<dyn Error>> {
-        let contents = fs::read_to_string(path)?;
-        let mut config: Config = toml::from_str(&contents)?;
-        validate_and_setup_keys(&mut config)?;
-        Ok(config)
-    }
+    fs::write(pub_path, pub_encoded)?;
+    info!("Server keys generated successfully.");
+    Ok(())
 }
 
-// --- Validation Logic ---
+// --- Validation ---
 
 fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
-    // 1. Port Validation
+    // 1. Port Validation — hard error on invalid port
     if let Some(p) = &config.server.port {
         if p.parse::<u16>().is_err() {
-            error!("Invalid port in config: {}. Defaulting to 8000.", p);
-            config.server.port = Some("8000".to_string());
+            error!("Invalid port in config: '{}'. Please set a valid port (1-65535).", p);
+            return Err(format!(
+                "Invalid port in config: '{}'. Please set a valid port (1-65535).", p
+            ).into());
         }
     }
 
@@ -198,38 +157,116 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
-pub fn generate_keys_if_missing<P: AsRef<Path>>(public_key_path: P, private_key_path: P) -> Result<(), Box<dyn Error>> {
-    let pub_path = public_key_path.as_ref();
-    let priv_path = private_key_path.as_ref();
+// --- Config Implementation ---
 
-    if pub_path.exists() && priv_path.exists() {
-        return Ok(());
+impl Config {
+    /// The entry point for main.rs. It automatically finds the config.
+    pub fn load() -> Result<Self, Box<dyn Error>> {
+        #[cfg(target_os = "windows")]
+        {
+            info!("Loading configuration from Windows Registry...");
+            Self::load_from_registry()
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let path = PathBuf::from(CONFIG_PATH);
+            info!("Loading configuration from {:?}...", path);
+            if !path.exists() {
+                warn!("Config file not found. Bootstrapping defaults at {:?}", path);
+                let mut default_cfg = Self::default();
+                validate_and_setup_keys(&mut default_cfg)?;
+                default_cfg.save()?;
+                return Ok(default_cfg);
+            }
+            Self::load_from_toml(&path)
+        }
     }
 
-    warn!("Server keys missing. Generating new Ed25519 pair at {:?}", priv_path.parent().unwrap());
+    #[cfg(target_os = "windows")]
+    fn load_from_registry() -> Result<Self, Box<dyn Error>> {
+        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+        let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
 
-    let mut csprng = OsRng;
-    let signing_key = SigningKey::generate(&mut csprng);
-    let verify_key = VerifyingKey::from(&signing_key);
+        // Read each value explicitly with defaults
+        let port     = key.get_value("Port").unwrap_or_else(|_| "8000".to_string());
+        let loglevel = key.get_value("LogLevel").unwrap_or_else(|_| "info".to_string());
+        let db       = key.get_value("DB").unwrap_or_else(|_| r"C:\ProgramData\OpenSCM\Server\scm.db".to_string());
+        let key_path = key.get_value("KeyPath").unwrap_or_else(|_| r"C:\ProgramData\OpenSCM\Server\keys".to_string());
+        let pub_key  = key.get_value("PubKeyFile").unwrap_or_else(|_| "scmserver.pub".to_string());
+        let priv_key = key.get_value("PrivKeyFile").unwrap_or_else(|_| "scmserver.key".to_string());
 
-    let priv_encoded = general_purpose::STANDARD.encode(signing_key.to_bytes());
-    let pub_encoded = general_purpose::STANDARD.encode(verify_key.to_bytes());
+        // Check if any registry values were missing
+        let needs_repair = [
+            key.get_value::<String, _>("Port").is_err(),
+            key.get_value::<String, _>("LogLevel").is_err(),
+            key.get_value::<String, _>("DB").is_err(),
+            key.get_value::<String, _>("KeyPath").is_err(),
+            key.get_value::<String, _>("PubKeyFile").is_err(),
+            key.get_value::<String, _>("PrivKeyFile").is_err(),
+        ].iter().any(|&missing| missing);
 
-    #[cfg(unix)]
-    {
-        use std::os::unix::fs::OpenOptionsExt;
-        let mut options = fs::OpenOptions::new();
-        options.create(true).write(true).truncate(true).mode(0o600);
-        let mut priv_file = options.open(priv_path)?;
-        priv_file.write_all(priv_encoded.as_bytes())?;
+        let mut config = Config {
+            server: ServerConfig {
+                port: Some(port),
+                loglevel: Some(loglevel),
+            },
+            database: DatabaseConfig {
+                path: db,
+            },
+            key: KeyPair {
+                key_path: Some(key_path),
+                public_key: Some(pub_key),
+                private_key: Some(priv_key),
+            },
+        };
+
+        if needs_repair {
+            warn!("Registry settings were missing. Performing self-repair...");
+            config.save()?;
+        }
+
+        validate_and_setup_keys(&mut config)?;
+        Ok(config)
     }
-    
-    #[cfg(not(unix))]
-    {
-        fs::write(priv_path, priv_encoded)?;
+
+    /// Persists current settings to the correct OS location
+    pub fn save(&self) -> Result<(), Box<dyn Error>> {
+        #[cfg(target_os = "windows")]
+        {
+            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+            let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
+
+            if let Some(p)  = &self.server.port      { key.set_value("Port", p)?; }
+            if let Some(l)  = &self.server.loglevel   { key.set_value("LogLevel", l)?; }
+            key.set_value("DB", &self.database.path)?;
+            if let Some(kp) = &self.key.key_path      { key.set_value("KeyPath", kp)?; }
+            if let Some(pk) = &self.key.public_key    { key.set_value("PubKeyFile", pk)?; }
+            if let Some(sk) = &self.key.private_key   { key.set_value("PrivKeyFile", sk)?; }
+            Ok(())
+        }
+
+        #[cfg(not(target_os = "windows"))]
+        {
+            let path = PathBuf::from(CONFIG_PATH);
+            self.save_to(path)
+        }
     }
 
-    fs::write(pub_path, pub_encoded)?;
-    info!("Server keys generated successfully.");
-    Ok(())
+    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
+        let toml_string = toml::to_string_pretty(self)?;
+        if let Some(parent) = path.as_ref().parent() {
+            fs::create_dir_all(parent)?;
+        }
+        fs::write(path, toml_string)?;
+        Ok(())
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    fn load_from_toml(path: &Path) -> Result<Self, Box<dyn Error>> {
+        let contents = fs::read_to_string(path)?;
+        let mut config: Config = toml::from_str(&contents)?;
+        validate_and_setup_keys(&mut config)?;
+        Ok(config)
+    }
 }
