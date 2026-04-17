@@ -20,6 +20,7 @@
 
   <section class="content">
     <div class="container-fluid">
+      
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
@@ -28,11 +29,11 @@
       </div>
       {% endif %}
 
-      {% if query.message %}
+      {% if success_message %}
       <div class="alert alert-success alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
-        {{ query.message }}
+        {{ success_message }}
       </div>
       {% endif %}
 
@@ -42,7 +43,10 @@
             <div class="card-header">
               <h3 class="card-title">Authorized System Users</h3>
               <div class="card-tools">
-                <a href="/users/add" class="btn btn-primary btn-sm">
+		<a href="{% if is_admin %}/users/add{% else %}#{% endif %}"
+   		   class="btn btn-primary btn-sm {% if not is_admin %}disabled{% endif %}">
+                   <i class="fas {% if is_admin %}fa-user-plus{% else %}fa-lock{% endif %}"></i> New User
+                </a>
                   <i class="fas fa-user-plus"></i> New User
                 </a>
               </div>
@@ -72,16 +76,21 @@
                         {{ user.role | capitalize }}
                       </span>
                     </td>
-                    <td class="text-right">
+		    <td class="text-right">
+                      {# Edit — always show for own profile, admin can edit anyone #}
+                      {% if is_admin or user.id == userid %}
                       <a class="btn btn-info btn-sm ml-1" href="/users/edit/{{ user.id }}" title="Edit User">
-                        <i class="fas fa-pencil-alt"></i>
+                         <i class="fas fa-pencil-alt"></i>
                       </a>
-                      {% if user.id != 1 %}
-                      <a class="btn btn-danger btn-sm ml-1" 
-                         onclick="return confirm('Are you sure you want to delete {{ user.username }}? This cannot be undone.')" 
-                         href="/users/delete/{{ user.id }}" 
+                      {% endif %}
+
+                      {# Delete — admin only, can't delete self or user ID 1 #}
+                      {% if is_admin and user.id != userid and user.id != 1 %}
+                      <a class="btn btn-danger btn-sm ml-1"
+                         onclick="return confirm('Delete this user? This cannot be undone.')"
+                         href="/users/delete/{{ user.id }}"
                          title="Delete User">
-                        <i class="fas fa-trash"></i>
+                         <i class="fas fa-trash"></i>
                       </a>
                       {% endif %}
                     </td>

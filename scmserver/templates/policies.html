@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
+{% block head %}
 <style>
 
   /* Dark Mode support for cards & fixed white line */
@@ -31,23 +31,6 @@
 <div class="content-wrapper">
   <section class="content-header">
     <div class="container-fluid">
-
-      {% if error_message %}
-      <div class="alert alert-danger alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
-        <h5><i class="icon fas fa-ban"></i> Error</h5>
-        {{ error_message }}
-      </div>
-      {% endif %}
-
-      {% if success_message %}
-      <div class="alert alert-success alert-dismissible">
-        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
-        <h5><i class="icon fas fa-check"></i> Success</h5>
-        {{ success_message }}
-      </div>
-      {% endif %}
-
       <div class="row mb-2">
         <div class="col-sm-6">
           <h1><i class="fas fa-shield-alt mr-2 text-primary"></i>Security Policies</h1>
@@ -64,6 +47,23 @@
 
   <section class="content">
     <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>
+        {{ error_message }}
+      </div>            
+      {% endif %}         
+                          
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
       <div class="card card-solid card-outline card-primary shadow-sm">
         <div class="card-header">
           <h3 class="card-title font-weight-bold">Policy Overview</h3>
@@ -104,7 +104,7 @@
                         {% else %}
                           <div class="d-flex justify-content-between text-xs font-weight-bold mb-1">
                             <span>COMPLIANCE</span>
-                            <span>{{ policy.compliance }}%</span>
+                            <span>{{ policy.compliance | round(precision=2) }}%</span>
                           </div>
                           <div class="progress progress-xxs">
                             <div class="progress-bar {% if policy.compliance < 50 %}bg-danger{% elif policy.compliance < 80 %}bg-warning{% else %}bg-success{% endif %}" style="width: {{ policy.compliance }}%"></div>
@@ -153,7 +153,7 @@
 
                     {# 4. Delete Policy (Editor Role) #}
                     <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-                       onclick="{% if is_editor %}return confirm('Delete policy: {{ policy.policy_name }}?');{% else %}return false;{% endif %}" 
+                       onclick="{% if is_editor %}return confirm('Delete this policy? This cannot be undone.');{% endif %}"
                        href="{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}"
                        {% if not is_editor %}style="filter: grayscale(100%);"{% endif %}
                        title="Delete Policy">

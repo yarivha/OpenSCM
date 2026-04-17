@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
-<link rel="stylesheet" href="/static/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
+{% block head %}
 <style>
   /* Dark Mode support */
   .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
@@ -95,7 +94,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
 <script>
   $(function () {
     // Initialize Duallistbox

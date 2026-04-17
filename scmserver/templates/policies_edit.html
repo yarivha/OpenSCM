@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
-<link rel="stylesheet" href="/static/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
+{% block head %}
 <style>
   .bootstrap-duallistbox-container .btn-group > .btn { border-radius: 4px; margin-bottom: 5px; }
   .info-container { margin-bottom: 5px; font-weight: bold; color: #6c757d; }
@@ -33,8 +32,16 @@
 
   <section class="content">
     <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
       <form method="post" action="/policies/edit/{{ policy.id }}">
-        
         <div class="row">
           <div class="col-md-12">
             <div class="card card-primary card-outline shadow">
@@ -171,7 +178,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
 <script>
   $(function () {
     // 1. Initialize Dual Listbox

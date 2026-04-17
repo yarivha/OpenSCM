@@ -11,12 +11,6 @@
   <link rel="stylesheet" href="/plugins/fontawesome-free/css/all.min.css">
   <!-- Ionicons -->
   <link rel="stylesheet" href="https://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
-  <!-- Tempusdominus Bootstrap 4 -->
-  <link rel="stylesheet" href="/plugins/tempusdominus-bootstrap-4/css/tempusdominus-bootstrap-4.min.css">
-  <!-- iCheck -->
-  <link rel="stylesheet" href="/plugins/icheck-bootstrap/icheck-bootstrap.min.css">
-  <!-- JQVMap -->
-  <link rel="stylesheet" href="/plugins/jqvmap/jqvmap.min.css">
   <!-- Theme style -->
   <link rel="stylesheet" href="/dist/css/adminlte.min.css">
   <!-- overlayScrollbars -->
@@ -30,12 +24,6 @@
   <link rel="stylesheet" href="/plugins/select2-bootstrap4-theme/select2-bootstrap4.min.css">
   <!-- Bootstrap4 Duallistbox -->
   <link rel="stylesheet" href="/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
-  <!-- BS Stepper -->
-  <link rel="stylesheet" href="/plugins/bs-stepper/css/bs-stepper.min.css">
-  <!-- dropzonejs -->
-  <link rel="stylesheet" href="/plugins/dropzone/min/dropzone.min.css">
-  <!-- summernote -->
-  <link rel="stylesheet" href="/plugins/summernote/summernote-bs4.min.css">
 
   {% block head %}{% endblock %}
 </head>
@@ -72,19 +60,22 @@
           <span class="dropdown-item dropdown-header">{{ notify_count | default(value=0) }} Notifications</span>
           <div class="dropdown-divider"></div>
 
-            {% for notify in notifications %}
-            <a href="#" class="dropdown-item">
-              <i class="fas mr-2 
-                {% if notify.type == 'info' %}fa-info-circle text-info{% elif notify.type == 'warning' %}fa-exclamation-triangle text-warning{% else %}fa-bell{% endif %}">
-              </i> 
-              {{ notify.message }}
-              <span class="float-right text-muted text-sm">{{ notify.timestamp }}</span>
-            </a>
-            {% endfor %}
+          {% for notify in notifications %}
+          <a href="#" class="dropdown-item">
+            <i class="fas mr-2
+              {% if notify.type == 'info' %}fa-info-circle text-info
+              {% elif notify.type == 'warning' %}fa-exclamation-triangle text-warning
+              {% else %}fa-bell
+              {% endif %}">
+            </i>
+            {{ notify.message }}
+            <span class="float-right text-muted text-sm">{{ notify.timestamp }}</span>
+          </a>
+          {% endfor %}
 
-            <div class="dropdown-divider"></div>
-              <a href="/notifications/clear" class="dropdown-item dropdown-footer">Clear All Notifications</a>
-            </div>
+          <div class="dropdown-divider"></div>
+          <a href="/notifications/clear" class="dropdown-item dropdown-footer">Clear All Notifications</a>
+        </div>
       </li>
 
       <li class="nav-item dropdown">
@@ -92,10 +83,10 @@
           <i class="fa fa-user fa-fw"></i> {{ username }}
         </a>
         <div class="dropdown-menu dropdown-menu-right">
-	  <a href="/users/edit/{{ userid }}" class="dropdown-item"><i class="fa fa-user fa-fw"></i> Profile</a>
-	  {% if is_admin %}
+          <a href="/users/edit/{{ userid }}" class="dropdown-item"><i class="fa fa-user fa-fw"></i> Profile</a>
+          {% if is_admin %}
           <a href="#" class="dropdown-item"><i class="fa fa-cog fa-fw"></i> Settings</a>
-	  {% endif %}
+          {% endif %}
           <div class="dropdown-divider"></div>
           <a href="/logout" class="dropdown-item text-danger">
             <i class="fa fa-sign-out-alt fa-fw"></i> Logout
@@ -112,7 +103,6 @@
     </a>
 
     <div class="sidebar">
-      <!-- SidebarSearch Form -->
       <div class="form-inline">
         <div class="input-group" data-widget="sidebar-search">
           <input class="form-control form-control-sidebar" type="search" placeholder="Search" aria-label="Search">
@@ -123,10 +113,15 @@
           </div>
         </div>
       </div>
+
       <nav class="mt-2">
         <ul class="nav nav-pills nav-sidebar flex-column" data-widget="treeview" role="menu" data-accordion="false">
+
           <li class="nav-item">
-            <a href="/" class="nav-link active"><i class="nav-icon fas fa-tachometer-alt"></i><p>Dashboard</p></a>
+            <a href="/" class="nav-link active">
+              <i class="nav-icon fas fa-tachometer-alt"></i>
+              <p>Dashboard</p>
+            </a>
           </li>
 
           <li class="nav-item">
@@ -138,11 +133,19 @@
               <li class="nav-item">
                 <a href="/systems" class="nav-link ml-3">
                   <i class="nav-icon fas fa-desktop"></i>
-                  <p>Systems {% if pending_count > 0 %}<span class="badge badge-danger right">{{ pending_count }}</span>{% endif %}</p>
+                  <p>
+                    Systems
+                    {% if pending_count > 0 %}
+                      <span class="badge badge-danger right">{{ pending_count }}</span>
+                    {% endif %}
+                  </p>
                 </a>
               </li>
               <li class="nav-item">
-                <a href="/system_groups" class="nav-link ml-3"><i class="nav-icon fas fa-layer-group"></i><p>Groups</p></a>
+                <a href="/system_groups" class="nav-link ml-3">
+                  <i class="nav-icon fas fa-layer-group"></i>
+                  <p>Groups</p>
+                </a>
               </li>
             </ul>
           </li>
@@ -153,33 +156,45 @@
               <p>Compliance <i class="right fas fa-angle-left"></i></p>
             </a>
             <ul class="nav nav-treeview">
-              <li class="nav-item"><a href="/tests" class="nav-link ml-3"><i class="far fa-check-circle nav-icon"></i><p>Tests</p></a></li>
-              <li class="nav-item"><a href="/policies" class="nav-link ml-3"><i class="fas fa-certificate nav-icon"></i><p>Policies</p></a></li>
+              <li class="nav-item">
+                <a href="/tests" class="nav-link ml-3">
+                  <i class="far fa-check-circle nav-icon"></i>
+                  <p>Tests</p>
+                </a>
+              </li>
+              <li class="nav-item">
+                <a href="/policies" class="nav-link ml-3">
+                  <i class="fas fa-certificate nav-icon"></i>
+                  <p>Policies</p>
+                </a>
+              </li>
             </ul>
           </li>
+
           <li class="nav-item">
-            <a href="/reports" class="nav-link"><i class="nav-icon fas fa-file-contract"></i><p>Reports</p></a>
+            <a href="/reports" class="nav-link">
+              <i class="nav-icon fas fa-file-contract"></i>
+              <p>Reports</p>
+            </a>
           </li>
 
           {% if is_admin %}
           <li class="nav-item has-treeview">
             <a href="#" class="nav-link">
               <i class="fas fa-users-cog nav-icon"></i>
-              <p>
-                Settings
-                <i class="fas fa-angle-left right"></i>
-              </p>
+              <p>Settings <i class="fas fa-angle-left right"></i></p>
             </a>
             <ul class="nav nav-treeview">
               <li class="nav-item">
                 <a href="/users" class="nav-link" style="padding-left: 30px;">
                   <i class="far fa-user nav-icon"></i>
                   <p>Users</p>
-          	</a>
+                </a>
               </li>
-      	    </ul>
-    	  </li>
+            </ul>
+          </li>
           {% endif %}
+
         </ul>
       </nav>
     </div>
@@ -187,28 +202,21 @@
 
   {% block content %}{% endblock %}
 
-  <!-- /.content-wrapper -->
   <footer class="main-footer">
     <strong>Copyright &copy; 2025-2026 <a href="https://openscm.io">Security Compliance Manager</a>.</strong>
     All rights reserved.
     <div class="float-right d-none d-sm-inline-block">
-	    <b>Version </b>{{ version }}
+      <b>Version </b>{{ version }}
     </div>
   </footer>
 
-  <!-- Control Sidebar -->
-  <aside class="control-sidebar control-sidebar-dark">
-    <!-- Control sidebar content goes here -->
-  </aside>
-  <!-- /.control-sidebar -->
+  <aside class="control-sidebar control-sidebar-dark"></aside>
 </div>
-<!-- ./wrapper -->
 
 <!-- jQuery -->
 <script src="/plugins/jquery/jquery.min.js"></script>
-<!-- jQuery UI 1.11.4 -->
+<!-- jQuery UI -->
 <script src="/plugins/jquery-ui/jquery-ui.min.js"></script>
-<!-- Resolve conflict in jQuery UI tooltip with Bootstrap tooltip -->
 <script>
   $.widget.bridge('uibutton', $.ui.button)
 </script>
@@ -216,27 +224,11 @@
 <script src="/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
 <!-- ChartJS -->
 <script src="/plugins/chart.js/Chart.min.js"></script>
-<!-- Sparkline -->
-<script src="/plugins/sparklines/sparkline.js"></script>
-<!-- JQVMap -->
-<script src="/plugins/jqvmap/jquery.vmap.min.js"></script>
-<script src="/plugins/jqvmap/maps/jquery.vmap.usa.js"></script>
-<!-- jQuery Knob Chart -->
-<script src="/plugins/jquery-knob/jquery.knob.min.js"></script>
-<!-- daterangepicker -->
-<script src="/plugins/moment/moment.min.js"></script>
-<script src="/plugins/daterangepicker/daterangepicker.js"></script>
-<!-- Tempusdominus Bootstrap 4 -->
-<script src="/plugins/tempusdominus-bootstrap-4/js/tempusdominus-bootstrap-4.min.js"></script>
-<!-- Summernote -->
-<script src="/plugins/summernote/summernote-bs4.min.js"></script>
 <!-- overlayScrollbars -->
 <script src="/plugins/overlayScrollbars/js/jquery.overlayScrollbars.min.js"></script>
 <!-- AdminLTE App -->
 <script src="/dist/js/adminlte.js"></script>
-<!-- AdminLTE dashboard demo (This is only for demo purposes) -->
-<script src="/dist/js/pages/dashboard.js"></script>
-<!-- DataTables  & Plugins -->
+<!-- DataTables & Plugins -->
 <script src="/plugins/datatables/jquery.dataTables.min.js"></script>
 <script src="/plugins/datatables-bs4/js/dataTables.bootstrap4.min.js"></script>
 <script src="/plugins/datatables-responsive/js/dataTables.responsive.min.js"></script>
@@ -253,46 +245,20 @@
 <script src="/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
 <!-- Select2 -->
 <script src="/plugins/select2/js/select2.full.min.js"></script>
-<!-- BS-Stepper -->
-<script src="/plugins/bs-stepper/js/bs-stepper.min.js"></script>
-<!-- dropzonejs -->
-<script src="/plugins/dropzone/min/dropzone.min.js"></script>
+<!-- Moment.js -->
+<script src="/plugins/moment/moment.min.js"></script>
 <!-- InputMask -->
-<script src="../../plugins/moment/moment.min.js"></script>
-<script src="../../plugins/inputmask/jquery.inputmask.min.js"></script>
+<script src="/plugins/inputmask/jquery.inputmask.min.js"></script>
 
 <script>
   $(function () {
-    //Initialize Select2 Elements
-    $('.select2').select2()
+    // Initialize Select2
+    $('.select2').select2();
+    $('.select2bs4').select2({ theme: 'bootstrap4' });
 
-    //Initialize Select2 Elements
-    $('.select2bs4').select2({
-      theme: 'bootstrap4'
-    })
-
-    //Bootstrap Duallistbox
-    $('.duallistbox').bootstrapDualListbox()
-
-    //Colorpicker
-    $('.my-colorpicker1').colorpicker()
-    //color picker with addon
-    $('.my-colorpicker2').colorpicker()
-
-    $('.my-colorpicker2').on('colorpickerChange', function(event) {
-      $('.my-colorpicker2 .fa-square').css('color', event.color.toString());
-    })
-
-    $("input[data-bootstrap-switch]").each(function(){
-      $(this).bootstrapSwitch('state', $(this).prop('checked'));
-    })
-
-  })
-  // BS-Stepper Init
-  document.addEventListener('DOMContentLoaded', function () {
-    window.stepper = new Stepper(document.querySelector('.bs-stepper'))
-  })
-
+    // Initialize Duallistbox
+    $('.duallistbox').bootstrapDualListbox();
+  });
 </script>
 
 <script>
@@ -305,38 +271,31 @@
   const body = document.body;
   const navbar = document.querySelector('.main-header');
 
-  // Function to apply the theme
   function setDarkMode(isDark) {
     if (isDark) {
       body.classList.add('dark-mode');
-      // Update Navbar to match Dark Mode
       navbar.classList.replace('navbar-white', 'navbar-dark');
       navbar.classList.replace('navbar-light', 'navbar-dark');
-      // Update Icon
       icon.classList.replace('fa-moon', 'fa-sun');
       localStorage.setItem('theme', 'dark');
     } else {
       body.classList.remove('dark-mode');
-      // Update Navbar to match Light Mode
       navbar.classList.replace('navbar-dark', 'navbar-white');
       navbar.classList.add('navbar-light');
-      // Update Icon
       icon.classList.replace('fa-sun', 'fa-moon');
       localStorage.setItem('theme', 'light');
     }
   }
 
   // Load saved preference on page start
-  const savedTheme = localStorage.getItem('theme');
-  if (savedTheme === 'dark') {
+  if (localStorage.getItem('theme') === 'dark') {
     setDarkMode(true);
   }
 
   // Toggle listener
   toggleBtn.addEventListener('click', (e) => {
     e.preventDefault();
-    const isNowDark = !body.classList.contains('dark-mode');
-    setDarkMode(isNowDark);
+    setDarkMode(!body.classList.contains('dark-mode'));
   });
 </script>
 

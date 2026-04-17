@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
+{% block head %}
 <style>
   /* Custom Color for Critical Severity */
   .badge-critical { background-color: #8B0000; color: white; }
@@ -46,6 +46,15 @@
 
   <section class="content">
     <div class="container-fluid">
+	
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
       <div class="card card-outline card-primary shadow-sm">
         <div class="card-header border-0">
           <h3 class="card-title">Compliance Definitions</h3>

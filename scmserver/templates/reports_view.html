@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
+{% block head %}
 <style>
   /* Theme-aware Verdict Box */
   .verdict-box {
@@ -87,7 +87,7 @@
                       <small class="text-uppercase text-muted text-xs">Systems</small>
                     </div>
                     <div class="col-6">
-    		      {% set fail_count = report.system_reports | filter(attribute="is_passed", value=false) | length %}
+			    {{ fail_count }}
                       <h3 class="{% if fail_count > 0 %}text-danger{% else %}text-success{% endif %} mb-0">
                         {{ fail_count }}
                       </h3>
@@ -148,7 +148,7 @@
                </div>
                <div class="col-sm-4 text-right">
                  {% if system.is_passed %}
-                    <span class="h5 text-success font-weight-bold"><i class="fas fa-shield-check mr-1"></i> COMPLIANT</span>
+                    <span class="h5 text-success font-weight-bold"><i class="fas fa-shield-alt mr-1"></i> COMPLIANT</span>
                  {% else %}
                     <span class="h5 text-danger font-weight-bold"><i class="fas fa-exclamation-triangle mr-1"></i> NON-COMPLIANT</span>
                  {% endif %}
@@ -164,7 +164,7 @@
           <a class="btn btn-secondary btn-sm" href="/reports">
             <i class="fas fa-history mr-1"></i> Back to History
           </a>
-          <a class="btn btn-primary btn-sm ml-2" href="/reports/download/{{ report.policy_id }}">
+          <a class="btn btn-primary btn-sm ml-2" href="/reports/download/{{ report.id }}">
             <i class="fas fa-download mr-1"></i> Download PDF
           </a>
         </div>

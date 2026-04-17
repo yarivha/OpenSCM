@@ -65,7 +65,7 @@
                       <label for="name">Display Name</label>
                       <div class="input-group">
                         <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-id-card"></i></span></div>
-                        <input type="text" name="name" class="form-control" placeholder="e.g. John Doe" required>
+                        <input type="text" name="name" class="form-control" placeholder="e.g. John Doe">
                       </div>
                     </div>
                   </div>
@@ -74,7 +74,7 @@
                       <label for="email">Email Address</label>
                       <div class="input-group">
                         <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-envelope"></i></span></div>
-                        <input type="email" name="email" class="form-control" placeholder="john@example.com" required>
+                        <input type="email" name="email" class="form-control" placeholder="john@example.com">
                       </div>
                     </div>
                   </div>
@@ -95,7 +95,8 @@
                       <label for="password">Initial Password</label>
                       <div class="input-group">
                         <div class="input-group-prepend"><span class="input-group-text"><i class="fas fa-key"></i></span></div>
-                        <input type="password" name="password" class="form-control" placeholder="••••••••" required>
+                        <input type="password" name="password" class="form-control" placeholder="••••••••" required minlength="8">
+			<small class="text-muted">Minimum 8 characters</small>
                       </div>
                     </div>
                   </div>

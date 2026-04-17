@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
+{% block head %}
 <style>
   /* Dark Mode support */
   .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
@@ -143,24 +143,6 @@
     // Initialize Select2 Elements
     $('.select2bs4').select2({
       theme: 'bootstrap4'
-    });
-  });
-
-  document.addEventListener('DOMContentLoaded', function() {
-    const datetimeElements = document.querySelectorAll('.datetime');
-    datetimeElements.forEach(function(element) {
-      const utcDateStr = element.getAttribute('data-utc');
-      if (utcDateStr) {
-        const utcDate = new Date(utcDateStr);
-        if (!isNaN(utcDate.getTime())) {
-          const options = { 
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-            hour12: false
-          };
-          element.textContent = utcDate.toLocaleDateString(navigator.language, options);
-        }
-      }
     });
   });
 </script>

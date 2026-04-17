@@ -30,11 +30,11 @@
       </div>
       {% endif %}
 
-      {% if query.message or success_message %}
+      {% if success_message %}
       <div class="alert alert-success alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
-        {{ query.message }}{{ success_message }}
+        {{ success_message }}
       </div>
       {% endif %}
 
@@ -94,7 +94,7 @@
 
                       {# Secondary Action: Delete #}
                       <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-                         onclick="{% if is_editor %}return confirm('Delete group {{ group.name }}? Systems will be unassigned.'){% else %}return false;{% endif %}" 
+                         onclick="{% if is_editor %}return confirm('Delete this group? Systems will be unassigned.'){% endif %}"
                          href="{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}"
                          {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
                         <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>

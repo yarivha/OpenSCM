@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
+{% block head %}
 <style>
   /* Theme-aware Verdict Box */
   .verdict-box {
@@ -141,7 +141,7 @@
                </div>
                <div class="col-sm-4 text-right">
                  {% if system.is_passed %}
-                    <span class="h5 text-success font-weight-bold"><i class="fas fa-shield-check mr-1"></i> PASSED</span>
+                    <span class="h5 text-success font-weight-bold"><i class="fas fa-shield-alt mr-1"></i> PASSED</span>
                  {% else %}
                     <span class="h5 text-danger font-weight-bold"><i class="fas fa-exclamation-triangle mr-1"></i> FAILED</span>
                  {% endif %}

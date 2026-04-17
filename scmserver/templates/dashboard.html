@@ -1,6 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
+{% block head %}
 <style>
   /* Ensure the chart background is readable in dark mode */
   .dark-mode .card { background-color: #343a40 !important; }
@@ -142,7 +142,7 @@
         		    style="width: {{ pol.compliance }}%">
       			    </div>
     			  </div>
-    			  <small class="font-weight-bold">{{ pol.compliance }}%</small>
+    			  <small class="font-weight-bold">{{ pol.compliance | round(precision=2) }}%</small>
   		        </div>
 		      </td>
                       <td class="text-center">

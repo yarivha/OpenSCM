@@ -30,11 +30,11 @@
       </div>
       {% endif %}
 
-      {% if query.message %}
+      {% if success_message %}
       <div class="alert alert-success alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
         <h5><i class="icon fas fa-check"></i> Success</h5>
-        {{ query.message }}
+        {{ success_message }}
       </div>
       {% endif %}
 
@@ -54,7 +54,6 @@
               <table id="reports_table" class="table table-bordered table-striped table-hover">
                 <thead>
                   <tr>
-                    <th style="display:none;">Status_Internal</th>
                     <th style="width: 10px">ID</th>
                     <th>Policy Name</th>
                     <th>Version</th>
@@ -66,7 +65,6 @@
                 <tbody>
                   {% for report in reports %}
                   <tr>
-                    <td style="display:none;">completed</td>
                     <td>{{ report.id }}</td>
                     <td><strong>{{ report.policy_name }}</strong></td>
                     <td><span class="badge badge-light">v{{ report.policy_version }}</span></td>

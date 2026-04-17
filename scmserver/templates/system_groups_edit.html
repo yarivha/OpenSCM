@@ -1,7 +1,6 @@
 {% extends "base.html" %}
 
-{% block styles %}
-<link rel="stylesheet" href="/static/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
+{% block head %}
 <style>
   /* Dark Mode support */
   .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
@@ -57,7 +56,7 @@
 
       <div class="row">
         <div class="col-md-10 mx-auto">
-          <form method="post"> <div class="card card-primary card-outline shadow-sm">
+          <form method="post" action="/system_groups/edit/{{ group.id }}"> <div class="card card-primary card-outline shadow-sm">
               <div class="card-header">
                 <h3 class="card-title">Group Properties: <strong>{{ group.name }}</strong></h3>
               </div>
@@ -109,7 +108,6 @@
 {% endblock %}
 
 {% block scripts %}
-<script src="/static/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
 <script>
   $(function () {
     $('.duallistbox').bootstrapDualListbox({
