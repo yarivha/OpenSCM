@@ -12,10 +12,10 @@ use serde::Deserialize;
 use serde_json::{json, Value};
 use tera::{Tera, Context};
 use tracing::{debug, info, warn, error};
+use time::Duration;
 
-use crate::models::ErrorQuery;
-use crate::handlers::render_template;
-use crate::models::UserRole;
+use crate::handlers::{render_template, add_notification};
+use crate::models::{UserRole, ErrorQuery, AuthSession};
 
 
 /// Checks if the current role meets the required level.
@@ -30,15 +30,6 @@ pub fn authorize(current_role: &str, required: UserRole) -> Option<Response> {
         let msg = format!("Unauthorized+access.+{:?}+role+required.", required);
         Some(Redirect::to(&format!("/?error_message={}", msg)).into_response())
     }
-}
-
-// --- 3. SESSION HANDLING ---
-
-pub struct AuthSession {
-    pub username: String,
-    pub userid: i32,
-    pub tenant_id: String,
-    pub role: String,
 }
 
 
@@ -61,17 +52,21 @@ where
 
             if let Some(cookie) = jar.get("session") {
                 if let Ok(session_json) = serde_json::from_str::<Value>(cookie.value()) {
-                    // --- THE FIX: We match 4 items on the left to match the 4 on the right ---
-                    if let (Some(username), Some(userid), Some(tenant_id), Some(role)) = (
+                    if let (Some(username), Some(userid_str), Some(tenant_id), Some(role)) = (
                         session_json.get("username").and_then(|v| v.as_str()),
                         session_json.get("userid").and_then(|v| v.as_str()),
                         session_json.get("tenant_id").and_then(|v| v.as_str()),
                         session_json.get("role").and_then(|v| v.as_str()),
                     ) {
+                        let userid = match userid_str.parse::<i32>() {
+                             Ok(id) => id,
+                            Err(_) => return Err(Redirect::to("/login")),
+                        };
+                       
+
                         return Ok(AuthSession {
                             username: username.to_string(),
-                            // Parsing to i32 since that's what your struct now expects
-                            userid: userid.parse::<i32>().unwrap_or(0),
+                            userid, 
                             tenant_id: tenant_id.to_string(),
                             role: role.to_string(),
                         });
@@ -94,6 +89,7 @@ pub struct LoginForm {
     password: String,
 }
 
+// login
 pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) -> Result<Html<String>, StatusCode> {
     let mut context = Context::new();
     if let Some(error_message) = query.error_message {
@@ -104,60 +100,100 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
 
 
 
-
+// login_submit
 pub async fn login_submit(
     jar: SignedCookieJar,           
     Extension(pool): Extension<SqlitePool>,
     Form(form): Form<LoginForm>,
 ) -> (SignedCookieJar, Redirect) {
 
+    // Guard against empty credentials
+    if form.username.is_empty() || form.password.is_empty() {
+        return (jar, Redirect::to("/login?error_message=Invalid%20Credentials"));
+    }
+
     let row = sqlx::query("SELECT password, username, id, tenant_id, role FROM users WHERE username = ?")
         .bind(&form.username)
         .fetch_optional(&pool)
         .await;
 
-    // 1. Check if the database query succeeded AND found a user
-    if let Ok(Some(row)) = row {
-        let password_hash: String = row.get("password");
-        
-        // 2. Verify the password first
-        if verify(&form.password, &password_hash).unwrap_or(false) {
+    // Timing attack protection — always run bcrypt regardless of whether user exists
+    const DUMMY_HASH: &str = "$2b$12$invalidhashfortimingprotectionXXXXXXXXXXXXXXXXXXXXXX";
+
+    let (hash_to_check, maybe_row) = match row {
+        Ok(Some(row)) => {
+            let hash: String = row.get("password");
+            (hash, Some(row))
+        },
+        Ok(None) => {
+            warn!("Login attempt for non-existent user: '{}'", form.username);
+            (DUMMY_HASH.to_string(), None)
+        },
+        Err(e) => {
+            error!("Database error during login: {}", e);
+            (DUMMY_HASH.to_string(), None)
+        },
+    };
+
+    let password_valid = verify(&form.password, &hash_to_check).unwrap_or(false);
+
+    if password_valid {
+        if let Some(row) = maybe_row {
             let username: String = row.get("username");
             let userid_raw: i32 = row.get("id");
             let role: String = row.get("role");
 
-            // 3. SAFE TENANT RETRIEVAL
-            // If the DB column is NULL, we map it to "default" to stay 
-            // consistent with our binary signature logic.
             let tenant_id: String = row.try_get::<String, _>("tenant_id")
                 .unwrap_or_else(|_| "default".to_string());
 
-            let userid = userid_raw.to_string();
-            
-            // 4. Create the session payload
-            let session_data = json!({ 
-                "username": username, 
-                "userid": userid,  
+            // Treat invalid userid as auth failure instead of defaulting to 0
+            let userid = match userid_raw.to_string().parse::<i32>() {
+                Ok(id) => id,
+                Err(_) => {
+                    error!("Invalid userid in database for user: '{}'", username);
+                    return (jar, Redirect::to("/login?error_message=Invalid%20Credentials"));
+                }
+            };
+
+            let session_data = json!({
+                "username": username,
+                "userid": userid.to_string(),
                 "tenant_id": tenant_id,
-                "role": role 
+                "role": role
             }).to_string();
 
             let mut cookie = Cookie::new("session", session_data);
             cookie.set_path("/");
             cookie.set_http_only(true);
             cookie.set_same_site(SameSite::Lax);
+            cookie.set_max_age(time::Duration::hours(8));
 
-            info!("User {} logged in successfully for tenant {}", username, tenant_id);
+            info!("User '{}' logged in successfully for tenant '{}'", username, tenant_id);
             return (jar.add(cookie), Redirect::to("/"));
         }
-    } 
-    
+    } else {
+        warn!("Failed login attempt for user: '{}'", form.username);
+
+        // If user exists but password was wrong, notify them of the failed attempt
+        if let Some(row) = maybe_row {
+            let userid_raw: i32 = row.get("id");
+            add_notification(
+                &pool,
+                "warning",
+                userid_raw,
+                &format!("Failed login attempt for user '{}'", form.username),
+            ).await;
+        }
+    }
+
     (jar, Redirect::to("/login?error_message=Invalid%20Credentials"))
 }
 
 
 
+
 // logout
-pub async fn logout(jar: CookieJar) -> (CookieJar, Redirect) {
+pub async fn logout(jar: SignedCookieJar) -> (SignedCookieJar, Redirect) {
     (jar.remove(Cookie::from("session")), Redirect::to("/login"))
 }
+
