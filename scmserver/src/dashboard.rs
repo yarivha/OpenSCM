@@ -6,12 +6,12 @@ use sqlx::sqlite::SqlitePool;
 use std::sync::Arc;
 use tracing::error;
 
-use crate::models::{ComplianceHistoryRow, PolicyFailRow, SystemFailRow, AuthSession};
+use crate::models::{ComplianceHistoryRow, PolicyFailRow, SystemFailRow, AuthSession,  Notification};
 use crate::handlers::render_template;
 
 
 
-#[derive(serde::Deserialize, serde::Serialize)] // Add Serialize if passing to template
+#[derive(serde::Deserialize)] // Add Serialize if passing to template
 pub struct DashboardParams {
     #[serde(default)] // Helps handle empty strings/missing keys
     pub error_message: Option<String>,
@@ -26,23 +26,53 @@ pub struct DashboardParams {
 pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
     -> impl IntoResponse {
 
-    
-    let range = params.range.clone().unwrap_or_else(|| "daily".to_string()).to_lowercase();
+
+    let range: &str = match params.range.as_deref() {
+        Some("yearly") => "yearly",
+        Some("weekly") => "weekly",
+        Some("monthly") => "monthly",
+        _ => "daily",
+    };
+
 
     let mut context = Context::new();
     
     // 1. Get counts for the Small Boxes
-    let systems_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM systems WHERE status = 'active'")
-        .fetch_one(&*pool).await.unwrap_or(0);
+    let systems_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM systems WHERE status = 'active' AND tenant_id = ?")
+        .bind(&auth.tenant_id)
+        .fetch_one(&*pool)
+        .await
+        .unwrap_or_else(|e| { error!("Failed to fetch systems count: {}", e); 0 });
+
     
-    let pending_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM systems WHERE status = 'pending'")
-        .fetch_one(&*pool).await.unwrap_or(0);
+    let pending_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM systems WHERE status = 'pending' AND tenant_id=?")
+        .bind(&auth.tenant_id)
+        .fetch_one(&*pool)
+        .await
+        .unwrap_or_else(|e| { error!("Failed to fetch pending systems count: {}", e); 0 });
 
-    let policies_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM policies")
-        .fetch_one(&*pool).await.unwrap_or(0);
+    let policies_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM policies WHERE tenant_id=?")
+        .bind(&auth.tenant_id)
+        .fetch_one(&*pool)
+        .await
+        .unwrap_or_else(|e| { error!("Failed to fetch policies count: {}", e); 0 });
 
-    let reports_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reports")
-        .fetch_one(&*pool).await.unwrap_or(0);
+    let reports_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reports  WHERE tenant_id=?")
+        .bind(&auth.tenant_id)
+        .fetch_one(&*pool)
+        .await
+        .unwrap_or_else(|e| { error!("Failed to fetch reports count: {}", e); 0 });
+
+
+    
+    let notifications = sqlx::query_as::<_, Notification>(
+        "SELECT * FROM notify WHERE tenant_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 10"
+    )
+    .bind(&auth.tenant_id)
+    .bind(auth.userid)
+    .fetch_all(&*pool).await.unwrap_or_default();
+
+
 
     // 2. Get Critical Policy Failures
     let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
@@ -73,7 +103,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
     // 4. Fetch History including POLICY_SCORE
     
-    let history_query = match range.as_str() {
+    let history_query = match range {
         "yearly" =>
             "SELECT strftime('%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
             FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 10",
@@ -117,7 +147,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     context.insert("reports_count", &reports_count);
     context.insert("top_failed_systems", &top_failed_systems); 
     context.insert("top_failed_policies", &top_failed_policies);
-    
+    context.insert("notifications", &notifications);
+
     // Graph Data
     context.insert("trend_labels", &labels);
     context.insert("trend_systems_scores", &systems_scores);

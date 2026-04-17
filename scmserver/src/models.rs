@@ -138,6 +138,7 @@ pub struct Notification {
     pub tenant_id: String,
     pub r#type: String,
     pub timestamp: String,
+    pub owner_id: i32,
     pub message: String,
 }
 
