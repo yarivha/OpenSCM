@@ -66,5 +66,3 @@ pub struct ComplianceResult {
     pub result: String, // "PASS", "FAIL", or "NA"
 }
 
-// SignedRequest<ComplianceResult> used for sending results back to server
-pub type SignedResult = SignedRequest<ComplianceResult>;
