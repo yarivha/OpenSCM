@@ -73,6 +73,7 @@ Section "Install"
     # The 'Double Tap': Kill the process to release file locks on scmclient.exe
     DetailPrint "Releasing file locks..."
     ExecWait 'taskkill /F /IM scmclient.exe /T'
+    Sleep 2000
 
     # --- 2. DEPLOY BINARIES (OVERWRITE) ---
     SetOutPath "$INSTDIR"
