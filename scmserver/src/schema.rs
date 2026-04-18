@@ -426,7 +426,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Conditions
     // --------------------
     let conditions = vec![
-        ("CONTAINS"),("NOT CONTAINS"),("EQUALS"),("NOT EQUALS"),("MORE THAN"),("LESS THAN")
+        ("CONTAINS"),("NOT CONTAINS"),("EQUALS"),("NOT EQUALS"),("MORE THAN"),("LESS THAN"),("REGEX")
     ];
 
     for name in conditions {
