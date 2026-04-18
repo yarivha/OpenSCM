@@ -84,10 +84,12 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
             systems_passed as systems_passed,
             systems_failed as systems_failed
         FROM policies 
+        WHERE tenant_id = ? 
         ORDER BY compliance_score ASC 
         LIMIT 5
         "#
     )
+    .bind(&auth.tenant_id)
     .fetch_all(&*pool)
     .await
     .map_err(|e| {
@@ -98,29 +100,32 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     // 3. Get Highest Risk Assets
     let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(
         "SELECT name as system_name, os, compliance_score as compliance, tests_passed, tests_failed 
-        FROM systems WHERE status='active' ORDER BY compliance_score ASC LIMIT 5"
-    ).fetch_all(&*pool).await.map_err(|e| { error!("{}", e); StatusCode::INTERNAL_SERVER_ERROR })?; 
+        FROM systems WHERE status='active' AND tenant_id = ? ORDER BY compliance_score ASC LIMIT 5"
+        ).bind(&auth.tenant_id)
+        .fetch_all(&*pool)
+        .await.map_err(|e| { error!("{}", e); StatusCode::INTERNAL_SERVER_ERROR })?; 
 
     // 4. Fetch History including POLICY_SCORE
     
     let history_query = match range {
         "yearly" =>
             "SELECT strftime('%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 10",
+            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY check_date DESC LIMIT 10",
         "weekly" =>
             "SELECT strftime('%Y-W%W', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
+            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
         "monthly" =>
             "SELECT strftime('%m-%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
+            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
         _ => // daily (average per hour)
             "SELECT strftime('%m-%d %H:00', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history GROUP BY 1 ORDER BY id DESC LIMIT 24"
+            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY id DESC LIMIT 24"
 
     };
 
     
     let history = sqlx::query_as::<_, ComplianceHistoryRow>(history_query)
+        .bind(&auth.tenant_id)
         .fetch_all(&*pool)
         .await
         .map_err(|e| {
