@@ -703,6 +703,34 @@ pub async fn policies_delete(
         return redir;
     }
 
+
+    // Before DELETE FROM policies:
+    if let Err(e) = sqlx::query(r#"
+        DELETE FROM results
+        WHERE system_id IN (
+            SELECT id FROM systems WHERE tenant_id = ?
+        )
+        AND test_id NOT IN (
+            SELECT DISTINCT tip.test_id
+            FROM tests_in_policy tip
+            JOIN systems_in_policy sip ON tip.policy_id = sip.policy_id
+            JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+            WHERE sig.tenant_id = ?
+            AND tip.policy_id != ?
+        )
+    "#)
+    .bind(&auth.tenant_id)
+    .bind(&auth.tenant_id)
+    .bind(id)
+    .execute(&pool)
+    .await
+    {
+        error!("Failed to clean up results for deleted policy {}: {}", id, e);
+        let encoded = urlencoding::encode(&format!("Error cleaning up results: {}", e)).to_string();
+        return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
+    }
+
+
     // ON DELETE CASCADE handles related records automatically
     if let Err(e) = sqlx::query(
         "DELETE FROM policies WHERE id = ? AND tenant_id = ?",
