@@ -66,17 +66,17 @@ sudo yum install scmclient
 
 ### 🪟 Windows
 
-Download the latest installer from **[openscm.io/download](https://openscm.io/download)**.
+Download the latest installer from **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
 
 The agent can be configured to run as a Windows Service during installation.
 
 ### 😈 FreeBSD / 🍎 macOS
 
-Coming soon — follow us on [GitHub](https://github.com/openscm/scmserver) for updates.
+Coming soon — follow us on [GitHub](https://github.com/yarivha/openscm) for updates.
 
 ### 🐳 Docker
 
-Coming soon — follow us on [GitHub](https://github.com/openscm/scmserver) for updates.
+Coming soon — follow us on [GitHub](https://github.com/yarivha/openscm) for updates.
 
 ---
 
@@ -85,7 +85,7 @@ After installation, access the dashboard at **http://your-server:8000**
 Default credentials: `admin` / `admin` — **change immediately after first login.**
 
 > For production deployments, run the server behind a reverse proxy (Nginx, Caddy)
-> with HTTPS enabled. See [openscm.io/docs](https://openscm.io/docs) for details.
+> with HTTPS enabled. See [openscm.io/guide/guide](https://openscm.io/guide/guide/) for details.
 
 ---
 
@@ -119,9 +119,8 @@ Report them responsibly to **security@openscm.io** — we respond within 48 hour
 
 ## 🛡️ Support
 
-- **Docs & User Guide:** [openscm.io/docs](https://openscm.io/docs)
-- **Bugs:** [GitHub Issues](https://github.com/openscm/scmserver/issues)
-- **Discussion:** [GitHub Discussions](https://github.com/openscm/scmserver/discussions)
+- **Docs & User Guide:** [openscm.io/guide/guide](https://openscm.io/guide/guide)
+- **Bugs:** [GitHub Issues](https://github.com/yarivha/OpenSCM/issues)
 
 ---
 
