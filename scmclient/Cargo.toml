@@ -7,7 +7,7 @@ license = "Apache-2.0"
 description = "Client for Open Security Compliance Manager"
 
 [package.metadata]
-release = "1"
+release = "2"
 
 [dependencies]
 sysinfo = "0.30"
