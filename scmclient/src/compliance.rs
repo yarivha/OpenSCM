@@ -278,18 +278,17 @@ fn apply_string_condition(actual: &str, condition: &str, expected: &str) -> bool
         "equals" | "equal"           => actual.to_lowercase() == expected.to_lowercase(),
         "not equals" | "not equal"   => actual.to_lowercase() != expected.to_lowercase(),
         "regular expression" | "regex" => {
-            match regex::RegexBuilder::new(sinput_trim)
+            match regex::RegexBuilder::new(expected)
                 .multi_line(true)
                 .size_limit(1_000_000)
                 .build()
             {
                 Ok(re) => re.is_match(actual),
                 Err(e) => {
-                    error!("Invalid regex pattern '{}': {}", sinput_trim, e);
+                    error!("Invalid regex pattern '{}': {}", expected, e);
                     false
                 }
             }
-
         }
         _ => {
             error!("Unknown string condition: '{}'", condition);
