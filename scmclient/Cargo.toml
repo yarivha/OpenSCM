@@ -1,13 +1,13 @@
 [package]
 name = "scmclient"
-version = "0.0.99"
+version = "0.1.0"
 edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "Apache-2.0"
 description = "Client for Open Security Compliance Manager"
 
 [package.metadata]
-release = "2"
+release = "1"
 
 [dependencies]
 sysinfo = "0.30"
