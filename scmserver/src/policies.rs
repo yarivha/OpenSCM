@@ -371,10 +371,11 @@ pub async fn policies_edit(
     };
 
     let schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        "SELECT id, policy_id, enabled, frequency, cron_expression, next_run, last_run
-         FROM policy_schedules WHERE policy_id = ?",
+        "SELECT id, tenant_id, policy_id, enabled, frequency, cron_expression, next_run, last_run
+         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ?",
     )
     .bind(id)
+    .bind(&auth.tenant_id)
     .fetch_optional(&*pool)
     .await
     .unwrap_or(None);
@@ -828,7 +829,6 @@ pub async fn policies_report(
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
-        report_id: None,
         version: policy_row.get("version"),
         description: policy_row
             .get::<Option<String>, _>("description")
@@ -961,7 +961,6 @@ pub async fn policies_report_download(
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
-        report_id: None,
         version: policy_row.get("version"),
         description: policy_row
             .get::<Option<String>, _>("description")

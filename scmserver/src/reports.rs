@@ -14,7 +14,7 @@ use genpdf::{fonts, elements, style, Element};
 use crate::auth::{self};
 use crate::handlers::{render_template, normalize_status};
 use crate::models::{
-    UserRole, ReportData, TestMeta, SystemReport, IndividualResult,
+    UserRole, TestMeta, SystemReport, IndividualResult,
     Report, ErrorQuery, AuthSession,
 };
 
@@ -49,6 +49,7 @@ pub async fn reports(
             .into_iter()
             .map(|row| Report {
                 id: row.get("id"),
+                tenant_id: auth.tenant_id.clone(),
                 submission_date: row.get("submission_date"),
                 policy_name: row.get("policy_name"),
                 policy_version: row.get("policy_version"),
@@ -187,7 +188,7 @@ pub async fn reports_save(
 
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();
 
-    // Serialize to JSON
+    // Serialize to JSON for storage
     let tests_json = match serde_json::to_string(&tests_metadata) {
         Ok(j) => j,
         Err(e) => {
@@ -204,10 +205,11 @@ pub async fn reports_save(
         }
     };
 
-    // Archive the snapshot with tenant_id
+    // Archive the snapshot
     match sqlx::query(r#"
         INSERT INTO reports
-            (tenant_id, policy_name, policy_version, policy_description, submitter_name, tests_metadata, report_results)
+            (tenant_id, policy_name, policy_version, policy_description,
+             submitter_name, tests_metadata, report_results)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     "#)
     .bind(&auth.tenant_id)
@@ -243,9 +245,10 @@ pub async fn reports_view(
         return redir;
     }
 
-    let row = match sqlx::query(
-        "SELECT id, submission_date, policy_name, policy_version, policy_description,
-                submitter_name, tests_metadata, report_results
+    // Fetch the saved report
+    let report = match sqlx::query_as::<_, Report>(
+        "SELECT id, tenant_id, submission_date, policy_name, policy_version,
+                policy_description, submitter_name, tests_metadata, report_results
          FROM reports
          WHERE id = ? AND tenant_id = ?",
     )
@@ -262,10 +265,10 @@ pub async fn reports_view(
         }
     };
 
-    let tests_metadata_raw: String = row.get("tests_metadata");
-    let system_reports_raw: String = row.get("report_results");
-
-    let tests_metadata: Vec<TestMeta> = match serde_json::from_str(&tests_metadata_raw) {
+    // Deserialize JSON fields
+    let tests_metadata: Vec<TestMeta> = match serde_json::from_str(
+        report.tests_metadata.as_deref().unwrap_or("[]"),
+    ) {
         Ok(m) => m,
         Err(e) => {
             error!(error = ?e, report_id = %id, "Failed to deserialize tests metadata");
@@ -273,7 +276,9 @@ pub async fn reports_view(
         }
     };
 
-    let system_reports: Vec<SystemReport> = match serde_json::from_str(&system_reports_raw) {
+    let system_reports: Vec<SystemReport> = match serde_json::from_str(
+        report.report_results.as_deref().unwrap_or("[]"),
+    ) {
         Ok(r) => r,
         Err(e) => {
             error!(error = ?e, report_id = %id, "Failed to deserialize system reports");
@@ -283,22 +288,10 @@ pub async fn reports_view(
 
     let fail_count = system_reports.iter().filter(|s| !s.is_passed).count();
 
-    let report_data = ReportData {
-        policy_id: None,
-        policy_name: row.get("policy_name"),
-        report_id: row.get("id"), 
-        version: row.get("policy_version"),
-        description: row
-            .get::<Option<String>, _>("policy_description")
-            .unwrap_or_default(),
-        submission_date: row.get("submission_date"),
-        submitter_name: row.get("submitter_name"),
-        tests_metadata,
-        system_reports,
-    };
-
     let mut context = Context::new();
-    context.insert("report", &report_data);
+    context.insert("report", &report);
+    context.insert("tests_metadata", &tests_metadata);
+    context.insert("system_reports", &system_reports);
     context.insert("fail_count", &fail_count);
     render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth))
         .await
@@ -316,7 +309,6 @@ pub async fn reports_delete(
         return redir;
     }
 
-    // Single row delete — no transaction needed
     if let Err(e) = sqlx::query("DELETE FROM reports WHERE id = ? AND tenant_id = ?")
         .bind(id)
         .bind(&auth.tenant_id)
@@ -343,9 +335,10 @@ pub async fn reports_download(
         return redir;
     }
 
-    let row = match sqlx::query(
-        "SELECT id, submission_date, policy_name, policy_version, policy_description,
-                submitter_name, tests_metadata, report_results
+    // Fetch the saved report
+    let report = match sqlx::query_as::<_, Report>(
+        "SELECT id, tenant_id, submission_date, policy_name, policy_version,
+                policy_description, submitter_name, tests_metadata, report_results
          FROM reports
          WHERE id = ? AND tenant_id = ?",
     )
@@ -362,10 +355,10 @@ pub async fn reports_download(
         }
     };
 
-    let tests_metadata_raw: String = row.get("tests_metadata");
-    let system_reports_raw: String = row.get("report_results");
-
-    let tests_metadata: Vec<TestMeta> = match serde_json::from_str(&tests_metadata_raw) {
+    // Deserialize JSON fields
+    let tests_metadata: Vec<TestMeta> = match serde_json::from_str(
+        report.tests_metadata.as_deref().unwrap_or("[]"),
+    ) {
         Ok(m) => m,
         Err(e) => {
             error!(error = ?e, report_id = %id, "Failed to deserialize tests metadata for download");
@@ -373,26 +366,14 @@ pub async fn reports_download(
         }
     };
 
-    let system_reports: Vec<SystemReport> = match serde_json::from_str(&system_reports_raw) {
+    let system_reports: Vec<SystemReport> = match serde_json::from_str(
+        report.report_results.as_deref().unwrap_or("[]"),
+    ) {
         Ok(r) => r,
         Err(e) => {
             error!(error = ?e, report_id = %id, "Failed to deserialize system reports for download");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
-    };
-
-    let report_data = ReportData {
-        policy_id:  None,
-        policy_name: row.get("policy_name"),
-        report_id:  row.get("id"),
-        version: row.get("policy_version"),
-        description: row
-            .get::<Option<String>, _>("policy_description")
-            .unwrap_or_default(),
-        submission_date: row.get("submission_date"),
-        submitter_name: row.get("submitter_name"),
-        tests_metadata,
-        system_reports,
     };
 
     // PDF Generation
@@ -436,10 +417,7 @@ pub async fn reports_download(
         }
     };
 
-    doc.set_title(format!(
-        "OpenSCM Compliance Report - {}",
-        report_data.policy_name
-    ));
+    doc.set_title(format!("OpenSCM Compliance Report - {}", report.policy_name));
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_margins(15);
     doc.set_page_decorator(decorator);
@@ -457,7 +435,8 @@ pub async fn reports_download(
 
     let mut submitter = elements::Paragraph::new(format!(
         "Generated on {} by {}",
-        report_data.submission_date, report_data.submitter_name
+        report.submission_date,
+        report.submitter_name.as_deref().unwrap_or("Unknown"),
     ));
     submitter.set_alignment(genpdf::Alignment::Center);
     doc.push(submitter);
@@ -477,7 +456,8 @@ pub async fn reports_download(
         Box::new(elements::Text::new("Policy Name")),
         Box::new(elements::Text::new(format!(
             ": {} v{}",
-            report_data.policy_name, report_data.version
+            report.policy_name,
+            report.policy_version.as_deref().unwrap_or(""),
         ))),
     ]) {
         error!("Failed to add policy name row to PDF: {}", e);
@@ -485,7 +465,10 @@ pub async fn reports_download(
 
     if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Description")),
-        Box::new(elements::Text::new(format!(": {}", report_data.description))),
+        Box::new(elements::Text::new(format!(
+            ": {}",
+            report.policy_description.as_deref().unwrap_or(""),
+        ))),
     ]) {
         error!("Failed to add description row to PDF: {}", e);
     }
@@ -494,7 +477,7 @@ pub async fn reports_download(
     doc.push(elements::PageBreak::new());
 
     // Per-system audit section
-    for system in report_data.system_reports {
+    for system in &system_reports {
         doc.push(
             elements::Text::new(format!("Host Name: {}", system.system_name))
                 .styled(style::Style::new().bold().with_font_size(14)),
@@ -563,8 +546,7 @@ pub async fn reports_download(
         }
 
         for res in &system.results {
-            let desc = report_data
-                .tests_metadata
+            let desc = tests_metadata
                 .iter()
                 .find(|t| t.name == res.test_name)
                 .map(|t| t.description.as_str())

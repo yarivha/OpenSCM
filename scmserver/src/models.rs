@@ -245,10 +245,8 @@ pub struct Condition {
 
 #[derive(Serialize, Deserialize)]
 pub struct ReportData {
-    // Page 1: Policy Header Info
-    pub policy_id: Option<i32>,
+    pub policy_id: i32,
     pub policy_name: String,
-    pub report_id: Option<i32>,
     pub version: String,
     pub description: String,
     pub submission_date: String,
@@ -256,6 +254,8 @@ pub struct ReportData {
     pub tests_metadata: Vec<TestMeta>,
     pub system_reports: Vec<SystemReport>,
 }
+
+
 
 /// Details for the "Policy Specification" page
 #[derive(Serialize, Deserialize)]
@@ -280,17 +280,19 @@ pub struct IndividualResult {
 }
 
 
-#[derive(Serialize)]
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Report {
     pub id: i32,
-    pub submission_date: DateTime<Utc>,
-    pub policy_name: Option<String>,
+    pub tenant_id: String,
+    pub submission_date: String,
+    pub policy_name: String,
     pub policy_version: Option<String>,
     pub policy_description: Option<String>,
     pub submitter_name: Option<String>,
     pub tests_metadata: Option<String>,
     pub report_results: Option<String>,
 }
+
 
 
 
