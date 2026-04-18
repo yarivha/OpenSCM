@@ -6,9 +6,6 @@ authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "FSL-1.1-ALv2"
 description = "Server for Open Security Compliance Manager"
 
-[package.metadata]
-release = "3"
-
 [dependencies]
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
 axum-server = "0.7"
