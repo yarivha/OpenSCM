@@ -653,6 +653,34 @@ pub async fn policies_edit_save(
         }
     }
 
+    // Clean up results for tests no longer reachable through any policy
+    if let Err(e) = sqlx::query(r#"
+        DELETE FROM results
+        WHERE system_id IN (
+            SELECT id FROM systems WHERE tenant_id = ?
+        )
+        AND test_id NOT IN (
+            SELECT DISTINCT tip.test_id
+            FROM tests_in_policy tip
+            JOIN systems_in_policy sip ON tip.policy_id = sip.policy_id
+            JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+            WHERE sig.tenant_id = ?
+        )
+    "#)
+    .bind(&auth.tenant_id)
+    .bind(&auth.tenant_id)
+    .execute(&mut *tx)
+    .await
+    {
+        let encoded = urlencoding::encode(&format!("Error cleaning up results: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
+    }
+
+
+
+
+
     if let Err(e) = tx.commit().await {
         let encoded = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
