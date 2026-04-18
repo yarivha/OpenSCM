@@ -7,7 +7,7 @@ license = "FSL-1.1-ALv2"
 description = "Server for Open Security Compliance Manager"
 
 [package.metadata]
-release = "2"
+release = "3"
 
 [dependencies]
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
