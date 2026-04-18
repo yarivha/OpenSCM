@@ -41,6 +41,7 @@ Section "Install"
     # This prevents the "Error opening file for writing" bug.
     DetailPrint "Ensuring process is terminated..."
     ExecWait 'taskkill /F /IM scmserver.exe /T'
+    Sleep 2000
 
     # --- 2. DEPLOY BINARIES ---
     SetOutPath "$INSTDIR"
