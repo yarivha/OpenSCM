@@ -59,7 +59,7 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 WHERE r.test_id = tests.id AND r.result = 'FAIL' AND s.status = 'active'
             ),
             compliance_score = (
-                SELECT CASE WHEN COUNT(*) = 0 THEN 100.0
+                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
                 ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
                 END FROM results r
                 JOIN systems s ON r.system_id = s.id
@@ -70,6 +70,7 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
     .await?;
 
     // 2. Update SYSTEM stats (only for active systems)
+    // Use -1.0 for systems with no results (not scanned) instead of 0.0
     sqlx::query(r#"
         UPDATE systems SET
             tests_passed = (
@@ -82,7 +83,7 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 SELECT COUNT(*) FROM results WHERE system_id = systems.id
             ),
             compliance_score = (
-                SELECT CASE WHEN COUNT(*) = 0 THEN 0.0
+                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
                 ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
                 END FROM results WHERE system_id = systems.id
             )
@@ -104,7 +105,7 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) as passed,
                 COUNT(CASE WHEN fails > 0 THEN 1 END) as failed,
                 CASE
-                    WHEN COUNT(CASE WHEN total_results > 0 THEN 1 END) = 0 THEN 0.0
+                    WHEN COUNT(CASE WHEN total_results > 0 THEN 1 END) = 0 THEN -1.0
                     ELSE (CAST(COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) AS REAL) /
                           COUNT(CASE WHEN total_results > 0 THEN 1 END)) * 100
                 END as score
@@ -138,44 +139,78 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
 
 
 pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    let sys_stats = sqlx::query(
-        "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM systems",
+
+    // Get all active tenants
+    let tenants: Vec<String> = sqlx::query_scalar(
+        "SELECT id FROM tenants",
     )
-    .fetch_one(pool)
-    .await?;
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
 
-    let pol_stats = sqlx::query(
-        "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total FROM policies",
-    )
-    .fetch_one(pool)
-    .await?;
+    for tenant_id in tenants {
 
-    let systems_score  = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-    let policies_score = pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-    let total_systems  = sys_stats.try_get::<i32, _>("total").unwrap_or(0);
-    let total_policies = pol_stats.try_get::<i32, _>("total").unwrap_or(0);
-
-    sqlx::query(r#"
-        INSERT INTO compliance_history (
-            systems_score, policies_score, total_systems,
-            total_policies, failed_systems, failed_policies
+        // Average only scanned active systems (exclude -1.0)
+        let sys_stats = sqlx::query(
+            "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total
+             FROM systems
+             WHERE tenant_id = ?
+             AND status = 'active'
+             AND compliance_score >= 0",
         )
-        VALUES (?, ?, ?, ?,
-            (SELECT COUNT(*) FROM systems WHERE compliance_score < 100),
-            (SELECT COUNT(*) FROM policies WHERE compliance_score < 100)
-        )
-    "#)
-    .bind(systems_score)
-    .bind(policies_score)
-    .bind(total_systems)
-    .bind(total_policies)
-    .execute(pool)
-    .await?;
+        .bind(&tenant_id)
+        .fetch_one(pool)
+        .await?;
 
-    info!(
-        "Compliance trend snapshot recorded: Sys {}%, Pol {}%",
-        systems_score, policies_score
-    );
+        // Average only scanned policies (exclude -1.0)
+        let pol_stats = sqlx::query(
+            "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total
+             FROM policies
+             WHERE tenant_id = ?
+             AND compliance_score >= 0",
+        )
+        .bind(&tenant_id)
+        .fetch_one(pool)
+        .await?;
+
+        let systems_score  = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
+        let policies_score = pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
+        let total_systems  = sys_stats.try_get::<i32, _>("total").unwrap_or(0);
+        let total_policies = pol_stats.try_get::<i32, _>("total").unwrap_or(0);
+
+        sqlx::query(r#"
+            INSERT INTO compliance_history (
+                tenant_id, systems_score, policies_score, total_systems,
+                total_policies, failed_systems, failed_policies
+            )
+            VALUES (?, ?, ?, ?, ?,
+                (SELECT COUNT(*) FROM systems
+                 WHERE compliance_score < 100
+                 AND compliance_score >= 0
+                 AND tenant_id = ?
+                 AND status = 'active'),
+                (SELECT COUNT(*) FROM policies
+                 WHERE compliance_score < 100
+                 AND compliance_score >= 0
+                 AND tenant_id = ?)
+            )
+        "#)
+        .bind(&tenant_id)
+        .bind(systems_score)
+        .bind(policies_score)
+        .bind(total_systems)
+        .bind(total_policies)
+        .bind(&tenant_id)
+        .bind(&tenant_id)
+        .execute(pool)
+        .await?;
+
+        info!(
+            "Compliance trend snapshot recorded for tenant '{}': Sys {}%, Pol {}%",
+            tenant_id, systems_score, policies_score
+        );
+    }
+
     Ok(())
 }
 
@@ -299,7 +334,12 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 }
             }
 
-            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT (for trend graphs) ---
+            // --- TASK B: COMPLIANCE RECALCULATION (every 60s) ---
+            if let Err(e) = recalculate_current_compliance(&loop_pool).await {
+                error!("Compliance recalculation failed: {}", e);
+            }
+
+            // --- TASK C: HOURLY COMPLIANCE SNAPSHOT (for trend graphs) ---
             if now.minute() == 0 && current_hour != last_snapshot_hour {
                 info!("Running hourly compliance aggregation snapshot...");
                 if let Err(e) = record_compliance_history(&loop_pool).await {
