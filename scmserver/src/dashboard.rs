@@ -65,15 +65,6 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
 
     
-    let notifications = sqlx::query_as::<_, Notification>(
-        "SELECT * FROM notify WHERE tenant_id = ? AND owner_id = ? ORDER BY id DESC LIMIT 10"
-    )
-    .bind(&auth.tenant_id)
-    .bind(auth.userid)
-    .fetch_all(&*pool).await.unwrap_or_default();
-
-
-
     // 2. Get Critical Policy Failures
     let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
         r#"
@@ -152,7 +143,6 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     context.insert("reports_count", &reports_count);
     context.insert("top_failed_systems", &top_failed_systems); 
     context.insert("top_failed_policies", &top_failed_policies);
-    context.insert("notifications", &notifications);
 
     // Graph Data
     context.insert("trend_labels", &labels);
