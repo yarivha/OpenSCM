@@ -272,9 +272,10 @@ pub async fn systems_edit(
     };
 
     let sig_result = sqlx::query(
-        "SELECT system_id, group_id FROM systems_in_groups WHERE system_id = ?",
+        "SELECT system_id, group_id FROM systems_in_groups WHERE system_id = ? AND tenant_id = ?",
     )
     .bind(id)
+    .bind(&auth.tenant_id)
     .fetch_all(&*pool)
     .await;
 
@@ -328,9 +329,10 @@ pub async fn systems_edit_save(
     let selected_groups = form_data.get("groups").cloned();
 
     if let Err(e) = sqlx::query(
-        "DELETE FROM systems_in_groups WHERE system_id = ?",
+        "DELETE FROM systems_in_groups WHERE system_id = ? AND tenant_id = ?",
     )
     .bind(id)
+    .bind(&auth.tenant_id)
     .execute(&mut *tx)
     .await
     {
@@ -343,10 +345,11 @@ pub async fn systems_edit_save(
         for g_id_str in group_ids {
             if let Ok(g_id) = g_id_str.parse::<i32>() {
                 if let Err(e) = sqlx::query(
-                    "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)",
+                    "INSERT INTO systems_in_groups (system_id, group_id, tenant_id) VALUES (?, ?, ?)",
                 )
                 .bind(id)
                 .bind(g_id)
+                .bind(&auth.tenant_id)
                 .execute(&mut *tx)
                 .await
                 {
@@ -678,10 +681,11 @@ pub async fn system_groups_add_save(
             match system_id_str.parse::<i32>() {
                 Ok(system_id) => {
                     if let Err(e) = sqlx::query(
-                        "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)",
+                        "INSERT INTO systems_in_groups (system_id, group_id, tenant_id) VALUES (?, ?, ?)",
                     )
                     .bind(system_id)
                     .bind(group_id)
+                    .bind(&auth.tenant_id)
                     .execute(&mut *tx)
                     .await
                     {
@@ -728,6 +732,34 @@ pub async fn system_groups_delete(
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
     }
+
+
+    // Before the DELETE FROM system_groups:
+    if let Err(e) = sqlx::query(r#"
+        DELETE FROM results
+        WHERE system_id IN (
+            SELECT id FROM systems WHERE tenant_id = ?
+        )
+        AND test_id NOT IN (
+            SELECT DISTINCT tip.test_id
+            FROM tests_in_policy tip
+            JOIN systems_in_policy sip ON tip.policy_id = sip.policy_id
+            JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+            WHERE sig.tenant_id = ?
+        )
+    "#)
+    .bind(&auth.tenant_id)
+    .bind(&auth.tenant_id)
+    .execute(&pool)
+    .await
+    {
+        error!("Failed to clean up results for deleted group {}: {}", id, e);
+        let encoded = urlencoding::encode(&format!("Error cleaning up results: {}", e)).to_string();
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
+    }
+
+
+
 
     // ON DELETE CASCADE handles systems_in_groups automatically
     if let Err(e) = sqlx::query(
@@ -824,9 +856,10 @@ pub async fn system_groups_edit(
     };
 
     let sig_result = sqlx::query(
-        "SELECT system_id, group_id FROM systems_in_groups WHERE group_id = ?",
+        "SELECT system_id, group_id FROM systems_in_groups WHERE group_id = ? AND tenant_id = ?",
     )
     .bind(id)
+    .bind(&auth.tenant_id)
     .fetch_all(&*pool)
     .await;
 
@@ -926,8 +959,9 @@ pub async fn system_groups_edit_save(
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
-    if let Err(e) = sqlx::query("DELETE FROM systems_in_groups WHERE group_id = ?")
+    if let Err(e) = sqlx::query("DELETE FROM systems_in_groups WHERE group_id = ? AND tenant_id = ?")
         .bind(id)
+        .bind(&auth.tenant_id)
         .execute(&mut *tx)
         .await
     {
@@ -942,10 +976,11 @@ pub async fn system_groups_edit_save(
             match system_id_str.parse::<i32>() {
                 Ok(system_id) => {
                     if let Err(e) = sqlx::query(
-                        "INSERT INTO systems_in_groups (system_id, group_id) VALUES (?, ?)",
+                        "INSERT INTO systems_in_groups (system_id, group_id, tenant_id) VALUES (?, ?, ?)",
                     )
                     .bind(system_id)
                     .bind(id)
+                    .bind(&auth.tenant_id)
                     .execute(&mut *tx)
                     .await
                     {
