@@ -68,7 +68,9 @@
               {% else %}fa-bell
               {% endif %}">
             </i>
-            {{ notify.message }}
+	    <span style="white-space: normal; word-break: break-word;">
+             {{ notify.message }}
+	    </span>
             <span class="float-right text-muted text-sm">{{ notify.timestamp }}</span>
           </a>
           {% endfor %}
