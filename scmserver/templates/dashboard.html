@@ -132,18 +132,22 @@
                         <span class="font-weight-bold">{{ pol.policy_name }}</span><br>
                         <small class="text-muted">Version: {{ pol.policy_version }}</small>
                       </td>
-                      <td class="text-center">
+		      <td class="text-center">
   			<div class="progress-wrapper" style="width: 80px; margin: 0 auto;">
-    			  <div class="progress progress-xxs mb-1">
-      			    <div class="progress-bar 
-        		    {% if pol.compliance >= 80 %}bg-success
-        		    {% elif pol.compliance >= 50 %}bg-warning
-        		    {% else %}bg-danger{% endif %}" 
-        		    style="width: {{ pol.compliance }}%">
+    			  {% if pol.compliance < 0 %}
+      			    <small class="badge badge-secondary">Not Scanned</small>
+    			  {% else %}
+      			    <div class="progress progress-xxs mb-1">
+        		      <div class="progress-bar
+          			{% if pol.compliance >= 80 %}bg-success
+          			{% elif pol.compliance >= 50 %}bg-warning
+          			{% else %}bg-danger{% endif %}"
+          			  style="width: {{ pol.compliance }}%">
+        		      </div>
       			    </div>
-    			  </div>
-    			  <small class="font-weight-bold">{{ pol.compliance | round(precision=2) }}%</small>
-  		        </div>
+      			    <small class="font-weight-bold">{{ pol.compliance | round(precision=2) }}%</small>
+    			    {% endif %}
+   			</div>
 		      </td>
                       <td class="text-center">
                          <span class="text-success">{{ pol.systems_passed }} <i class="fas fa-check-circle"></i></span>
