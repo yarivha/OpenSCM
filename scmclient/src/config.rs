@@ -1,9 +1,13 @@
 use serde::{Deserialize, Serialize};
 use std::error::Error;
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::PathBuf;
 use tracing::{info, warn, error};
 use toml;
+
+// Unix specific imports
+use toml;
+use std::path::Path;
 
 // Windows-specific imports
 #[cfg(target_os = "windows")]
@@ -145,8 +149,8 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
-    /// Read a registry value, stripping null terminators and whitespace.
-    /// Returns the default string if the value is missing.
+    // Read a registry value, stripping null terminators and whitespace.
+    // Returns the default string if the value is missing.
     let read_val = |name: &str, default: &str| -> String {
         key.get_value::<String, _>(name)
             .unwrap_or_else(|_| default.to_string())
