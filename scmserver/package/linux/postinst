@@ -5,6 +5,8 @@ CONFIG_DIR="/etc/openscm"
 KEYS_DIR="/etc/openscm/keys"
 DATA_DIR="/var/lib/openscm"
 LOG_DIR="/var/log/openscm"
+OLD_DB="/etc/openscm/scm.db"
+OLD_BIN="/opt/openscm/scmserver"
 
 if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
 
@@ -30,7 +32,23 @@ if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
     chown -R openscm:openscm "$DATA_DIR"
     chown -R openscm:openscm "$LOG_DIR"
 
-    # 5. Enable and start service
+    # 5. Migrate database from old location (pre 0.1.2)
+    if [ -f "$OLD_DB" ] && [ ! -f "$DATA_DIR/scm.db" ]; then
+        echo "Migrating database from $OLD_DB to $DATA_DIR/scm.db ..."
+        cp "$OLD_DB" "$DATA_DIR/scm.db"
+        chown openscm:openscm "$DATA_DIR/scm.db"
+        chmod 640 "$DATA_DIR/scm.db"
+        echo "Database migrated successfully."
+        echo "Old database preserved at $OLD_DB — remove manually when satisfied."
+    fi
+
+    # 6. Stop old service if binary exists in old location (pre 0.1.2)
+    if [ -f "$OLD_BIN" ]; then
+        echo "Detected old installation at $OLD_BIN"
+        systemctl stop "$APP_NAME.service" >/dev/null 2>&1 || true
+    fi
+
+    # 7. Enable and start service
     if [ -d /run/systemd/system ]; then
         systemctl --system daemon-reload >/dev/null 2>&1 || true
         systemctl enable "$APP_NAME.service" >/dev/null 2>&1 || true
@@ -41,7 +59,11 @@ if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
     echo "       $APP_NAME INSTALLATION COMPLETE"
     echo "============================================================"
     echo ""
-    echo "  Dashboard: http://localhost:8000"
+    echo "  Dashboard : http://localhost:8000"
+    echo "  Config    : $CONFIG_DIR/scmserver.config"
+    echo "  Database  : $DATA_DIR/scm.db"
+    echo "  Logs      : $LOG_DIR/"
+    echo ""
     echo "  Default credentials: admin / admin"
     echo "  CHANGE THE DEFAULT PASSWORD IMMEDIATELY"
     echo ""
