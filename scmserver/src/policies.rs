@@ -1183,25 +1183,17 @@ pub async fn policies_report_download(
             elements::Text::new("Audit Rules Detailed Breakdown")
                 .styled(style::Style::new().bold()),
         );
-        let mut rules_table = elements::TableLayout::new(vec![2, 1, 4]);
+        let mut rules_table = elements::TableLayout::new(vec![4, 1]);
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
         if let Err(e) = rules_table.push_row(vec![
             Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
             Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
         ]) {
             error!("Failed to add rules table header to PDF: {}", e);
         }
 
         for res in &system.results {
-            let desc = report_data
-                .tests_metadata
-                .iter()
-                .find(|t| t.name == res.test_name)
-                .map(|t| t.description.as_str())
-                .unwrap_or("No description provided");
-
             let is_pass = res.status == "PASS";
             let (status_text, status_color) = if is_pass {
                 ("PASS", style::Color::Rgb(0, 128, 0))
@@ -1215,7 +1207,6 @@ pub async fn policies_report_download(
                     elements::Text::new(status_text)
                         .styled(style::Style::new().with_color(status_color).bold()),
                 ),
-                Box::new(elements::Text::new(desc)),
             ]) {
                 error!("Failed to add rule row to PDF: {}", e);
             }
