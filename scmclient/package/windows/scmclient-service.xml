@@ -1,9 +1,22 @@
 <service>
   <id>OpenSCMClient</id>
-  <name>OpenSCM Client Service</name>
-  <description>Background service for OpenSCM CLI.</description>
-  
+  <name>OpenSCM Agent</name>
+  <description>OpenSCM security compliance agent — https://openscm.io</description>
+
   <executable>%BASE%\scmclient.exe</executable>
-  
-  <log mode="roll"></log>
+
+  <!-- Restart on failure -->
+  <onfailure action="restart" delay="5 sec"/>
+  <onfailure action="restart" delay="10 sec"/>
+  <onfailure action="none"/>
+
+  <!-- Logging -->
+  <log mode="roll-by-size">
+    <sizeThreshold>10240</sizeThreshold>
+    <keepFiles>5</keepFiles>
+  </log>
+
+  <!-- Start mode -->
+  <startmode>Automatic</startmode>
+
 </service>
