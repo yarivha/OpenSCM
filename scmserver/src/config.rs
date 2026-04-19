@@ -6,11 +6,12 @@ use std::path::{Path, PathBuf};
 use std::error::Error;
 use tracing::{info, warn, error};
 use base64::{engine::general_purpose, Engine as _};
-use toml;
+
 
 // Unix specific imports
 #[cfg(not(target_os = "windows"))]
 use std::io::Write;
+use toml;
 
 // Windows-specific imports
 #[cfg(target_os = "windows")]
