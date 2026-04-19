@@ -92,16 +92,16 @@ Section "Install"
     File "scmclient-service.xml"
 
     # --- 3. PERSISTENCE (KEYS & CONFIG) ---
-    # Use COMMONAPPDATA (C:\ProgramData) — accessible by SYSTEM service account
-    CreateDirectory "$COMMONAPPDATA\OpenSCM\Client"
-    CreateDirectory "$COMMONAPPDATA\OpenSCM\Client\keys"
+    # Use PROGRAMDATA (C:\ProgramData) — accessible by SYSTEM service account
+    CreateDirectory "$PROGRAMDATA\OpenSCM\Client"
+    CreateDirectory "$PROGRAMDATA\OpenSCM\Client\keys"
 
     # --- 4. REGISTRY UPDATE ---
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL" "$ServerURL"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "TenantId" "default"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$COMMONAPPDATA\OpenSCM\Client\keys"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$PROGRAMDATA\OpenSCM\Client\keys"
 
     # --- 5. SERVICE RESTART ---
     DetailPrint "Registering and starting OpenSCM Agent service..."
