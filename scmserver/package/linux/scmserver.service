@@ -1,16 +1,27 @@
 [Unit]
-Description=OpenSCM Server Service
+Description=OpenSCM Server
+Documentation=https://openscm.io/docs
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/openscm/scmserver
-WorkingDirectory=/opt/openscm
+User=openscm
+Group=openscm
+
+ExecStart=/usr/bin/scmserver
+WorkingDirectory=/var/lib/openscm
+
 Restart=on-failure
-User=root
+RestartSec=5s
+
+# Hardening
+NoNewPrivileges=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/var/lib/openscm /etc/openscm /var/log/openscm
 
 # Logs
-StandardOutput=append:/var/log/openscm/scmserver_output.log
+StandardOutput=append:/var/log/openscm/scmserver.log
 StandardError=append:/var/log/openscm/scmserver_error.log
 
 [Install]

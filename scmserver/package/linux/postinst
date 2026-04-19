@@ -1,16 +1,36 @@
 #!/bin/sh
 
 APP_NAME="scmserver"
+CONFIG_DIR="/etc/openscm"
+KEYS_DIR="/etc/openscm/keys"
+DATA_DIR="/var/lib/openscm"
 LOG_DIR="/var/log/openscm"
 
 if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
 
-    # 1. Create Log Directory
-    if [ ! -d "$LOG_DIR" ]; then
-        mkdir -p "$LOG_DIR"
+    # 1. Create system user if not exists
+    if ! id -u openscm > /dev/null 2>&1; then
+        useradd --system --no-create-home --shell /bin/false openscm
     fi
+
+    # 2. Create directories
+    mkdir -p "$CONFIG_DIR"
+    mkdir -p "$KEYS_DIR"
+    mkdir -p "$DATA_DIR"
+    mkdir -p "$LOG_DIR"
+
+    # 3. Set permissions
+    chmod 755 "$CONFIG_DIR"
+    chmod 700 "$KEYS_DIR"
+    chmod 750 "$DATA_DIR"
     chmod 755 "$LOG_DIR"
 
+    # 4. Set ownership
+    chown -R openscm:openscm "$CONFIG_DIR"
+    chown -R openscm:openscm "$DATA_DIR"
+    chown -R openscm:openscm "$LOG_DIR"
+
+    # 5. Enable and start service
     if [ -d /run/systemd/system ]; then
         systemctl --system daemon-reload >/dev/null 2>&1 || true
         systemctl enable "$APP_NAME.service" >/dev/null 2>&1 || true
@@ -21,7 +41,11 @@ if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
     echo "       $APP_NAME INSTALLATION COMPLETE"
     echo "============================================================"
     echo ""
+    echo "  Dashboard: http://localhost:8000"
+    echo "  Default credentials: admin / admin"
+    echo "  CHANGE THE DEFAULT PASSWORD IMMEDIATELY"
+    echo ""
+    echo "============================================================"
 fi
 
 exit 0
-

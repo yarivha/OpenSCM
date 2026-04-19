@@ -1,14 +1,13 @@
 #!/bin/sh
 
-
 APP_NAME="scmserver"
-LOG_DIR="/var/log/openscm"
 
 if [ "$1" = "0" ] || [ "$1" = "remove" ]; then
     echo "Stopping and disabling $APP_NAME service..."
-    systemctl stop $APP_NAME.service >/dev/null 2>&1 || true
-    systemctl disable $APP_NAME.service >/dev/null 2>&1 || true
+    if [ -d /run/systemd/system ]; then
+        systemctl stop "$APP_NAME.service" >/dev/null 2>&1 || true
+        systemctl disable "$APP_NAME.service" >/dev/null 2>&1 || true
+    fi
 fi
 
 exit 0
-
