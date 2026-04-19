@@ -1,0 +1,17 @@
+version: '3.8'
+
+services:
+  openscm:
+    image: yarivh/openscm:latest
+    container_name: openscm
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    volumes:
+      - openscm_data:/var/lib/openscm
+      - openscm_config:/etc/openscm
+
+volumes:
+  openscm_data:
+  openscm_config:
+
