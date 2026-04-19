@@ -323,7 +323,7 @@ pub async fn send(
                     "SELECT t.* FROM commands c
                      JOIN tests t ON c.test_id = t.id
                      WHERE c.system_id = ? AND c.tenant_id = ?
-                     LIMIT 20",
+                     LIMIT 500",
                 )
                 .bind(id)
                 .bind(tenant_id)
