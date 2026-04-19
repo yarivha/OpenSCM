@@ -234,7 +234,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
     let loop_pool = pool.clone();
 
     tokio::spawn(async move {
-        let mut last_snapshot_hour: i32 = -1;
+        let mut last_snapshot_hour: i32 = Utc::now().hour() as i32;
 
         loop {
             interval.tick().await;
