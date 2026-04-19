@@ -13,6 +13,11 @@
     !define BUILD_DIR "/Apps/OpenSCM/build"
 !endif
 
+# --- ICON Defenition ---
+!define MUI_ICON "scmserver.ico"
+!define MUI_UNICON "scmserver.ico"
+
+
 # --- Basic Metadata ---
 !ifdef INSTALLER_NAME
     OutFile "${INSTALLER_NAME}"
@@ -21,6 +26,7 @@
 !endif
 
 Name "OpenSCM Server"
+Icon "scmserver.ico"
 InstallDir "$PROGRAMFILES64\OpenSCM\Server"
 RequestExecutionLevel admin
 
@@ -83,6 +89,7 @@ Section "Install"
     File "${BUILD_DIR}\target\x86_64-pc-windows-gnu\release\scmserver.exe"
     File "scmserver-service.exe"
     File "scmserver-service.xml"
+    File "scmserver.ico"
 
     # --- 3. DATA PERSISTENCE ---
     # Use COMMONAPPDATA (C:\ProgramData) — accessible by SYSTEM service account
@@ -113,6 +120,8 @@ Section "Install"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Server" "Publisher" "OpenSCM"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Server" "URLInfoAbout" "https://openscm.io"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Server" "HelpLink" "https://openscm.io/docs"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Server" "DisplayName" "OpenSCM Server"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Server" "DisplayIcon" "$INSTDIR\scmserver.ico"    # ADD HERE
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Server" "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Server" "NoRepair" 1
 
@@ -134,6 +143,7 @@ Section "Uninstall"
     Delete "$INSTDIR\scmserver.exe"
     Delete "$INSTDIR\scmserver-service.exe"
     Delete "$INSTDIR\scmserver-service.xml"
+    Delete "$INSTDIR\scmserver.ico" 
     Delete "$INSTDIR\uninstall.exe"
 
     # 3. Remove registry keys

@@ -14,6 +14,12 @@
     !define BUILD_DIR "/Apps/OpenSCM/build"
 !endif
 
+
+# --- Icon Defenition ---  
+!define MUI_ICON "scmclient.ico"
+!define MUI_UNICON "scmclient.ico"
+
+
 # --- Metadata ---
 !ifdef INSTALLER_NAME
     OutFile "${INSTALLER_NAME}"
@@ -22,6 +28,7 @@
 !endif
 
 Name "OpenSCM Agent"
+Icon "scmclient.ico"
 InstallDir "$PROGRAMFILES64\OpenSCM\Client"
 RequestExecutionLevel admin
 
@@ -100,6 +107,7 @@ Section "Install"
     File "${BUILD_DIR}\target\x86_64-pc-windows-gnu\release\scmclient.exe"
     File "scmclient-service.exe"
     File "scmclient-service.xml"
+    File "scmclient.ico" 
 
     # --- 3. PERSISTENCE (KEYS & CONFIG) ---
     # Use PROGRAMDATA (C:\ProgramData) — accessible by SYSTEM service account
@@ -129,6 +137,8 @@ Section "Install"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "Publisher" "OpenSCM"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "URLInfoAbout" "https://openscm.io"
     WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "HelpLink" "https://openscm.io/docs"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "DisplayName" "OpenSCM Agent"
+    WriteRegStr HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "DisplayIcon" "$INSTDIR\scmclient.ico"
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "NoModify" 1
     WriteRegDWORD HKLM "Software\Microsoft\Windows\CurrentVersion\Uninstall\OpenSCM-Client" "NoRepair" 1
 
@@ -150,6 +160,7 @@ Section "Uninstall"
     Delete "$INSTDIR\scmclient.exe"
     Delete "$INSTDIR\scmclient-service.exe"
     Delete "$INSTDIR\scmclient-service.xml"
+    Delete "$INSTDIR\scmclient.ico"
     Delete "$INSTDIR\uninstall.exe"
 
     # 3. Remove registry keys
