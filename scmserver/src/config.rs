@@ -11,6 +11,7 @@ use base64::{engine::general_purpose, Engine as _};
 // Unix specific imports
 #[cfg(not(target_os = "windows"))]
 use std::io::Write;
+#[cfg(not(target_os = "windows"))]
 use toml;
 
 // Windows-specific imports
