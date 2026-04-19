@@ -1,16 +1,20 @@
 [Unit]
-Description=OpenSCM Client Service
+Description=OpenSCM Agent
+Documentation=https://openscm.io/docs
 After=network.target
 
 [Service]
 Type=simple
-ExecStart=/opt/openscm/scmclient
-WorkingDirectory=/opt/openscm
-Restart=on-failure
 User=root
 
+ExecStart=/usr/bin/scmclient
+WorkingDirectory=/etc/openscm
+
+Restart=on-failure
+RestartSec=5s
+
 # Logs
-StandardOutput=append:/var/log/openscm/scmclient_output.log
+StandardOutput=append:/var/log/openscm/scmclient.log
 StandardError=append:/var/log/openscm/scmclient_error.log
 
 [Install]

@@ -1,16 +1,30 @@
 #!/bin/sh
 
 APP_NAME="scmclient"
+CONFIG_DIR="/etc/openscm"
+KEYS_DIR="/etc/openscm/keys"
 LOG_DIR="/var/log/openscm"
+OLD_BIN="/opt/openscm/scmclient"
 
 if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
 
-    # 1. Create Log Directory
-    if [ ! -d "$LOG_DIR" ]; then
-        mkdir -p "$LOG_DIR"
-    fi
+    # 1. Create directories
+    mkdir -p "$CONFIG_DIR"
+    mkdir -p "$KEYS_DIR"
+    mkdir -p "$LOG_DIR"
+
+    # 2. Set permissions
+    chmod 755 "$CONFIG_DIR"
+    chmod 700 "$KEYS_DIR"
     chmod 755 "$LOG_DIR"
 
+    # 3. Stop old service if binary exists in old location (pre 0.1.2)
+    if [ -f "$OLD_BIN" ]; then
+        echo "Detected old installation at $OLD_BIN"
+        systemctl stop "$APP_NAME.service" >/dev/null 2>&1 || true
+    fi
+
+    # 4. Enable and start service
     if [ -d /run/systemd/system ]; then
         systemctl --system daemon-reload >/dev/null 2>&1 || true
         systemctl enable "$APP_NAME.service" >/dev/null 2>&1 || true
@@ -20,13 +34,19 @@ if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ]; then
     echo "============================================================"
     echo "       $APP_NAME INSTALLATION COMPLETE"
     echo "============================================================"
-    echo " Please update: /etc/openscm/$APP_NAME.config"
     echo ""
-    echo " Then restart the service:"
-    echo "   sudo systemctl restart $APP_NAME.service"
+    echo "  Config : $CONFIG_DIR/scmclient.config"
+    echo "  Keys   : $KEYS_DIR/"
+    echo "  Logs   : $LOG_DIR/"
+    echo ""
+    echo "  Edit the config to point to your OpenSCM server:"
+    echo "    url = \"https://your-openscm-server.com\""
+    echo "    tenant_id = \"default\""
+    echo ""
+    echo "  Then restart the service:"
+    echo "    sudo systemctl restart $APP_NAME"
+    echo ""
     echo "============================================================"
-    echo ""
 fi
 
 exit 0
-
