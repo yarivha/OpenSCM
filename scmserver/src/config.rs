@@ -3,11 +3,14 @@ use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fs;
 use std::path::{Path, PathBuf};
-use std::io::Write;
 use std::error::Error;
 use tracing::{info, warn, error};
 use base64::{engine::general_purpose, Engine as _};
 use toml;
+
+// Unix specific imports
+#[cfg(not(target_os = "windows"))]
+use std::io::Write;
 
 // Windows-specific imports
 #[cfg(target_os = "windows")]
@@ -260,6 +263,7 @@ impl Config {
         }
     }
 
+    #[cfg(not(target_os = "windows"))]
     pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
         let toml_string = toml::to_string_pretty(self)?;
         if let Some(parent) = path.as_ref().parent() {
