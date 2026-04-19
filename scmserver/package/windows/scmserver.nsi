@@ -60,13 +60,13 @@ Section "Install"
 
     # --- 3. DATA PERSISTENCE ---
     # Use COMMONAPPDATA (C:\ProgramData) — accessible by SYSTEM service account
-    CreateDirectory "$COMMONAPPDATA\OpenSCM\Server"
-    CreateDirectory "$COMMONAPPDATA\OpenSCM\Server\keys"
+    CreateDirectory "$PROGRAMDATA\OpenSCM\Server"
+    CreateDirectory "$PROGRAMDATA\OpenSCM\Server\keys"
 
     # --- 4. REGISTRY CONFIGURATION ---
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "Port" "8000"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "LogLevel" "info"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "DB" "$COMMONAPPDATA\OpenSCM\Server\scm.db"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "DB" "$PROGRAMDATA\OpenSCM\Server\scm.db"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "KeyPath" "$COMMONAPPDATA\OpenSCM\Server\keys"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "PubKeyFile" "scmserver.pub"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "PrivKeyFile" "scmserver.key"
