@@ -3,9 +3,9 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use tracing::{info, warn, error};
-use toml;
 
 // Unix specific imports
+#[cfg(not(target_os = "windows"))]
 use toml;
 use std::path::Path;
 
