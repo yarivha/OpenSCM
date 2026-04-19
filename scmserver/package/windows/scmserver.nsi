@@ -24,6 +24,10 @@ Name "OpenSCM Server"
 InstallDir "$PROGRAMFILES64\OpenSCM\Server"
 RequestExecutionLevel admin
 
+# --- Variables ---
+Var ProgramData
+
+
 # --- Interface Settings ---
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_DIRECTORY
@@ -37,8 +41,30 @@ RequestExecutionLevel admin
 # INSTALLATION SECTION
 # =========================================================
 Section "Install"
+    ReadEnvStr $ProgramData "PROGRAMDATA"
     SetShellVarContext all
     SetRegView 64
+
+
+    # --- 1. PRE-INSTALL: STOP SERVICE & RELEASE LOCKS ---
+    DetailPrint "Checking for existing server instance..."
+
+    # Graceful stop via Windows service manager first
+    DetailPrint "Stopping OpenSCM Server service..."
+    ExecWait 'sc stop OpenSCMServer'
+    Sleep 2000
+
+    # Stop via service wrapper if exists
+    IfFileExists "$INSTDIR\scmserver-service.exe" 0 +3
+       DetailPrint "Stopping service wrapper..."
+       ExecWait '"$INSTDIR\scmserver-service.exe" stop'
+
+    # Force kill any remaining process and wait for OS to release file locks
+    DetailPrint "Releasing file locks..."
+    ExecWait 'taskkill /F /IM scmserver.exe /T'
+    Sleep 3000
+
+
 
     # --- 1. PRE-INSTALL: HANDLE UPGRADES & FILE LOCKS ---
     DetailPrint "Checking for existing server instance..."
@@ -60,14 +86,14 @@ Section "Install"
 
     # --- 3. DATA PERSISTENCE ---
     # Use COMMONAPPDATA (C:\ProgramData) — accessible by SYSTEM service account
-    CreateDirectory "$PROGRAMDATA\OpenSCM\Server"
-    CreateDirectory "$PROGRAMDATA\OpenSCM\Server\keys"
+    CreateDirectory "$ProgramData\OpenSCM\Server"
+    CreateDirectory "$ProgramData\OpenSCM\Server\keys"
 
     # --- 4. REGISTRY CONFIGURATION ---
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "Port" "8000"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "LogLevel" "info"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "DB" "$PROGRAMDATA\OpenSCM\Server\scm.db"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "KeyPath" "$COMMONAPPDATA\OpenSCM\Server\keys"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "DB" "$ProgramData\OpenSCM\Server\scm.db"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "KeyPath" "$ProgramData\OpenSCM\Server\keys"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "PubKeyFile" "scmserver.pub"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Server" "PrivKeyFile" "scmserver.key"
 

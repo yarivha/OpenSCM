@@ -31,6 +31,7 @@ Var Dialog
 Var Label1
 Var Text1
 Var ExistingURL
+Var ProgramData
 
 # --- Pages ---
 !insertmacro MUI_PAGE_WELCOME
@@ -70,19 +71,28 @@ FunctionEnd
 # INSTALLATION SECTION
 # =========================================================
 Section "Install"
+    ReadEnvStr $ProgramData "PROGRAMDATA"
     SetShellVarContext all
     SetRegView 64
 
     # --- 1. PRE-INSTALL: STOP SERVICE & RELEASE LOCKS ---
     DetailPrint "Checking for existing client instance..."
 
-    IfFileExists "$INSTDIR\scmclient-service.exe" 0 +3
-        DetailPrint "Stopping OpenSCM Agent service..."
-        ExecWait '"$INSTDIR\scmclient-service.exe" stop'
+    # Graceful stop via Windows service manager first
+    DetailPrint "Stopping OpenSCM Agent service..."
+    ExecWait 'sc stop OpenSCMClient'
+    Sleep 2000
 
+    # Stop via service wrapper if exists
+    IfFileExists "$INSTDIR\scmclient-service.exe" 0 +3
+       DetailPrint "Stopping service wrapper..."
+       ExecWait '"$INSTDIR\scmclient-service.exe" stop'
+
+    # Force kill any remaining process and wait for OS to release file locks
     DetailPrint "Releasing file locks..."
     ExecWait 'taskkill /F /IM scmclient.exe /T'
-    Sleep 2000
+    Sleep 3000
+
 
     # --- 2. DEPLOY BINARIES ---
     SetOutPath "$INSTDIR"
@@ -93,15 +103,15 @@ Section "Install"
 
     # --- 3. PERSISTENCE (KEYS & CONFIG) ---
     # Use PROGRAMDATA (C:\ProgramData) — accessible by SYSTEM service account
-    CreateDirectory "$PROGRAMDATA\OpenSCM\Client"
-    CreateDirectory "$PROGRAMDATA\OpenSCM\Client\keys"
+    CreateDirectory "$ProgramData\OpenSCM\Client"
+    CreateDirectory "$ProgramData\OpenSCM\Client\keys"
 
     # --- 4. REGISTRY UPDATE ---
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL" "$ServerURL"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "TenantId" "default"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$PROGRAMDATA\OpenSCM\Client\keys"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$ProgramData\OpenSCM\Client\keys"
 
     # --- 5. SERVICE RESTART ---
     DetailPrint "Registering and starting OpenSCM Agent service..."
