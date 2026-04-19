@@ -5,6 +5,7 @@
 ![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange)
 ![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows-lightgrey)
 ![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM%20|%20RISC--V-blue)
+![Docker](https://img.shields.io/badge/docker-yarivh%2Fopenscm-blue)
 
 A self-hosted, privacy-first security compliance platform built in Rust.
 
@@ -76,7 +77,16 @@ Coming soon — follow us on [GitHub](https://github.com/yarivha/openscm) for up
 
 ### 🐳 Docker
 
-Coming soon — follow us on [GitHub](https://github.com/yarivha/openscm) for updates.
+
+```bash
+docker run -d \
+  --name openscm \
+  -p 8000:8000 \
+  -v openscm_config:/etc/openscm \
+  -v openscm_data:/var/lib/openscm \
+  yarivh/openscm:latest
+```
+
 
 ---
 
