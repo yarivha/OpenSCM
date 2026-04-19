@@ -48,12 +48,18 @@ pub struct KeyPair {
 
 // --- Default ---
 
+
 impl Default for Config {
     fn default() -> Self {
         #[cfg(windows)]
+        let base_config = PathBuf::from(r"C:\ProgramData\OpenSCM\Server");
+        #[cfg(windows)]
         let base_data = PathBuf::from(r"C:\ProgramData\OpenSCM\Server");
+
         #[cfg(not(windows))]
-        let base_data = PathBuf::from("/etc/openscm");
+        let base_config = PathBuf::from("/etc/openscm");
+        #[cfg(not(windows))]
+        let base_data = PathBuf::from("/var/lib/openscm");
 
         Self {
             server: ServerConfig {
@@ -64,13 +70,14 @@ impl Default for Config {
                 path: base_data.join("scm.db").to_string_lossy().into_owned(),
             },
             key: KeyPair {
-                key_path: Some(base_data.join("keys").to_string_lossy().into_owned()),
+                key_path: Some(base_config.join("keys").to_string_lossy().into_owned()),
                 public_key: Some("scmserver.pub".to_string()),
                 private_key: Some("scmserver.key".to_string()),
             },
         }
     }
 }
+
 
 // --- Key Generation ---
 
