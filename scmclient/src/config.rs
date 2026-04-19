@@ -7,6 +7,7 @@ use tracing::{info, warn, error};
 // Unix specific imports
 #[cfg(not(target_os = "windows"))]
 use toml;
+#[cfg(not(target_os = "windows"))]
 use std::path::Path;
 
 // Windows-specific imports
