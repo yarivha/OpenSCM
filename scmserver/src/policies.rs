@@ -1112,7 +1112,7 @@ pub async fn policies_report_download(
     // Report details table
     doc.push(elements::Text::new("Report Details").styled(style::Style::new().bold()));
     let mut details_table = elements::TableLayout::new(vec![1, 3]);
-    details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+    details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
 
     if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Policy Name")),
@@ -1146,7 +1146,7 @@ pub async fn policies_report_download(
         let violation_count = system.results.len() - compliant_count;
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
-        summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+        summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
 
         if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Compliance Status")),
@@ -1193,7 +1193,7 @@ pub async fn policies_report_download(
                 .styled(style::Style::new().bold()),
         );
         let mut rules_table = elements::TableLayout::new(vec![4, 1]);
-        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
 
         if let Err(e) = rules_table.push_row(vec![
             Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
