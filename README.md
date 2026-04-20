@@ -3,8 +3,8 @@
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](https://fsl.software/)
 [![Client License](https://img.shields.io/badge/client-Apache%202.0-green)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange)](https://rust-lang.org/)
-[![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows-lightgrey)]
-[![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM%20|%20RISC--V-blue)]
+![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows-lightgrey)
+![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM%20|%20RISC--V-blue)
 [![Docker](https://img.shields.io/badge/docker-openscm%2Fscmserver-blue)](https://hub.docker.com/r/openscm/scmserver)
 
 A self-hosted, privacy-first security compliance platform built in Rust.
@@ -14,6 +14,17 @@ Unlike traditional compliance tools, OpenSCM agents execute tests locally and on
 For full documentation, installation guides, and user manual visit **[openscm.io](https://openscm.io)**.
 
 ---
+
+## Documentation
+To check out docs, visit [openscm.io](https://openscm.io).
+
+## Sponsor
+
+If you find this project helpful, please consider sponsoring us to support ongoing development and maintenance.
+
+[![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsors-ea4aaa?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/yarivha)
+
+
 
 ## 🚀 Key Features
 
@@ -95,7 +106,7 @@ After installation, access the dashboard at **http://your-server:8000**
 Default credentials: `admin` / `admin` — **change immediately after first login.**
 
 > For production deployments, run the server behind a reverse proxy (Nginx, Caddy)
-> with HTTPS enabled. See [openscm.io/guide/guide](https://openscm.io/guide/guide/) for details.
+> with HTTPS enabled. See [openscm.io](https://openscm.io) for details.
 
 ---
 
@@ -129,7 +140,7 @@ Report them responsibly to **security@openscm.io** — we respond within 48 hour
 
 ## 🛡️ Support
 
-- **Docs & User Guide:** [openscm.io/guide/guide](https://openscm.io/guide/guide)
+- **Docs & User Guide:** [openscm.io](https://openscm.io)
 - **Bugs:** [GitHub Issues](https://github.com/yarivha/OpenSCM/issues)
 
 ---
