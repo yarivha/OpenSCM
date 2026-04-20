@@ -22,6 +22,15 @@ use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data, normalize_status};
 
 
+
+fn truncate_text(s: &str, max: usize) -> String {
+    if s.chars().count() > max {
+        format!("{}...", &s.chars().take(max).collect::<String>())
+    } else {
+        s.to_string()
+    }
+}
+
 // ============================================================
 // HANDLERS
 // ============================================================
@@ -1202,7 +1211,7 @@ pub async fn policies_report_download(
             };
 
             if let Err(e) = rules_table.push_row(vec![
-                Box::new(elements::Text::new(&res.test_name)),
+                Box::new(elements::Paragraph::new(truncate_text(&res.test_name, 80))),
                 Box::new(
                     elements::Text::new(status_text)
                         .styled(style::Style::new().with_color(status_color).bold()),
