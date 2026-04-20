@@ -355,16 +355,6 @@ pub async fn reports_download(
         }
     };
 
-    // Deserialize JSON fields
-    let tests_metadata: Vec<TestMeta> = match serde_json::from_str(
-        report.tests_metadata.as_deref().unwrap_or("[]"),
-    ) {
-        Ok(m) => m,
-        Err(e) => {
-            error!(error = ?e, report_id = %id, "Failed to deserialize tests metadata for download");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
 
     let system_reports: Vec<SystemReport> = match serde_json::from_str(
         report.report_results.as_deref().unwrap_or("[]"),
@@ -448,14 +438,16 @@ pub async fn reports_download(
     doc.push(elements::Break::new(1.0));
 
     // Report details table
-    doc.push(elements::Text::new("Report Details").styled(style::Style::new().bold()));
+    doc.push(elements::Text::new("Report Details")
+        .styled(style::Style::new().bold().with_font_size(14)));
+    doc.push(elements::Break::new(0.5));
     let mut details_table = elements::TableLayout::new(vec![1, 3]);
     details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Policy Name")),
-        Box::new(elements::Text::new(format!(
-            ": {} v{}",
+        Box::new(elements::Text::new("Policy Name").styled(style::Style::new().bold())),
+        Box::new(elements::Paragraph::new(format!(
+            " {} v{}",
             report.policy_name,
             report.policy_version.as_deref().unwrap_or(""),
         ))),
@@ -464,9 +456,9 @@ pub async fn reports_download(
     }
 
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Description")),
-        Box::new(elements::Text::new(format!(
-            ": {}",
+        Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
+        Box::new(elements::Paragraph::new(format!(
+            " {}",
             report.policy_description.as_deref().unwrap_or(""),
         ))),
     ]) {
@@ -491,12 +483,12 @@ pub async fn reports_download(
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Compliance Status")),
+            Box::new(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
             Box::new(
                 elements::Text::new(if system.is_passed {
-                    ": Compliant"
+                    " Compliant"
                 } else {
-                    ": Non-Compliant"
+                    " Non-Compliant"
                 })
                 .styled(
                     style::Style::new()
@@ -513,15 +505,15 @@ pub async fn reports_download(
         }
 
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Violation Rule Count")),
-            Box::new(elements::Text::new(format!(": Critical - {}", violation_count))),
+            Box::new(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
+            Box::new(elements::Text::new(format!(" Critical - {}", violation_count))),
         ]) {
             error!("Failed to add violation count row to PDF: {}", e);
         }
 
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Compliant Rule Count")),
-            Box::new(elements::Text::new(format!(": {}", compliant_count))),
+            Box::new(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
+            Box::new(elements::Text::new(format!(" {}", compliant_count))),
         ]) {
             error!("Failed to add compliant count row to PDF: {}", e);
         }
@@ -532,26 +524,20 @@ pub async fn reports_download(
         // Rules breakdown
         doc.push(
             elements::Text::new("Audit Rules Detailed Breakdown")
-                .styled(style::Style::new().bold()),
+                .styled(style::Style::new().bold().with_font_size(14)),   
         );
-        let mut rules_table = elements::TableLayout::new(vec![2, 1, 4]);
+        doc.push(elements::Break::new(0.5));
+        let mut rules_table = elements::TableLayout::new(vec![4, 1]);
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
         if let Err(e) = rules_table.push_row(vec![
             Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
             Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
         ]) {
             error!("Failed to add rules table header to PDF: {}", e);
         }
 
         for res in &system.results {
-            let desc = tests_metadata
-                .iter()
-                .find(|t| t.name == res.test_name)
-                .map(|t| t.description.as_str())
-                .unwrap_or("No description provided");
-
             let is_pass = res.status == "PASS";
             let (status_text, status_color) = if is_pass {
                 ("PASS", style::Color::Rgb(0, 128, 0))
@@ -560,12 +546,11 @@ pub async fn reports_download(
             };
 
             if let Err(e) = rules_table.push_row(vec![
-                Box::new(elements::Text::new(&res.test_name)),
+                Box::new(elements::Paragraph::new(&res.test_name)),
                 Box::new(
                     elements::Text::new(status_text)
                         .styled(style::Style::new().with_color(status_color).bold()),
                 ),
-                Box::new(elements::Text::new(desc)),
             ]) {
                 error!("Failed to add rule row to PDF: {}", e);
             }
