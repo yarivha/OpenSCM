@@ -336,12 +336,8 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 }
             }
 
-            // --- TASK B: COMPLIANCE RECALCULATION (every 60s) ---
-            if let Err(e) = recalculate_current_compliance(&loop_pool).await {
-                error!("Compliance recalculation failed: {}", e);
-            }
 
-            // --- TASK C: HOURLY COMPLIANCE SNAPSHOT (for trend graphs) ---
+            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT (for trend graphs) ---
             if now.minute() == 0 && current_hour != last_snapshot_hour {
                 info!("Running hourly compliance aggregation snapshot...");
                 if let Err(e) = record_compliance_history(&loop_pool).await {
