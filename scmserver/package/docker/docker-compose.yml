@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   openscm:
-    image: yarivh/openscm:latest
+    image: openscm/scmserver:latest
     container_name: openscm
     restart: unless-stopped
     ports:
