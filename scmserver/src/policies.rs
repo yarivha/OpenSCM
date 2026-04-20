@@ -1116,7 +1116,7 @@ pub async fn policies_report_download(
     details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
 
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Policy Name")),
+        Box::new(elements::Text::new("Policy Name")).styled(style::Style::new().bold()),
         Box::new(elements::Paragraph::new(format!(
             " {} v{}",
             report_data.policy_name, report_data.version
@@ -1126,7 +1126,7 @@ pub async fn policies_report_download(
     }
 
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Description")),
+        Box::new(elements::Text::new("Description")).styled(style::Style::new().bold()),
         Box::new(elements::Paragraph::new(format!(" {}", report_data.description))),
     ]) {
         error!("Failed to add description row to PDF: {}", e);
@@ -1153,9 +1153,9 @@ pub async fn policies_report_download(
             Box::new(elements::Text::new("Compliance Status")),
             Box::new(
                 elements::Text::new(if system.is_passed {
-                    ": Compliant"
+                    " Compliant"
                 } else {
-                    ": Non-Compliant"
+                    " Non-Compliant"
                 })
                 .styled(
                     style::Style::new()
@@ -1173,14 +1173,14 @@ pub async fn policies_report_download(
 
         if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Violation Rule Count")),
-            Box::new(elements::Text::new(format!(": Critical - {}", violation_count))),
+            Box::new(elements::Text::new(format!(" Critical - {}", violation_count))),
         ]) {
             error!("Failed to add violation count row to PDF: {}", e);
         }
 
         if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Compliant Rule Count")),
-            Box::new(elements::Text::new(format!(": {}", compliant_count))),
+            Box::new(elements::Text::new(format!(" {}", compliant_count))),
         ]) {
             error!("Failed to add compliant count row to PDF: {}", e);
         }
@@ -1193,6 +1193,7 @@ pub async fn policies_report_download(
             elements::Text::new("Audit Rules Detailed Breakdown")
                 .styled(style::Style::new().bold()),
         );
+        doc.push(elements::Break::new(0.5));
         let mut rules_table = elements::TableLayout::new(vec![4, 1]);
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
 
@@ -1212,7 +1213,7 @@ pub async fn policies_report_download(
             };
 
             if let Err(e) = rules_table.push_row(vec![
-                Box::new(elements::Paragraph::new(truncate_text(&res.test_name, 80))),
+                Box::new(elements::Paragraph::new(format!(" {}", res.test_name))),
                 Box::new(
                     elements::Text::new(status_text)
                         .styled(style::Style::new().with_color(status_color).bold()),
