@@ -1,11 +1,11 @@
 # OpenSCM — Open Security Compliance Manager
 
-![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)
-![Client License](https://img.shields.io/badge/client-Apache%202.0-green)
-![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange)
-![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows-lightgrey)
-![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM%20|%20RISC--V-blue)
-![Docker](https://img.shields.io/badge/docker-openscm%2Fscmserver-blue)
+[![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](https://fsl.software/)
+[![Client License](https://img.shields.io/badge/client-Apache%202.0-green)](https://www.apache.org/licenses/LICENSE-2.0)
+[![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange)](https://rust-lang.org/)
+[![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows-lightgrey)]
+[![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM%20|%20RISC--V-blue)]
+[![Docker](https://img.shields.io/badge/docker-openscm%2Fscmserver-blue)](https://hub.docker.com/r/openscm/scmserver)
 
 A self-hosted, privacy-first security compliance platform built in Rust.
 
