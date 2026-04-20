@@ -1111,13 +1111,14 @@ pub async fn policies_report_download(
 
     // Report details table
     doc.push(elements::Text::new("Report Details").styled(style::Style::new().bold()));
+    doc.push(elements::Break::new(0.5));
     let mut details_table = elements::TableLayout::new(vec![1, 3]);
     details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
 
     if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Policy Name")),
-        Box::new(elements::Text::new(format!(
-            ": {} v{}",
+        Box::new(elements::Paragraph::new(format!(
+            " {} v{}",
             report_data.policy_name, report_data.version
         ))),
     ]) {
@@ -1126,7 +1127,7 @@ pub async fn policies_report_download(
 
     if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Description")),
-        Box::new(elements::Text::new(format!(": {}", report_data.description))),
+        Box::new(elements::Paragraph::new(format!(" {}", report_data.description))),
     ]) {
         error!("Failed to add description row to PDF: {}", e);
     }
