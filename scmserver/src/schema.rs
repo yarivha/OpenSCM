@@ -38,6 +38,18 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE TABLE settings (
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            key TEXT NOT NULL,
+            value TEXT NOT NULL,
+            description TEXT,
+            PRIMARY KEY (tenant_id, key),
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
 
 
     // Create notify table
@@ -386,6 +398,20 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
    
+
+    // Inset Default Settings
+
+    sqlx::query(
+        "INSERT OR IGNORE INTO settings (tenant_id, key, value, description) VALUES
+        ('default', 'schema_version', '1', 'Current database schema version'),
+        ('default', 'offline_threshold', '600', 'Seconds without activity before system is marked offline'),
+        ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
+        ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status')"
+        )
+        .execute(pool)
+        .await?;
+
+
 
     // --------------------
     // Elements
