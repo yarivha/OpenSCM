@@ -21,8 +21,11 @@ use winreg::RegKey;
 // CONSTANTS
 // ============================================================
 
-#[cfg(not(target_os = "windows"))]
+#[cfg(target_os = "linux")]
 const CONFIG_PATH: &str = "/etc/openscm/scmclient.config";
+
+#[cfg(target_os = "freebsd")]
+const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
 
 
 // ============================================================
@@ -62,10 +65,14 @@ impl Default for Config {
     fn default() -> Self {
         let base_dir = if cfg!(target_os = "windows") {
             PathBuf::from(r"C:\ProgramData\OpenSCM\Client")
+        } else if cfg!(target_os = "freebsd") {
+            PathBuf::from("/usr/local/etc/openscm")
+        } else if cfg!(target_os = "linux") {
+            PathBuf::from("/etc/openscm")
         } else {
             PathBuf::from("/etc/openscm")
-        };
-
+    };
+       
         Self {
             server: ServerConfig {
                 url: "http://localhost:8000".to_string(),
@@ -81,6 +88,7 @@ impl Default for Config {
         }
     }
 }
+
 
 
 // ============================================================
