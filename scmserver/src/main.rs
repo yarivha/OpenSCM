@@ -10,6 +10,7 @@ mod tests;
 mod policies;
 mod reports;
 mod users;
+mod settings;
 mod scheduler;
 
 use tera::Tera;
@@ -66,6 +67,11 @@ use crate::reports::{
 use crate::users::{
     users, users_add, users_add_save,
     users_delete, users_edit, users_edit_save, change_password,
+};
+
+// Settings
+use crate::settings::{
+    settings, settings_save
 };
 
 // Client (API endpoints)
@@ -275,6 +281,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .route("/reports/view/{id}",get(reports_view))
         .route("/reports/delete/{id}",get(reports_delete))
         .route("/reports/download/{id}",get(reports_download))
+        .route("/settings", get(settings))
+        .route("/settings/save", post(settings_save))
         .route("/send", post(send))
         .route("/result", post(receive_result))
         .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {
