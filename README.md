@@ -3,8 +3,8 @@
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](https://fsl.software/)
 [![Client License](https://img.shields.io/badge/client-Apache%202.0-green)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange)](https://rust-lang.org/)
-![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows-lightgrey)
-![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM%20|%20RISC--V-blue)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows%20|%20FreeBSD-lightgrey)
+![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM64%20|%20RISC--V%20|%20PowerPC64-blue)
 [![Docker](https://img.shields.io/badge/docker-openscm%2Fscmserver-blue)](https://hub.docker.com/r/openscm/scmserver)
 
 A self-hosted, privacy-first security compliance platform built in Rust.
@@ -32,7 +32,7 @@ If you find this project helpful, please consider sponsoring us to support ongoi
 - **Mutual Ed25519 Signing** — every payload is cryptographically signed in both directions
 - **UI-Driven Policy Builder** — define compliance tests visually, no scripting required
 - **Evidence-Grade Reports** — archive compliance results as formal audit evidence (PDF)
-- **Universal Platform Support** — Linux and Windows on x86, ARM, and RISC-V (macOS and FreeBSD coming soon)
+- **Universal Platform Support** — Linux , Windows and FreeBSD on x86, ARM, RISC-V and PowerPC (macOS coming soon)
 - **Single Binary Deployment** — server ships with all assets embedded, no setup required
 - **Scheduled Scanning** — automate compliance scans on any schedule
 - **Role-Based Access Control** — Administrator, Editor, Runner, Viewer
@@ -84,7 +84,12 @@ The agent can be configured to run as a Windows Service during installation.
 
 ### 😈 FreeBSD / 🍎 macOS
 
-Coming soon — follow us on [GitHub](https://github.com/yarivha/openscm) for updates.
+Download the latest installer from **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
+and run the following:
+
+```bash
+pkg add scmclient-<version>.pkg
+```
 
 ### 🐳 Docker
 
@@ -97,6 +102,7 @@ docker run -d \
   -v openscm_data:/var/lib/openscm \
   openscm/scmserver:latest
 ```
+
 
 
 ---
