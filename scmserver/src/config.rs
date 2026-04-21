@@ -7,7 +7,6 @@ use std::error::Error;
 use tracing::{info, warn, error};
 use base64::{engine::general_purpose, Engine as _};
 
-
 // Unix specific imports
 #[cfg(not(target_os = "windows"))]
 use std::io::Write;
@@ -21,8 +20,11 @@ use winreg::enums::*;
 use winreg::RegKey;
 
 // --- Constants ---
-#[cfg(not(windows))]
+#[cfg(target_os = "linux")]
 const CONFIG_PATH: &str = "/etc/openscm/scmserver.config";
+
+#[cfg(target_os = "freebsd")]
+const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmserver.config";
 
 // --- Structs ---
 
@@ -53,17 +55,21 @@ pub struct KeyPair {
 
 // --- Default ---
 
-
 impl Default for Config {
     fn default() -> Self {
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         let base_config = PathBuf::from(r"C:\ProgramData\OpenSCM\Server");
-        #[cfg(windows)]
+        #[cfg(target_os = "windows")]
         let base_data = PathBuf::from(r"C:\ProgramData\OpenSCM\Server");
 
-        #[cfg(not(windows))]
+        #[cfg(target_os = "freebsd")]
+        let base_config = PathBuf::from("/usr/local/etc/openscm");
+        #[cfg(target_os = "freebsd")]
+        let base_data = PathBuf::from("/var/db/openscm");
+
+        #[cfg(target_os = "linux")]
         let base_config = PathBuf::from("/etc/openscm");
-        #[cfg(not(windows))]
+        #[cfg(target_os = "linux")]
         let base_data = PathBuf::from("/var/lib/openscm");
 
         Self {
@@ -82,7 +88,6 @@ impl Default for Config {
         }
     }
 }
-
 
 // --- Key Generation ---
 
@@ -136,10 +141,47 @@ pub fn generate_keys_if_missing<P: AsRef<Path>>(
     Ok(())
 }
 
+// --- Directory Setup ---
+
+fn create_required_directories(config: &Config) {
+    #[cfg(target_os = "windows")]
+    let dirs: Vec<&str> = vec![
+        r"C:\ProgramData\OpenSCM\Server\keys",
+        r"C:\ProgramData\OpenSCM\Server\logs",
+    ];
+
+    #[cfg(target_os = "freebsd")]
+    let dirs: Vec<&str> = vec![
+        "/usr/local/etc/openscm/keys",
+        "/var/log/openscm",
+        "/var/db/openscm",
+    ];
+
+    #[cfg(target_os = "linux")]
+    let dirs: Vec<&str> = vec![
+        "/etc/openscm/keys",
+        "/var/log/openscm",
+        "/var/lib/openscm",
+    ];
+
+    for dir in dirs {
+        if let Err(e) = fs::create_dir_all(dir) {
+            warn!("Could not create directory {}: {}", dir, e);
+        }
+    }
+
+    // Also create database directory from config path
+    if let Some(parent) = Path::new(&config.database.path).parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            warn!("Could not create database directory {:?}: {}", parent, e);
+        }
+    }
+}
+
 // --- Validation ---
 
 fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
-    // 1. Port Validation — hard error on invalid port
+    // 1. Port Validation
     if let Some(p) = &config.server.port {
         if p.parse::<u16>().is_err() {
             error!("Invalid port in config: '{}'. Please set a valid port (1-65535).", p);
@@ -149,12 +191,19 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // 2. Setup Key Directory
+    // 2. Create all required directories
+    create_required_directories(config);
+
+    // 3. Setup Key Directory
     let key_dir = config.key.key_path.as_ref()
         .map(PathBuf::from)
         .unwrap_or_else(|| {
-            #[cfg(windows)] { PathBuf::from(r"C:\ProgramData\OpenSCM\Server\keys") }
-            #[cfg(not(windows))] { PathBuf::from("/etc/openscm/keys") }
+            #[cfg(target_os = "windows")]
+            { PathBuf::from(r"C:\ProgramData\OpenSCM\Server\keys") }
+            #[cfg(target_os = "freebsd")]
+            { PathBuf::from("/usr/local/etc/openscm/keys") }
+            #[cfg(target_os = "linux")]
+            { PathBuf::from("/etc/openscm/keys") }
         });
 
     if !key_dir.exists() {
@@ -172,7 +221,6 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
 // --- Config Implementation ---
 
 impl Config {
-    /// The entry point for main.rs. It automatically finds the config.
     pub fn load() -> Result<Self, Box<dyn Error>> {
         #[cfg(target_os = "windows")]
         {
@@ -200,7 +248,6 @@ impl Config {
         let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
         let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
 
-        // Read each value explicitly with defaults
         let port     = key.get_value("Port").unwrap_or_else(|_| "8000".to_string());
         let loglevel = key.get_value("LogLevel").unwrap_or_else(|_| "info".to_string());
         let db       = key.get_value("DB").unwrap_or_else(|_| r"C:\ProgramData\OpenSCM\Server\scm.db".to_string());
@@ -208,7 +255,6 @@ impl Config {
         let pub_key  = key.get_value("PubKeyFile").unwrap_or_else(|_| "scmserver.pub".to_string());
         let priv_key = key.get_value("PrivKeyFile").unwrap_or_else(|_| "scmserver.key".to_string());
 
-        // Check if any registry values were missing
         let needs_repair = [
             key.get_value::<String, _>("Port").is_err(),
             key.get_value::<String, _>("LogLevel").is_err(),
@@ -242,7 +288,6 @@ impl Config {
         Ok(config)
     }
 
-    /// Persists current settings to the correct OS location
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
         #[cfg(target_os = "windows")]
         {
