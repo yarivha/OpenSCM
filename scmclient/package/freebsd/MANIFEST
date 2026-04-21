@@ -1,0 +1,70 @@
+name: "${APP_NAME}"
+version: "${VERSION}"
+release: "${RELEASE}"
+origin: "sysutils/${APP_NAME}"
+comment: "OpenSCM Agent"
+desc: "Security Compliance Monitoring agent"
+maintainer: "yariv@openscm.io"
+website: "https://openscm.io"
+prefix: "/usr/local"
+categories: [sysutils]
+licenselogic: "single"
+licenses: [Apache-2.0]
+arch: "${ARCH}"
+
+files: {
+    /usr/local/bin/${APP_NAME}: "",
+    /usr/local/etc/rc.d/${APP_NAME}: ""
+}
+
+scripts: {
+    post-install: |
+        #!/bin/sh
+        CONFIG_DIR="/usr/local/etc/openscm"
+        KEYS_DIR="/usr/local/etc/openscm/keys"
+        LOG_DIR="/var/log/openscm"
+
+        # Create directories
+        mkdir -p "\$CONFIG_DIR"
+        mkdir -p "\$KEYS_DIR"
+        mkdir -p "\$LOG_DIR"
+
+        chmod 755 "\$CONFIG_DIR"
+        chmod 700 "\$KEYS_DIR"
+        chmod 755 "\$LOG_DIR"
+
+        # Create a sample config if one doesn't exist
+        if [ ! -f "\$CONFIG_DIR/${APP_NAME}.config" ]; then
+            echo 'url = "https://your-openscm-server.com"' > "\$CONFIG_DIR/${APP_NAME}.config.sample"
+        fi
+
+        # Enable service
+        sysrc ${APP_NAME}_enable=YES
+
+        echo "============================================================"
+        echo "       ${APP_NAME} INSTALLATION COMPLETE"
+        echo "============================================================"
+        echo "  Config : \$CONFIG_DIR/${APP_NAME}.config"
+        echo "  Keys   : \$KEYS_DIR/"
+        echo "  Logs   : \$LOG_DIR/"
+        echo ""
+        echo "  Edit the config and then start the service:"
+        echo "    service ${APP_NAME} start"
+        echo "============================================================"
+
+    pre-deinstall: |
+        #!/bin/sh
+        service ${APP_NAME} stop >/dev/null 2>&1 || true
+        sysrc -x ${APP_NAME}_enable >/dev/null 2>&1 || true
+
+    post-deinstall: |
+        #!/bin/sh
+        # \$1 is the package name
+        if [ "\$1" = "${APP_NAME}" ]; then
+            CONFIG_DIR="/usr/local/etc/openscm"
+            LOG_DIR="/var/log/openscm"
+            # We only remove logs/config if you want a "purge" behavior
+            rm -rf "\$LOG_DIR"
+            # Optional: rm -f "\$CONFIG_DIR/${APP_NAME}.config"
+        fi
+}
