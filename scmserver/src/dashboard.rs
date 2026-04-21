@@ -64,6 +64,22 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
         .unwrap_or_else(|e| { error!("Failed to fetch reports count: {}", e); 0 });
 
 
+    let compliance_sat: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_sat'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(80);
+
+    let compliance_marginal: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_marginal'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(60);
+
     
     // 2. Get Critical Policy Failures
     let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
@@ -143,6 +159,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     context.insert("reports_count", &reports_count);
     context.insert("top_failed_systems", &top_failed_systems); 
     context.insert("top_failed_policies", &top_failed_policies);
+    context.insert("compliance_sat", &compliance_sat);
+    context.insert("compliance_marginal", &compliance_marginal);
 
     // Graph Data
     context.insert("trend_labels", &labels);

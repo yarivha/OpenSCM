@@ -139,10 +139,10 @@
     			  {% else %}
       			    <div class="progress progress-xxs mb-1">
         		      <div class="progress-bar
-          			{% if pol.compliance >= 80 %}bg-success
-          			{% elif pol.compliance >= 50 %}bg-warning
-          			{% else %}bg-danger{% endif %}"
-          			  style="width: {{ pol.compliance }}%">
+				{% if pol.compliance >= compliance_sat %}bg-success
+  				{% elif pol.compliance >= compliance_marginal %}bg-warning
+  				{% else %}bg-danger{% endif %}"
+  				style="width: {{ pol.compliance }}%">
         		      </div>
       			    </div>
       			    <small class="font-weight-bold">{{ pol.compliance | round(precision=2) }}%</small>
@@ -192,8 +192,13 @@
     			  <small class="text-muted">Not Scanned</small>
 			{% else %}
     			  <div class="progress progress-xxs mt-1 mb-1" style="width: 60px; margin: 0 auto;">
-        		    <div class="progress-bar {% if sys.compliance >= 80 %}bg-success{% elif sys.compliance >= 50 %}bg-warning{% else %}bg-danger{% endif %}" style="width: {{ sys.compliance }}%"></div>
-    			  </div>
+        		    <div class="progress-bar 
+				{% if sys.compliance >= compliance_sat %}bg-success
+  				{% elif sys.compliance >= compliance_marginal %}bg-warning
+  				{% else %}bg-danger{% endif %}"
+  				style="width: {{ sys.compliance }}%">				    
+    			    </div>
+			  </div>
     			  <small class="font-weight-bold">{{ sys.compliance | round(precision=2) }}%</small>
 			{% endif %}
                       </td>
