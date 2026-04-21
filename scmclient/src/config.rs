@@ -63,16 +63,15 @@ pub struct KeyPair {
 
 impl Default for Config {
     fn default() -> Self {
-        let base_dir = if cfg!(target_os = "windows") {
-            PathBuf::from(r"C:\ProgramData\OpenSCM\Client")
-        } else if cfg!(target_os = "freebsd") {
-            PathBuf::from("/usr/local/etc/openscm")
-        } else if cfg!(target_os = "linux") {
-            PathBuf::from("/etc/openscm")
-        } else {
-            PathBuf::from("/etc/openscm")
-    };
-       
+        #[cfg(target_os = "windows")]
+        let base_dir = PathBuf::from(r"C:\ProgramData\OpenSCM\Client");
+
+        #[cfg(target_os = "freebsd")]
+        let base_dir = PathBuf::from("/usr/local/etc/openscm");
+
+        #[cfg(target_os = "linux")]
+        let base_dir = PathBuf::from("/etc/openscm");
+
         Self {
             server: ServerConfig {
                 url: "http://localhost:8000".to_string(),
@@ -89,6 +88,43 @@ impl Default for Config {
     }
 }
 
+
+// ============================================================
+// DIRECTORY SETUP
+// ============================================================
+
+fn create_required_directories(config: &Config) {
+    #[cfg(target_os = "windows")]
+    let dirs: Vec<&str> = vec![
+        r"C:\ProgramData\OpenSCM\Client\keys",
+        r"C:\ProgramData\OpenSCM\Client\logs",
+    ];
+
+    #[cfg(target_os = "freebsd")]
+    let dirs: Vec<&str> = vec![
+        "/usr/local/etc/openscm/keys",
+        "/var/log/openscm",
+    ];
+
+    #[cfg(target_os = "linux")]
+    let dirs: Vec<&str> = vec![
+        "/etc/openscm/keys",
+        "/var/log/openscm",
+    ];
+
+    for dir in dirs {
+        if let Err(e) = fs::create_dir_all(dir) {
+            warn!("Could not create directory {}: {}", dir, e);
+        }
+    }
+
+    // Also create key directory from config path
+    if let Some(key_path) = &config.key.key_path {
+        if let Err(e) = fs::create_dir_all(key_path) {
+            warn!("Could not create key directory {}: {}", key_path, e);
+        }
+    }
+}
 
 
 // ============================================================
@@ -142,7 +178,10 @@ pub fn get_config() -> Result<Config, Box<dyn Error>> {
                 "Config file not found at '{}'. Bootstrapping defaults.",
                 CONFIG_PATH
             );
+            let default_config = Config::default();
+            create_required_directories(&default_config);
             bootstrap_default_config(&path)?;
+            return load_from_toml(&path);
         }
         load_from_toml(&path)
     }
@@ -168,7 +207,6 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
             .to_string()
     };
 
-    // Check which values are missing for repair detection
     let needs_repair = [
         key.get_value::<String, _>("ServerURL").is_err(),
         key.get_value::<String, _>("TenantId").is_err(),
@@ -181,7 +219,6 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
 
     let url = read_val("ServerURL", "http://localhost:8000");
 
-    // Validate that URL is not empty
     if url.is_empty() {
         error!("Registry: ServerURL is empty. Please set a valid server URL.");
         return Err("ServerURL is required but empty in registry".into());
@@ -206,11 +243,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         config.save()?;
     }
 
-    // Ensure key directory exists
-    if let Some(path) = &config.key.key_path {
-        fs::create_dir_all(path)?;
-    }
-
+    create_required_directories(&config);
     Ok(config)
 }
 
@@ -234,7 +267,6 @@ fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
     let content = fs::read_to_string(path)?;
     let config: Config = toml::from_str(&content)?;
 
-    // Validate mandatory fields
     if config.server.url.trim().is_empty() {
         error!("Configuration error: 'server.url' is empty in '{}'.", path.display());
         return Err("server.url is required but empty in config file".into());
@@ -245,13 +277,6 @@ fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
         return Err("server.tenant_id is required but empty in config file".into());
     }
 
-    // Ensure key directory exists
-    if let Some(key_path) = &config.key.key_path {
-        fs::create_dir_all(key_path).map_err(|e| {
-            error!("Failed to create key directory '{}': {}", key_path, e);
-            e
-        })?;
-    }
-
+    create_required_directories(&config);
     Ok(config)
 }
