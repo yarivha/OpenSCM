@@ -10,9 +10,16 @@ name="scmclient"
 rcvar="scmclient_enable"
 command="/usr/local/bin/scmclient"
 pidfile="/var/run/${name}.pid"
+logfile="/var/log/openscm/scmclient.log"
+
+start_cmd="${name}_start"
+
+scmclient_start()
+{
+    /usr/sbin/daemon -p ${pidfile} -o ${logfile} -f ${command}
+}
 
 load_rc_config $name
 : ${scmclient_enable:=NO}
 
 run_rc_command "$1"
-

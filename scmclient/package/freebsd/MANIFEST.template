@@ -1,0 +1,24 @@
+{
+  "name": "${APP_NAME}",
+  "origin": "sysutils/${APP_NAME}",
+  "version": "${VERSION}",
+  "comment": "OpenSCM Agent",
+  "maintainer": "yariv@openscm.io",
+  "www": "https://openscm.io",
+  "abi": "FreeBSD:*:amd64",
+  "arch": "freebsd:*:x86:64",
+  "prefix": "/usr/local",
+  "flatsize": ${FLAT_SIZE},
+  "licenselogic": "single",
+  "licenses": ["Apache-2.0"],
+  "desc": "Security Compliance Monitoring agent",
+  "files": {
+    "/usr/local/bin/${APP_NAME}": {"sum":"-","uname":"root","gname":"wheel","perm":"0555","fflags":0,"mtime":${BIN_MTIME}},
+    "/usr/local/etc/rc.d/${APP_NAME}": {"sum":"-","uname":"root","gname":"wheel","perm":"0555","fflags":0,"mtime":${RC_MTIME}}
+  },
+  "scripts": {
+    "post-install": "#!/bin/sh\nCONFIG_DIR=\"/usr/local/etc/openscm\"\nKEYS_DIR=\"/usr/local/etc/openscm/keys\"\nLOG_DIR=\"/var/log/openscm\"\nmkdir -p \"$CONFIG_DIR\"\nmkdir -p \"$KEYS_DIR\"\nmkdir -p \"$LOG_DIR\"\nchmod 755 \"$CONFIG_DIR\"\nchmod 700 \"$KEYS_DIR\"\nchmod 755 \"$LOG_DIR\"\nsysrc scmclient_enable=YES\nservice scmclient start\necho \"============================================================\"\necho \"       scmclient INSTALLATION COMPLETE\"\necho \"============================================================\"\necho \"  Config : $CONFIG_DIR/scmclient.config\"\necho \"  Keys   : $KEYS_DIR/\"\necho \"  Logs   : $LOG_DIR/\"\necho \"\"\necho \"  Edit the config to point to your OpenSCM server then\"\necho \"  restart: service scmclient restart\"\necho \"============================================================\"\n",
+    "pre-deinstall": "#!/bin/sh\nservice scmclient stop >/dev/null 2>&1 || true\nsysrc -x scmclient_enable >/dev/null 2>&1 || true\n",
+    "post-deinstall": "#!/bin/sh\nrm -rf /var/log/openscm\n"
+  }
+}
