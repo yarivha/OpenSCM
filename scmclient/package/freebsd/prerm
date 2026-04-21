@@ -1,9 +1,0 @@
-#!/bin/sh
-
-echo "Stopping scmclient service..."
-if service scmclient status >/dev/null 2>&1; then
-    service scmclient stop
-fi
-
-exit 0
-
