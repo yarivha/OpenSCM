@@ -237,5 +237,30 @@
     
     table.buttons().container().appendTo('#systems_table_wrapper .col-md-6:eq(0)');
   });
+
+
+$(document).ready(function() {
+    var offlineThreshold = {{ offline_threshold }};
+
+    $('#systems_table tbody tr').each(function() {
+        var lastSeenCell = $(this).find('td.datetime');
+        var lastSeenUtc = lastSeenCell.data('utc');
+
+        if (!lastSeenUtc) return;
+
+        var lastSeenTime = new Date(lastSeenUtc).getTime();
+        var now = new Date().getTime();
+        var diffSeconds = (now - lastSeenTime) / 1000;
+
+        if (diffSeconds > offlineThreshold) {
+            $(this).addClass('text-muted');
+            $(this).css('opacity', '0.5');
+            lastSeenCell.html(
+                lastSeenCell.text() + 
+                ' <span class="badge badge-secondary ml-1">Offline</span>'
+            );
+        }
+    });
+});
 </script>
 {% endblock %}

@@ -129,7 +129,19 @@ pub async fn systems(
         })
         .collect();
 
+
+    let offline_threshold: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'offline_threshold'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(600);
+
+
     let mut context = Context::new();
+    context.insert("offline_threshold", &offline_threshold);
+    
     if let Some(error_message) = params.get("error_message") {
         context.insert("error_message", error_message);
     }
