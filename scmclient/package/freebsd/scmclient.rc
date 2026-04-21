@@ -1,24 +1,18 @@
 #!/bin/sh
-
+#
 # PROVIDE: scmclient
-# REQUIRE: LOGIN DAEMON NETWORKING
+# REQUIRE: NETWORKING
 # KEYWORD: shutdown
 
 . /etc/rc.subr
 
 name="scmclient"
 rcvar="scmclient_enable"
-
-# הגדרת הפקודה להרצה (הנתיב שהגדרת ב-dst ב-yaml)
 command="/usr/local/bin/scmclient"
-
-# אם האפליקציה צריכה דגלים (Flags) בהרצה, אפשר להוסיף כאן
-scmclient_args="--daemon"
-
-# פקודה להרצה ברקע (כי ב-FreeBSD אין תמיד systemd שינהל daemonize)
 pidfile="/var/run/${name}.pid"
-command_args="-p ${pidfile} ${scmclient_args}"
 
 load_rc_config $name
+: ${scmclient_enable:=NO}
+
 run_rc_command "$1"
 
