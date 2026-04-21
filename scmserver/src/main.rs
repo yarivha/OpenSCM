@@ -133,6 +133,35 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .init();
 
     info!("Starting OpenSCM Server...");
+    info!("Checking Directories existance...");
+    // Create required directories
+    {
+        #[cfg(target_os = "windows")]
+        let dirs = vec![
+            r"C:\ProgramData\OpenSCM\Server\keys",
+            r"C:\ProgramData\OpenSCM\Server\logs",
+        ];
+
+        #[cfg(target_os = "freebsd")]
+        let dirs = vec![
+            "/usr/local/etc/openscm/keys",
+            "/var/log/openscm",
+            "/var/lib/openscm",
+        ];
+
+        #[cfg(target_os = "linux")]
+        let dirs = vec![
+            "/etc/openscm/keys",
+            "/var/log/openscm",
+            "/var/lib/openscm",
+        ];
+
+        for dir in dirs {
+            if let Err(e) = std::fs::create_dir_all(dir) {
+                warn!("Could not create directory {}: {}", dir, e);
+            }
+        }
+    }
 
     // Load Config
     let config = config::Config::load().map_err(|e| {
