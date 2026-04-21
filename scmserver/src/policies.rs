@@ -34,10 +34,30 @@ pub async fn policies(
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
+    // Check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
 
+    // Get applicable settings 
+    let compliance_sat: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_sat'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(80);
+
+    let compliance_marginal: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_marginal'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(60);
+
+
+    // Get policies information
     let rows = match sqlx::query(r#"
         SELECT
             p.id AS policy_id,
@@ -103,6 +123,8 @@ pub async fn policies(
         })
         .collect();
 
+
+    // Create context to send HTML
     let mut context = Context::new();
     if let Some(msg) = query.error_message {
         context.insert("error_message", &msg);
@@ -111,6 +133,8 @@ pub async fn policies(
         context.insert("success_message", &msg);
     }
     context.insert("policies", &policies);
+    context.insert("compliance_sat", &compliance_sat);
+    context.insert("compliance_marginal", &compliance_marginal);
     render_template(&tera, Some(&pool), "policies.html", context, Some(auth))
         .await
         .into_response()

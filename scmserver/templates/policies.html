@@ -116,11 +116,11 @@
                     <div class="col-5 text-center d-flex align-items-center justify-content-center cert-icon-col">
                       <a href="/policies/report/{{ policy.policy_id }}" class="hover-zoom">
                         <i class="fas fa-certificate fa-4x 
-                          {% if policy.compliance == -1.0 %} text-secondary opacity-50
-                          {% elif policy.compliance < 50 %} text-danger
-                          {% elif policy.compliance < 80 %} text-warning
-                          {% else %} text-success {% endif %}">
-                        </i>
+  			  {% if policy.compliance == -1.0 %} text-secondary opacity-50
+  			  {% elif policy.compliance < compliance_marginal %} text-danger
+  			  {% elif policy.compliance < compliance_sat %} text-warning
+  			  {% else %} text-success {% endif %}">
+			</i>
                       </a>
                     </div>
                   </div>
