@@ -39,7 +39,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     sqlx::query(
-        "CREATE TABLE settings (
+        "CREATE TABLE IF NOT EXISTS settings (
             tenant_id TEXT NOT NULL DEFAULT 'default',
             key TEXT NOT NULL,
             value TEXT NOT NULL,
