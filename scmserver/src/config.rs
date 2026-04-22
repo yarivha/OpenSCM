@@ -6,33 +6,50 @@ use std::path::{Path, PathBuf};
 use std::error::Error;
 use tracing::{info, warn, error};
 use base64::{engine::general_purpose, Engine as _};
+use cfg_if::cfg_if;
 
-// Unix specific imports
-#[cfg(not(target_os = "windows"))]
-use std::io::Write;
-#[cfg(not(target_os = "windows"))]
-use toml;
-
-// Windows-specific imports
-#[cfg(target_os = "windows")]
-use winreg::enums::*;
-#[cfg(target_os = "windows")]
-use winreg::RegKey;
+// load OS specific modules
+cfg_if! {
+    if #[cfg(not(target_os = "windows"))] {
+        use std::io::Write;
+        use toml;
+    } else if #[cfg(target_os = "windows")] {
+        use winreg::enums::*;
+        use winreg::RegKey;
+    }
+}
 
 // --- Constants ---
-#[cfg(target_os = "linux")]
-const CONFIG_PATH: &str = "/etc/openscm/scmserver.config";
+cfg_if! {
+    if #[cfg(target_os = "linux")] {
+        const CONFIG_PATH: &str = "/etc/openscm/scmserver.config";
+        const DB_PATH: &str = "/var/lib/openscm/scm.db";
+        const PRIVATE_KEY_PATH: &str = "/etc/openscm/keys/scmserver.key";
+        const PUBLIC_KEY_PATH: &str = "/etc/openscm/keys/scmserver.pub";
+    } else if #[cfg(target_os = "freebsd")] {
+        const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmserver.config";
+        const DB_PATH: &str = "/var/db/openscm/scm.db";
+        const PRIVATE_KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmserver.key";
+        const PUBLIC_KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmserver.pub";
+    } else if #[cfg(target_os = "windows")] {
+        const CONFIG_PATH: &str = r"C:\ProgramData\OpenSCM\Server\scmserver.config";
+        const DB_PATH: &str = r"C:\ProgramData\OpenSCM\Server\scm.db";
+        const PRIVATE_KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Server\keys\scmserver.key";
+        const PUBLIC_KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Server\keys\scmserver.pub";
+    }
+}
 
-#[cfg(target_os = "freebsd")]
-const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmserver.config";
+pub fn db_path() -> &'static str { DB_PATH }
+pub fn private_key_path() -> &'static str { PRIVATE_KEY_PATH }
+pub fn config_path() -> &'static str { CONFIG_PATH }
 
 // --- Structs ---
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Config {
     pub server: ServerConfig,
-    pub database: DatabaseConfig,
-    pub key: KeyPair,
+    pub database: DatabaseConfig, // Added this
+    pub key: KeyConfig,           // Added this
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
@@ -41,14 +58,13 @@ pub struct ServerConfig {
     pub loglevel: Option<String>,
 }
 
-#[derive(Debug, Deserialize, Clone, Serialize)]
+#[derive(Debug, Deserialize, Clone, Serialize, Default)]
 pub struct DatabaseConfig {
     pub path: String,
 }
 
-#[derive(Debug, Deserialize, Clone, Serialize)]
-pub struct KeyPair {
-    pub key_path: Option<String>,
+#[derive(Debug, Deserialize, Clone, Serialize, Default)]
+pub struct KeyConfig {
     pub public_key: Option<String>,
     pub private_key: Option<String>,
 }
@@ -57,33 +73,17 @@ pub struct KeyPair {
 
 impl Default for Config {
     fn default() -> Self {
-        #[cfg(target_os = "windows")]
-        let base_config = PathBuf::from(r"C:\ProgramData\OpenSCM\Server");
-        #[cfg(target_os = "windows")]
-        let base_data = PathBuf::from(r"C:\ProgramData\OpenSCM\Server");
-
-        #[cfg(target_os = "freebsd")]
-        let base_config = PathBuf::from("/usr/local/etc/openscm");
-        #[cfg(target_os = "freebsd")]
-        let base_data = PathBuf::from("/var/db/openscm");
-
-        #[cfg(target_os = "linux")]
-        let base_config = PathBuf::from("/etc/openscm");
-        #[cfg(target_os = "linux")]
-        let base_data = PathBuf::from("/var/lib/openscm");
-
         Self {
             server: ServerConfig {
                 port: Some("8000".to_string()),
                 loglevel: Some("info".to_string()),
             },
             database: DatabaseConfig {
-                path: base_data.join("scm.db").to_string_lossy().into_owned(),
+                path: DB_PATH.to_string(),
             },
-            key: KeyPair {
-                key_path: Some(base_config.join("keys").to_string_lossy().into_owned()),
-                public_key: Some("scmserver.pub".to_string()),
-                private_key: Some("scmserver.key".to_string()),
+            key: KeyConfig {
+                public_key: Some(PUBLIC_KEY_PATH.to_string()),
+                private_key: Some(PRIVATE_KEY_PATH.to_string()),
             },
         }
     }
@@ -91,29 +91,20 @@ impl Default for Config {
 
 // --- Key Generation ---
 
-pub fn generate_keys_if_missing<P: AsRef<Path>>(
-    public_key_path: P,
-    private_key_path: P,
-) -> Result<(), Box<dyn Error>> {
-    let pub_path = public_key_path.as_ref();
-    let priv_path = private_key_path.as_ref();
+pub fn generate_keys_if_missing() -> Result<(), Box<dyn Error>> {
+    let priv_path = Path::new(PRIVATE_KEY_PATH);
+    let pub_path = Path::new(PUBLIC_KEY_PATH);
 
-    if pub_path.exists() && priv_path.exists() {
+    if priv_path.exists() && pub_path.exists() {
         return Ok(());
     }
 
-    if pub_path.exists() ^ priv_path.exists() {
-        warn!(
-            "Partial key pair detected! Only one key file exists. Regenerating both... pub={} priv={}",
-            pub_path.exists(),
-            priv_path.exists()
-        );
+    if priv_path.exists() || pub_path.exists() {
+        warn!("Incomplete key pair found. Regenerating for consistency.");
     } else {
-        warn!(
-            "Server keys missing. Generating new Ed25519 pair at {:?}",
-            priv_path.parent().unwrap_or(priv_path)
-        );
+        info!("Initializing OpenSCM server identity keys...");
     }
+
 
     let mut csprng = OsRng;
     let signing_key = SigningKey::generate(&mut csprng);
@@ -141,64 +132,22 @@ pub fn generate_keys_if_missing<P: AsRef<Path>>(
     Ok(())
 }
 
-
 // --- Validation ---
 
 fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
-    // 1. Port Validation
     if let Some(p) = &config.server.port {
-        if p.parse::<u16>().is_err() {
-            error!("Invalid port in config: '{}'. Please set a valid port (1-65535).", p);
-            return Err(format!(
-                "Invalid port in config: '{}'. Please set a valid port (1-65535).", p
-            ).into());
-        }
+        p.parse::<u16>().map_err(|_| {
+            error!("Invalid port in config: '{}'.", p);
+            format!("Invalid port: {}", p)
+        })?;
     }
 
+    // Force constants to ensure compliance
+    config.database.path = DB_PATH.to_string();
+    config.key.private_key = Some(PRIVATE_KEY_PATH.to_string());
+    config.key.public_key = Some(PUBLIC_KEY_PATH.to_string());
 
-    // 2. Create database directory if missing
-    if let Some(parent) = std::path::Path::new(&config.database.path).parent() {
-        if !parent.exists() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                error!("Database directory '{:?}' does not exist and could not be created: {}. Please reinstall the package.", parent, e);
-                return Err(format!("Missing database directory: {:?}", parent).into());
-            } else {
-                info!("Created database directory {:?}", parent);
-            }
-        }
-   
-    }
-
-
-    // 3. Setup Key Directory
-    let key_dir = config.key.key_path.as_ref()
-        .map(PathBuf::from)
-        .unwrap_or_else(|| {
-            #[cfg(target_os = "windows")]
-            { PathBuf::from(r"C:\ProgramData\OpenSCM\Server\keys") }
-            #[cfg(target_os = "freebsd")]
-            { PathBuf::from("/usr/local/etc/openscm/keys") }
-            #[cfg(target_os = "linux")]
-            { PathBuf::from("/etc/openscm/keys") }
-        });
-
-
-    // Create key directory
-    if !key_dir.exists() {
-        if let Err(e) = fs::create_dir_all(&key_dir) {
-            error!("Key directory '{:?}' does not exist and could not be created: {}. Please reinstall the package.", key_dir, e);
-            return Err(format!("Missing key directory: {:?}", key_dir).into());
-        } else {
-            info!("Created key directory {:?}", key_dir);
-        }
-    }
-
-
-
-    let pub_filename = config.key.public_key.as_deref().unwrap_or("scmserver.pub");
-    let priv_filename = config.key.private_key.as_deref().unwrap_or("scmserver.key");
-
-    generate_keys_if_missing(key_dir.join(pub_filename), key_dir.join(priv_filename))?;
+    generate_keys_if_missing()?;
     Ok(())
 }
 
@@ -206,116 +155,67 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
 
 impl Config {
     pub fn load() -> Result<Self, Box<dyn Error>> {
-        #[cfg(target_os = "windows")]
-        {
-            info!("Loading configuration from Windows Registry...");
-            Self::load_from_registry()
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            // Ensure config directory exists before anything else
-            if let Some(parent) = std::path::Path::new(CONFIG_PATH).parent() {
-                if let Err(e) = fs::create_dir_all(parent) {
-                    warn!("Could not create config directory {:?}: {}", parent, e);
+        cfg_if! {
+            if #[cfg(target_os = "windows")] {
+                info!("Loading configuration from Windows Registry...");
+                Self::load_from_registry()
+            } else {
+                let path = PathBuf::from(CONFIG_PATH);
+                if let Some(parent) = path.parent() {
+                    if !parent.exists() { fs::create_dir_all(parent)?; }
                 }
+
+                info!("Loading configuration from {:?}...", path);
+                if !path.exists() {
+                    warn!("Config file not found. Bootstrapping defaults...");
+                    let mut default_cfg = Self::default();
+                    validate_and_setup_keys(&mut default_cfg)?;
+                    default_cfg.save()?;
+                    return Ok(default_cfg);
+                }
+                Self::load_from_toml(&path)
+            }
+        }
+    }
+
+    cfg_if! {
+        if #[cfg(target_os = "windows")] {
+            fn load_from_registry() -> Result<Self, Box<dyn Error>> {
+                let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+                let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
+
+                let port     = key.get_value("Port").unwrap_or_else(|_| "8000".to_string());
+                let loglevel = key.get_value("LogLevel").unwrap_or_else(|_| "info".to_string());
+
+                let mut config = Config::default();
+                config.server.port = Some(port);
+                config.server.loglevel = Some(loglevel);
+
+                validate_and_setup_keys(&mut config)?;
+                Ok(config)
             }
 
-            let path = PathBuf::from(CONFIG_PATH);
-            info!("Loading configuration from {:?}...", path);
-            if !path.exists() {
-                warn!("Config file not found. Bootstrapping defaults at {:?}", path);
-                let mut default_cfg = Self::default();
-                validate_and_setup_keys(&mut default_cfg)?;
-                default_cfg.save()?;
-                return Ok(default_cfg);
+            pub fn save(&self) -> Result<(), Box<dyn Error>> {
+                let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+                let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
+                if let Some(p) = &self.server.port { key.set_value("Port", p)?; }
+                if let Some(l) = &self.server.loglevel { key.set_value("LogLevel", l)?; }
+                Ok(())
             }
-            Self::load_from_toml(&path)
+        } else {
+            pub fn save(&self) -> Result<(), Box<dyn Error>> {
+                let path = PathBuf::from(CONFIG_PATH);
+                let toml_string = toml::to_string_pretty(self)?;
+                fs::write(path, toml_string)?;
+                Ok(())
+            }
+
+            fn load_from_toml(path: &Path) -> Result<Self, Box<dyn Error>> {
+                let contents = fs::read_to_string(path)?;
+                let mut config: Config = toml::from_str(&contents)?;
+                validate_and_setup_keys(&mut config)?;
+                Ok(config)
+            }
         }
-    }
-
-    #[cfg(target_os = "windows")]
-    fn load_from_registry() -> Result<Self, Box<dyn Error>> {
-        let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-        let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
-
-        let port     = key.get_value("Port").unwrap_or_else(|_| "8000".to_string());
-        let loglevel = key.get_value("LogLevel").unwrap_or_else(|_| "info".to_string());
-        let db       = key.get_value("DB").unwrap_or_else(|_| r"C:\ProgramData\OpenSCM\Server\scm.db".to_string());
-        let key_path = key.get_value("KeyPath").unwrap_or_else(|_| r"C:\ProgramData\OpenSCM\Server\keys".to_string());
-        let pub_key  = key.get_value("PubKeyFile").unwrap_or_else(|_| "scmserver.pub".to_string());
-        let priv_key = key.get_value("PrivKeyFile").unwrap_or_else(|_| "scmserver.key".to_string());
-
-        let needs_repair = [
-            key.get_value::<String, _>("Port").is_err(),
-            key.get_value::<String, _>("LogLevel").is_err(),
-            key.get_value::<String, _>("DB").is_err(),
-            key.get_value::<String, _>("KeyPath").is_err(),
-            key.get_value::<String, _>("PubKeyFile").is_err(),
-            key.get_value::<String, _>("PrivKeyFile").is_err(),
-        ].iter().any(|&missing| missing);
-
-        let mut config = Config {
-            server: ServerConfig {
-                port: Some(port),
-                loglevel: Some(loglevel),
-            },
-            database: DatabaseConfig {
-                path: db,
-            },
-            key: KeyPair {
-                key_path: Some(key_path),
-                public_key: Some(pub_key),
-                private_key: Some(priv_key),
-            },
-        };
-
-        if needs_repair {
-            warn!("Registry settings were missing. Performing self-repair...");
-            config.save()?;
-        }
-
-        validate_and_setup_keys(&mut config)?;
-        Ok(config)
-    }
-
-    pub fn save(&self) -> Result<(), Box<dyn Error>> {
-        #[cfg(target_os = "windows")]
-        {
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Server")?;
-
-            if let Some(p)  = &self.server.port      { key.set_value("Port", p)?; }
-            if let Some(l)  = &self.server.loglevel   { key.set_value("LogLevel", l)?; }
-            key.set_value("DB", &self.database.path)?;
-            if let Some(kp) = &self.key.key_path      { key.set_value("KeyPath", kp)?; }
-            if let Some(pk) = &self.key.public_key    { key.set_value("PubKeyFile", pk)?; }
-            if let Some(sk) = &self.key.private_key   { key.set_value("PrivKeyFile", sk)?; }
-            Ok(())
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            let path = PathBuf::from(CONFIG_PATH);
-            self.save_to(path)
-        }
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    pub fn save_to<P: AsRef<Path>>(&self, path: P) -> Result<(), Box<dyn Error>> {
-        let toml_string = toml::to_string_pretty(self)?;
-        if let Some(parent) = path.as_ref().parent() {
-            fs::create_dir_all(parent)?;
-        }
-        fs::write(path, toml_string)?;
-        Ok(())
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    fn load_from_toml(path: &Path) -> Result<Self, Box<dyn Error>> {
-        let contents = fs::read_to_string(path)?;
-        let mut config: Config = toml::from_str(&contents)?;
-        validate_and_setup_keys(&mut config)?;
-        Ok(config)
     }
 }

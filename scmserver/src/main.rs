@@ -31,6 +31,9 @@ use sha2::Sha256;
 // Handlers (shared utilities)
 use crate::handlers::{not_found, clear_notifications};
 
+// Config
+use crate::config::{Config, config_path,private_key_path, db_path};
+
 // Schema
 use crate::schema::initialize_database;
 
@@ -103,32 +106,56 @@ pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
     Ok(tera)
 }
 
-// check missing directories 
+
 fn check_required_directories() -> Result<(), Box<dyn std::error::Error>> {
-    #[cfg(target_os = "windows")]
-    let dirs: Vec<&str> = vec![
-        r"C:\ProgramData\OpenSCM\Server\logs",
+    // 1. Gather targets from your single-source-of-truth helpers
+    let targets = [
+        config_path(),
+        db_path(),
+        private_key_path(),
     ];
 
-    #[cfg(target_os = "freebsd")]
-    let dirs: Vec<&str> = vec![
-        "/var/log/openscm",
-    ];
+    for target in targets {
+        if let Some(parent) = std::path::Path::new(target).parent() {
+            // Check if directory exists
+            if !parent.exists() {
+                info!("Required directory {:?} is missing. Attempting to create...", parent);
+                
+                // 2. Attempt to create. If it fails (e.g., Permission Denied), trigger the error logic.
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    error!(
+                        "CRITICAL FAILURE: Could not create directory {:?}. Error: {}. \
+                        This usually means the service lacks sufficient privileges or the \
+                        installation is corrupt. Please reinstall the package or check permissions.", 
+                        parent, e
+                    );
+                    return Err(format!("Missing required directory and failed to create: {:?}", parent).into());
+                }
+                info!("Successfully created directory: {:?}", parent);
+            }
 
-    #[cfg(target_os = "linux")]
-    let dirs: Vec<&str> = vec![
-        "/var/log/openscm",
-    ];
+            // 3. Set secure permissions (Unix-specific)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let is_key_dir = target == private_key_path();
+                let mode = if is_key_dir { 0o700 } else { 0o755 };
 
-    for dir in dirs {
-        if !std::path::Path::new(dir).exists() {
-            eprintln!("Required directory '{}' does not exist. Please reinstall the package.", dir);
-            return Err(format!("Missing required directory: {}", dir).into());
+                if let Err(e) = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(mode)) {
+                    error!(
+                        "CRITICAL FAILURE: Could not set permissions ({:o}) on {:?}. Error: {}. \
+                        Ensure the OpenSCM service has ownership of its data directories.", 
+                        mode, parent, e
+                    );
+                    return Err(format!("Permission hardening failed for: {:?}", parent).into());
+                }
+            }
         }
     }
-    Ok(())
 
+    Ok(())
 }
+
 
 // Serve embedded static files
 async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
@@ -165,7 +192,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     info!("Starting OpenSCM Server...");
 
     // Load Config
-    let config = config::Config::load().map_err(|e| {
+    let config = Config::load().map_err(|e| {
         error!("Failed to load configuration: {}", e);
         e
     })?;
@@ -178,12 +205,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Load server private key
     info!("Load server private key ...");
-    let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or(""));
-    let priv_file = config.key.private_key.as_deref().unwrap_or("scmserver.key");
-    let priv_path = key_dir.join(priv_file);
 
-    let priv_base64 = fs::read_to_string(&priv_path).map_err(|e| {
-        error!("Failed to read private key from '{}': {}", priv_path.display(), e);
+    let priv_base64 = fs::read_to_string(private_key_path()).map_err(|e| {
+        error!("Failed to read private key from '{}': {}", private_key_path(), e);
         e
     })?;
     let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim()).map_err(|e| {
@@ -213,15 +237,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
 
     // 3. Database Initialization
-    info!("Connecting database at '{}'...", config.database.path);
-    let db_path = PathBuf::from(&config.database.path);
+    info!("Connecting database at '{}'...", db_path());
     
-    // Ensure the directory for the DB exists
-    if let Some(parent) = db_path.parent() {
-        std::fs::create_dir_all(parent)?;
-    }
-
-    let database_url = format!("sqlite://{}", config.database.path);
+    let database_url = format!("sqlite://{}", &db_path());
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true);
 
