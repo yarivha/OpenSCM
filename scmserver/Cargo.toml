@@ -7,6 +7,7 @@ license = "FSL-1.1-ALv2"
 description = "Server for Open Security Compliance Manager"
 
 [dependencies]
+cfg-if = "1.0"
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
 axum-server = "0.7"
 axum-extra = { version = "0.10", features = ["cookie", "cookie-signed"] }
