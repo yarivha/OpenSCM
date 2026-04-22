@@ -3,30 +3,40 @@ use std::error::Error;
 use std::fs;
 use std::path::PathBuf;
 use tracing::{info, warn, error};
+use cfg_if::cfg_if;
 
-// Unix specific imports
-#[cfg(not(target_os = "windows"))]
-use toml;
-#[cfg(not(target_os = "windows"))]
-use std::path::Path;
+// load OS specific modules
+cfg_if! {
+    if #[cfg(not(target_os = "windows"))] {
+        use std::path::Path;
+        use toml;
+    } else if #[cfg(target_os = "windows")] {
+        use winreg::enums::*;
+        use winreg::RegKey;
+    }
+}
 
-// Windows-specific imports
-#[cfg(target_os = "windows")]
-use winreg::enums::*;
-#[cfg(target_os = "windows")]
-use winreg::RegKey;
 
 
 // ============================================================
 // CONSTANTS
 // ============================================================
 
-#[cfg(target_os = "linux")]
-const CONFIG_PATH: &str = "/etc/openscm/scmclient.config";
+// --- Constants ---
+cfg_if! {
+    if #[cfg(target_os = "linux")] {
+        const CONFIG_PATH: &str = "/etc/openscm/scmclient.config";
+        const KEY_PATH: &str = "/etc/openscm/keys/scmclient";
+    } else if #[cfg(target_os = "freebsd")] {
+        const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
+        const KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmclient";
+    } else if #[cfg(target_os = "windows")] {
+        const KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Client\keys\scmclient";
+    }
+}
 
-#[cfg(target_os = "freebsd")]
-const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
-
+pub fn key_path() -> &'static str { KEY_PATH }
+pub fn config_path() -> &'static str { CONFIG_PATH }
 
 // ============================================================
 // STRUCTS
@@ -36,7 +46,6 @@ const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
 pub struct Config {
     pub server: ServerConfig,
     pub client: ClientConfig,
-    pub key: KeyPair,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
@@ -51,11 +60,6 @@ pub struct ClientConfig {
     pub loglevel: Option<String>,
 }
 
-#[derive(Debug, Clone, Serialize, Deserialize, Default)]
-pub struct KeyPair {
-    pub key_path: Option<String>,
-}
-
 
 // ============================================================
 // DEFAULT
@@ -63,14 +67,6 @@ pub struct KeyPair {
 
 impl Default for Config {
     fn default() -> Self {
-        #[cfg(target_os = "windows")]
-        let base_dir = PathBuf::from(r"C:\ProgramData\OpenSCM\Client");
-
-        #[cfg(target_os = "freebsd")]
-        let base_dir = PathBuf::from("/usr/local/etc/openscm");
-
-        #[cfg(target_os = "linux")]
-        let base_dir = PathBuf::from("/etc/openscm");
 
         Self {
             server: ServerConfig {
@@ -80,9 +76,6 @@ impl Default for Config {
             client: ClientConfig {
                 heartbeat: Some("300".to_string()),
                 loglevel: Some("info".to_string()),
-            },
-            key: KeyPair {
-                key_path: Some(base_dir.join("keys").to_string_lossy().into_owned()),
             },
         }
     }
@@ -94,30 +87,37 @@ impl Default for Config {
 // CONFIG IMPLEMENTATION
 // ============================================================
 
+
 impl Config {
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
-        #[cfg(target_os = "windows")]
-        {
-            let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
-            let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
+        cfg_if! {
+            if #[cfg(target_os = "windows")] {
+                // --- Windows Registry Logic ---
+                let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
+                let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
-            key.set_value("ServerURL", &self.server.url)?;
-            key.set_value("TenantId", &self.server.tenant_id)?;
-            if let Some(hb) = &self.client.heartbeat { key.set_value("Heartbeat", hb)?; }
-            if let Some(ll) = &self.client.loglevel  { key.set_value("LogLevel", ll)?; }
-            if let Some(kp) = &self.key.key_path     { key.set_value("KeyPath", kp)?; }
+                key.set_value("ServerURL", &self.server.url)?;
+                key.set_value("TenantId", &self.server.tenant_id)?;
+                
+                if let Some(hb) = &self.client.heartbeat { 
+                    key.set_value("Heartbeat", hb)?; 
+                }
+                if let Some(ll) = &self.client.loglevel { 
+                    key.set_value("LogLevel", ll)?; 
+                }
 
-            info!("Configuration saved to Windows Registry.");
-            Ok(())
-        }
-
-        #[cfg(not(target_os = "windows"))]
-        {
-            let path = PathBuf::from(CONFIG_PATH);
-            let toml_string = toml::to_string_pretty(self)?;
-            fs::write(&path, toml_string)?;
-            info!("Configuration saved to {:?}.", path);
-            Ok(())
+                info!("Configuration saved to Windows Registry.");
+                Ok(())
+            } else {
+                // --- Unix (FreeBSD/Linux) TOML Logic ---
+                let path = PathBuf::from(CONFIG_PATH);
+                let toml_string = toml::to_string_pretty(self)?;
+                
+                fs::write(&path, toml_string)?;
+                
+                info!("Configuration saved to {:?}.", path);
+                Ok(())
+            }
         }
     }
 }
@@ -128,29 +128,27 @@ impl Config {
 // ============================================================
 
 pub fn get_config() -> Result<Config, Box<dyn Error>> {
-    #[cfg(target_os = "windows")]
-    {
-        load_from_registry()
-    }
-
-    #[cfg(not(target_os = "windows"))]
-    {
-        if let Some(parent) = std::path::Path::new(CONFIG_PATH).parent() {
-            if let Err(e) = fs::create_dir_all(parent) {
-                warn!("Could not create config directory {:?}: {}", parent, e);
+    cfg_if! {
+        if #[cfg(target_os = "windows")] {
+            // Windows logic: Just pull from the Registry
+            load_from_registry()
+        } else {
+            // Unix logic: Handle the TOML file and bootstrapping
+            let path = PathBuf::from(CONFIG_PATH);
+            
+            if !path.exists() {
+                warn!(
+                    "Config file not found at '{}'. Bootstrapping defaults.",
+                    CONFIG_PATH
+                );
+                bootstrap_default_config(&path)?;
             }
+            
+            load_from_toml(&path)
         }
-        let path = PathBuf::from(CONFIG_PATH);
-        if !path.exists() {
-            warn!(
-                "Config file not found at '{}'. Bootstrapping defaults.",
-                CONFIG_PATH
-            );
-            bootstrap_default_config(&path)?;
-        }
-        load_from_toml(&path)
     }
 }
+
 
 
 // ============================================================
@@ -177,7 +175,6 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         key.get_value::<String, _>("TenantId").is_err(),
         key.get_value::<String, _>("Heartbeat").is_err(),
         key.get_value::<String, _>("LogLevel").is_err(),
-        key.get_value::<String, _>("KeyPath").is_err(),
     ]
     .iter()
     .any(|&missing| missing);
@@ -198,9 +195,6 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
             heartbeat: Some(read_val("Heartbeat", "300")),
             loglevel:  Some(read_val("LogLevel", "info")),
         },
-        key: KeyPair {
-            key_path: Some(read_val("KeyPath", r"C:\ProgramData\OpenSCM\Client\keys")),
-        },
     };
 
     if needs_repair {
@@ -214,9 +208,6 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
 
 #[cfg(not(target_os = "windows"))]
 fn bootstrap_default_config(path: &Path) -> Result<(), Box<dyn Error>> {
-    if let Some(parent) = path.parent() {
-        fs::create_dir_all(parent)?;
-    }
     let default_config = Config::default();
     let toml_string = toml::to_string_pretty(&default_config)?;
     fs::write(path, &toml_string)?;

@@ -10,7 +10,7 @@ use sha2::{Sha256, Digest};
 use rand::rngs::OsRng;
 
 use crate::models::{UnsignedPayload, SignedRequest, SignedResponse, Test, ComplianceResult};
-use crate::config::Config;
+use crate::config::{Config, key_path};
 use crate::compliance::evaluate;
 
 
@@ -207,7 +207,7 @@ pub async fn send_system_info(
 
     // 1. Derive namespaced file paths per server URL
     let namespace = get_url_namespace(&config.server.url);
-    let key_dir = PathBuf::from(config.key.key_path.as_deref().unwrap_or("."));
+    let key_dir = std::path::Path::new(key_path()).parent().expect("Core key directory must have a parent path");
 
     let id_path         = key_dir.join(format!("client_{}.id", namespace));
     let priv_path       = key_dir.join(format!("client_{}.key", namespace));

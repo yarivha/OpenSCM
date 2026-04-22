@@ -7,47 +7,61 @@ use tokio::time::{sleep, Duration};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use tracing::{debug, info, warn, error};
 
-#[tokio::main]
-async fn main() {
-    
-    // Create required directories BEFORE logger init
-    create_required_directories();
 
-    if let Err(e) = run().await {
-        error!("Fatal Error: {}", e);
-        std::process::exit(1);
-    }
-}
+use crate::config::{config_path,key_path};
 
-//----------------------------------------
-//  create_required_directories
-//---------------------------------------
-fn create_required_directories() {
-    #[cfg(target_os = "windows")]
-    let dirs: Vec<&str> = vec![
-        r"C:\ProgramData\OpenSCM\Client\logs",
+
+fn check_required_directories() -> Result<(), Box<dyn std::error::Error>> {
+    // 1. Gather targets from your single-source-of-truth helpers
+    let targets = [
+        config_path(),
+        key_path(),
     ];
 
-    #[cfg(target_os = "freebsd")]
-    let dirs: Vec<&str> = vec![
-        "/var/log/openscm",
-    ];
+    for target in targets {
+        if let Some(parent) = std::path::Path::new(target).parent() {
+            // Check if directory exists
+            if !parent.exists() {
+                info!("Required directory {:?} is missing. Attempting to create...", parent);
+                
+                // 2. Attempt to create. If it fails (e.g., Permission Denied), trigger the error logic.
+                if let Err(e) = std::fs::create_dir_all(parent) {
+                    error!(
+                        "CRITICAL FAILURE: Could not create directory {:?}. Error: {}. \
+                        This usually means the service lacks sufficient privileges or the \
+                        installation is corrupt. Please reinstall the package or check permissions.", 
+                        parent, e
+                    );
+                    return Err(format!("Missing required directory and failed to create: {:?}", parent).into());
+                }
+                info!("Successfully created directory: {:?}", parent);
+            }
 
-    #[cfg(target_os = "linux")]
-    let dirs: Vec<&str> = vec![
-        "/var/log/openscm",
-    ];
+            // 3. Set secure permissions (Unix-specific)
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let is_key_dir = target == key_path();
+                let mode = if is_key_dir { 0o700 } else { 0o755 };
 
-    for dir in dirs {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            eprintln!("Could not create directory {}: {}", dir, e);
+                if let Err(e) = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(mode)) {
+                    error!(
+                        "CRITICAL FAILURE: Could not set permissions ({:o}) on {:?}. Error: {}. \
+                        Ensure the OpenSCM service has ownership of its data directories.", 
+                        mode, parent, e
+                    );
+                    return Err(format!("Permission hardening failed for: {:?}", parent).into());
+                }
+            }
         }
     }
+
+    Ok(())
 }
 
 
-
-async fn run() -> Result<(), Box<dyn std::error::Error>> {
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Logging setup
     let env_filter = EnvFilter::new("info");
@@ -58,7 +72,10 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         .with(fmt::layer())
         .init();
 
-    // 2. Version and CLI args
+    // 2. create required directories BEFORE logger init
+    check_required_directories()?;
+
+    // 3. Version and CLI args
     let version = env!("CARGO_PKG_VERSION");
     let args: Vec<String> = std::env::args().collect();
 
@@ -77,14 +94,14 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     }
 
 
-    // 3. Load config
+    // 4. Load config
     info!("Loading configuration...");
     let mut config = config::get_config().map_err(|e| {
         error!("Configuration error: {}", e);
         e
     })?;
 
-    // 4. Handle URL override
+    // 5. Handle URL override
     let mut config_changed = false;
     let mut i = 0;
     while i < args.len() {
@@ -107,7 +124,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
         info!("New configuration persisted.");
     }
 
-    // 5. Startup info
+    // 6. Startup info
     let server_url  = &config.server.url;
     let log_level   = config.client.loglevel.as_deref().unwrap_or("info");
     let heartbeat_secs = config.client.heartbeat
@@ -128,7 +145,7 @@ async fn run() -> Result<(), Box<dyn std::error::Error>> {
     // Track last applied log level to avoid redundant reloads
     let mut last_log_level = log_level.to_string();
 
-    // 6. Main heartbeat loop
+    // 7. Main heartbeat loop
     loop {
         debug!("Starting heartbeat cycle");
 
