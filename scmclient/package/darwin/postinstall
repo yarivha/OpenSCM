@@ -1,0 +1,11 @@
+#!/bin/bash
+# Ensure directory exists
+mkdir -p /var/log/openscm
+chmod 755 /var/log/openscm
+mkdir -p /usr/local/etc/openscm
+chmod 755 /usr/local/etc/openscm
+mkdir -p /usr/local/etc/openscm/keys
+chmod 700 /usr/local/etc/openscm/keys
+
+# Load and start the service immediately
+launchctl load /Library/LaunchDaemons/io.openscm.scmclient.plist
