@@ -156,6 +156,14 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
     }
 
 
+     // 2. Create database directory
+    if let Some(parent) = std::path::Path::new(&config.database.path).parent() {
+        if let Err(e) = fs::create_dir_all(parent) {
+            warn!("Could not create database directory {:?}: {}", parent, e);
+        }
+    }
+
+
     // 3. Setup Key Directory
     let key_dir = config.key.key_path.as_ref()
         .map(PathBuf::from)
@@ -167,6 +175,13 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
             #[cfg(target_os = "linux")]
             { PathBuf::from("/etc/openscm/keys") }
         });
+
+
+    // Create key directory
+    if let Err(e) = fs::create_dir_all(&key_dir) {
+        warn!("Could not create key directory {:?}: {}", key_dir, e);
+    }
+
 
     let pub_filename = config.key.public_key.as_deref().unwrap_or("scmserver.pub");
     let priv_filename = config.key.private_key.as_deref().unwrap_or("scmserver.key");
@@ -187,6 +202,13 @@ impl Config {
 
         #[cfg(not(target_os = "windows"))]
         {
+            // Ensure config directory exists before anything else
+            if let Some(parent) = std::path::Path::new(CONFIG_PATH).parent() {
+                if let Err(e) = fs::create_dir_all(parent) {
+                    warn!("Could not create config directory {:?}: {}", parent, e);
+                }
+            }
+
             let path = PathBuf::from(CONFIG_PATH);
             info!("Loading configuration from {:?}...", path);
             if !path.exists() {

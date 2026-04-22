@@ -112,13 +112,11 @@ fn create_required_directories() {
 
     #[cfg(target_os = "freebsd")]
     let dirs: Vec<&str> = vec![
-        "/usr/local/etc/openscm",
         "/var/log/openscm",
     ];
 
     #[cfg(target_os = "linux")]
     let dirs: Vec<&str> = vec![
-        "/etc/openscm",
         "/var/log/openscm",
     ];
 
@@ -173,19 +171,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let loglevel = config.server.loglevel.as_deref().unwrap_or("info");
     let _ = reload_handle.reload(EnvFilter::new(loglevel));
     debug!("Log level set to '{}'", loglevel);
-
-
-    // Create config-dependent directories
-    if let Some(key_path) = &config.key.key_path {
-        if let Err(e) = std::fs::create_dir_all(key_path) {
-            warn!("Could not create key directory {}: {}", key_path, e);
-        }
-    }
-    if let Some(parent) = std::path::Path::new(&config.database.path).parent() {
-        if let Err(e) = std::fs::create_dir_all(parent) {
-            warn!("Could not create database directory {:?}: {}", parent, e);
-        }
-    }
 
 
     // Load server private key
