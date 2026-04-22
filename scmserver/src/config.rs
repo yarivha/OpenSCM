@@ -2,7 +2,7 @@ use ed25519_dalek::{SigningKey, VerifyingKey};
 use rand::rngs::OsRng;
 use serde::{Deserialize, Serialize};
 use std::fs;
-use std::path::{Path, PathBuf};
+use std::path::Path;
 use std::error::Error;
 use tracing::{info, warn, error};
 use base64::{engine::general_purpose, Engine as _};
@@ -12,6 +12,7 @@ use cfg_if::cfg_if;
 cfg_if! {
     if #[cfg(not(target_os = "windows"))] {
         use std::io::Write;
+        use std::path::PathBuf;
         use toml;
     } else if #[cfg(target_os = "windows")] {
         use winreg::enums::*;
@@ -153,6 +154,8 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
 
 // --- Config Implementation ---
 
+// --- Config Implementation ---
+
 impl Config {
     pub fn load() -> Result<Self, Box<dyn Error>> {
         cfg_if! {
@@ -161,10 +164,6 @@ impl Config {
                 Self::load_from_registry()
             } else {
                 let path = PathBuf::from(CONFIG_PATH);
-                if let Some(parent) = path.parent() {
-                    if !parent.exists() { fs::create_dir_all(parent)?; }
-                }
-
                 info!("Loading configuration from {:?}...", path);
                 if !path.exists() {
                     warn!("Config file not found. Bootstrapping defaults...");
@@ -187,10 +186,22 @@ impl Config {
                 let port     = key.get_value("Port").unwrap_or_else(|_| "8000".to_string());
                 let loglevel = key.get_value("LogLevel").unwrap_or_else(|_| "info".to_string());
 
+                // 1. Initialize using your Default to get all fields (database, key, etc.)
                 let mut config = Config::default();
                 config.server.port = Some(port);
                 config.server.loglevel = Some(loglevel);
 
+                // 2. Check if we need to repair missing registry values
+                let needs_repair = [
+                    key.get_value::<String, _>("Port").is_err(),
+                    key.get_value::<String, _>("LogLevel").is_err(),
+                ].iter().any(|&missing| missing);
+
+                if needs_repair {
+                    warn!("Registry settings were missing. Performing self-repair...");
+                    config.save()?;
+                }
+                
                 validate_and_setup_keys(&mut config)?;
                 Ok(config)
             }
@@ -218,4 +229,5 @@ impl Config {
             }
         }
     }
-}
+} 
+
