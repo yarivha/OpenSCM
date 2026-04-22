@@ -156,11 +156,17 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
     }
 
 
-     // 2. Create database directory
+    // 2. Create database directory if missing
     if let Some(parent) = std::path::Path::new(&config.database.path).parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            warn!("Could not create database directory {:?}: {}", parent, e);
+        if !parent.exists() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                error!("Database directory '{:?}' does not exist and could not be created: {}. Please reinstall the package.", parent, e);
+                return Err(format!("Missing database directory: {:?}", parent).into());
+            } else {
+                info!("Created database directory {:?}", parent);
+            }
         }
+   
     }
 
 
@@ -178,9 +184,15 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
 
 
     // Create key directory
-    if let Err(e) = fs::create_dir_all(&key_dir) {
-        warn!("Could not create key directory {:?}: {}", key_dir, e);
+    if !key_dir.exists() {
+        if let Err(e) = fs::create_dir_all(&key_dir) {
+            error!("Key directory '{:?}' does not exist and could not be created: {}. Please reinstall the package.", key_dir, e);
+            return Err(format!("Missing key directory: {:?}", key_dir).into());
+        } else {
+            info!("Created key directory {:?}", key_dir);
+        }
     }
+
 
 
     let pub_filename = config.key.public_key.as_deref().unwrap_or("scmserver.pub");

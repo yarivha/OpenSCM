@@ -103,7 +103,7 @@ pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
     Ok(tera)
 }
 
-// check and create missing directories 
+// check missing directories 
 fn create_required_directories() {
     #[cfg(target_os = "windows")]
     let dirs: Vec<&str> = vec![
@@ -121,10 +121,13 @@ fn create_required_directories() {
     ];
 
     for dir in dirs {
-        if let Err(e) = std::fs::create_dir_all(dir) {
-            eprintln!("Could not create directory {}: {}", dir, e);
+        if !std::path::Path::new(dir).exists() {
+            eprintln!("Required directory '{}' does not exist. Please reinstall the package.", dir);
+            return Err(format!("Missing required directory: {}", dir).into());
         }
     }
+    Ok(())
+
 }
 
 // Serve embedded static files
@@ -149,7 +152,7 @@ async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // 0. Create required directories BEFORE logger init
-    create_required_directories();
+    create_required_directories()?;
 
     // 1. Logging setup
     let env_filter = EnvFilter::new("info");
