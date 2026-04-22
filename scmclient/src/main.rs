@@ -25,19 +25,16 @@ async fn main() {
 fn create_required_directories() {
     #[cfg(target_os = "windows")]
     let dirs: Vec<&str> = vec![
-        r"C:\ProgramData\OpenSCM\Client\keys",
         r"C:\ProgramData\OpenSCM\Client\logs",
     ];
 
     #[cfg(target_os = "freebsd")]
     let dirs: Vec<&str> = vec![
-        "/usr/local/etc/openscm/keys",
         "/var/log/openscm",
     ];
 
     #[cfg(target_os = "linux")]
     let dirs: Vec<&str> = vec![
-        "/etc/openscm/keys",
         "/var/log/openscm",
     ];
 

@@ -135,6 +135,11 @@ pub fn get_config() -> Result<Config, Box<dyn Error>> {
 
     #[cfg(not(target_os = "windows"))]
     {
+        if let Some(parent) = std::path::Path::new(CONFIG_PATH).parent() {
+            if let Err(e) = fs::create_dir_all(parent) {
+                warn!("Could not create config directory {:?}: {}", parent, e);
+            }
+        }
         let path = PathBuf::from(CONFIG_PATH);
         if !path.exists() {
             warn!(
