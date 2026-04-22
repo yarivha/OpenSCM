@@ -33,6 +33,9 @@ cfg_if! {
     } else if #[cfg(target_os = "windows")] {
         const CONFIG_PATH: &str = r"C:\ProgramData\OpenSCM\Client\scmclient.config";
         const KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Client\keys\scmclient";
+    } else if #[cfg(target_os = "macos")] {
+        const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
+        const KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmclient";
     }
 }
 
