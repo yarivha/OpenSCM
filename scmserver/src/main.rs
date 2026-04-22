@@ -104,7 +104,7 @@ pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
 }
 
 // check missing directories 
-fn create_required_directories() {
+fn check_required_directories() -> Result<(), Box<dyn std::error::Error>> {
     #[cfg(target_os = "windows")]
     let dirs: Vec<&str> = vec![
         r"C:\ProgramData\OpenSCM\Server\logs",
@@ -152,7 +152,7 @@ async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
 async fn main() -> Result<(), Box<dyn Error>> {
 
     // 0. Create required directories BEFORE logger init
-    create_required_directories()?;
+    check_required_directories()?;
 
     // 1. Logging setup
     let env_filter = EnvFilter::new("info");
