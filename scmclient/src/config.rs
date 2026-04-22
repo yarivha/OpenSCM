@@ -1,7 +1,5 @@
 use serde::{Deserialize, Serialize};
 use std::error::Error;
-use std::fs;
-use std::path::PathBuf;
 use tracing::{info, warn, error};
 use cfg_if::cfg_if;
 
@@ -9,6 +7,8 @@ use cfg_if::cfg_if;
 cfg_if! {
     if #[cfg(not(target_os = "windows"))] {
         use std::path::Path;
+        use std::fs;
+        use std::path::PathBuf;
         use toml;
     } else if #[cfg(target_os = "windows")] {
         use winreg::enums::*;
