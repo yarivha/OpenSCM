@@ -141,42 +141,6 @@ pub fn generate_keys_if_missing<P: AsRef<Path>>(
     Ok(())
 }
 
-// --- Directory Setup ---
-
-fn create_required_directories(config: &Config) {
-    #[cfg(target_os = "windows")]
-    let dirs: Vec<&str> = vec![
-        r"C:\ProgramData\OpenSCM\Server\keys",
-        r"C:\ProgramData\OpenSCM\Server\logs",
-    ];
-
-    #[cfg(target_os = "freebsd")]
-    let dirs: Vec<&str> = vec![
-        "/usr/local/etc/openscm/keys",
-        "/var/log/openscm",
-        "/var/db/openscm",
-    ];
-
-    #[cfg(target_os = "linux")]
-    let dirs: Vec<&str> = vec![
-        "/etc/openscm/keys",
-        "/var/log/openscm",
-        "/var/lib/openscm",
-    ];
-
-    for dir in dirs {
-        if let Err(e) = fs::create_dir_all(dir) {
-            warn!("Could not create directory {}: {}", dir, e);
-        }
-    }
-
-    // Also create database directory from config path
-    if let Some(parent) = Path::new(&config.database.path).parent() {
-        if let Err(e) = fs::create_dir_all(parent) {
-            warn!("Could not create database directory {:?}: {}", parent, e);
-        }
-    }
-}
 
 // --- Validation ---
 
@@ -191,8 +155,6 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    // 2. Create all required directories
-    create_required_directories(config);
 
     // 3. Setup Key Directory
     let key_dir = config.key.key_path.as_ref()
@@ -205,11 +167,6 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
             #[cfg(target_os = "linux")]
             { PathBuf::from("/etc/openscm/keys") }
         });
-
-    if !key_dir.exists() {
-        info!("Creating keys directory: {}", key_dir.display());
-        fs::create_dir_all(&key_dir)?;
-    }
 
     let pub_filename = config.key.public_key.as_deref().unwrap_or("scmserver.pub");
     let priv_filename = config.key.private_key.as_deref().unwrap_or("scmserver.key");
