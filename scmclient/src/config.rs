@@ -31,6 +31,7 @@ cfg_if! {
         const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
         const KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmclient";
     } else if #[cfg(target_os = "windows")] {
+        const CONFIG_PATH: &str = r"C:\ProgramData\OpenSCM\Client\scmclient.config";
         const KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Client\keys\scmclient";
     }
 }
