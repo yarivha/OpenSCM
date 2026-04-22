@@ -89,43 +89,6 @@ impl Default for Config {
 }
 
 
-// ============================================================
-// DIRECTORY SETUP
-// ============================================================
-
-fn create_required_directories(config: &Config) {
-    #[cfg(target_os = "windows")]
-    let dirs: Vec<&str> = vec![
-        r"C:\ProgramData\OpenSCM\Client\keys",
-        r"C:\ProgramData\OpenSCM\Client\logs",
-    ];
-
-    #[cfg(target_os = "freebsd")]
-    let dirs: Vec<&str> = vec![
-        "/usr/local/etc/openscm/keys",
-        "/var/log/openscm",
-    ];
-
-    #[cfg(target_os = "linux")]
-    let dirs: Vec<&str> = vec![
-        "/etc/openscm/keys",
-        "/var/log/openscm",
-    ];
-
-    for dir in dirs {
-        if let Err(e) = fs::create_dir_all(dir) {
-            warn!("Could not create directory {}: {}", dir, e);
-        }
-    }
-
-    // Also create key directory from config path
-    if let Some(key_path) = &config.key.key_path {
-        if let Err(e) = fs::create_dir_all(key_path) {
-            warn!("Could not create key directory {}: {}", key_path, e);
-        }
-    }
-}
-
 
 // ============================================================
 // CONFIG IMPLEMENTATION
@@ -178,10 +141,7 @@ pub fn get_config() -> Result<Config, Box<dyn Error>> {
                 "Config file not found at '{}'. Bootstrapping defaults.",
                 CONFIG_PATH
             );
-            let default_config = Config::default();
-            create_required_directories(&default_config);
             bootstrap_default_config(&path)?;
-            return load_from_toml(&path);
         }
         load_from_toml(&path)
     }
@@ -243,7 +203,6 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         config.save()?;
     }
 
-    create_required_directories(&config);
     Ok(config)
 }
 
@@ -277,6 +236,5 @@ fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
         return Err("server.tenant_id is required but empty in config file".into());
     }
 
-    create_required_directories(&config);
     Ok(config)
 }

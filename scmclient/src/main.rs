@@ -9,11 +9,46 @@ use tracing::{debug, info, warn, error};
 
 #[tokio::main]
 async fn main() {
+    
+    // Create required directories BEFORE logger init
+    create_required_directories();
+
     if let Err(e) = run().await {
         error!("Fatal Error: {}", e);
         std::process::exit(1);
     }
 }
+
+//----------------------------------------
+//  create_required_directories
+//---------------------------------------
+fn create_required_directories() {
+    #[cfg(target_os = "windows")]
+    let dirs: Vec<&str> = vec![
+        r"C:\ProgramData\OpenSCM\Client\keys",
+        r"C:\ProgramData\OpenSCM\Client\logs",
+    ];
+
+    #[cfg(target_os = "freebsd")]
+    let dirs: Vec<&str> = vec![
+        "/usr/local/etc/openscm/keys",
+        "/var/log/openscm",
+    ];
+
+    #[cfg(target_os = "linux")]
+    let dirs: Vec<&str> = vec![
+        "/etc/openscm/keys",
+        "/var/log/openscm",
+    ];
+
+    for dir in dirs {
+        if let Err(e) = std::fs::create_dir_all(dir) {
+            eprintln!("Could not create directory {}: {}", dir, e);
+        }
+    }
+}
+
+
 
 async fn run() -> Result<(), Box<dyn std::error::Error>> {
 
