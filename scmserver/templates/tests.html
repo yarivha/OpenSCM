@@ -268,24 +268,25 @@ $(function () {
 
     // 2. DataTables Initialization
     const table = $("#tests_table").DataTable({
-        "responsive": true,
-        "lengthChange": false, // Usually disabled to make room for buttons
-        "autoWidth": false,
-        "order": [[1, "asc"]],
-        "columnDefs": [{ "targets": 0, "visible": false }],
-        // 'dom' is critical: B (Buttons), f (filter), r (processing), t (table), i (info), p (pagination)
-        "dom": '<"row"<"col-md-6"B><"col-md-6"f>>rtip',
-        "buttons": [
-            { extend: 'copy', className: 'btn-sm' },
-            { extend: 'csv', className: 'btn-sm' },
-            { extend: 'excel', className: 'btn-sm' },
-            { extend: 'pdf', className: 'btn-sm' },
-            { extend: 'print', className: 'btn-sm' },
-            { extend: 'colvis', className: 'btn-sm' }
-        ]
+    "responsive": true,
+    "lengthChange": true,
+    "autoWidth": false,
+    "order": [[1, "asc"]],
+    "columnDefs": [{ "targets": 0, "visible": false }],
+    // Layout: 'l' and 'B' are now together in the first 6-columns
+    // 'f' (filter) stays in the right 6-columns
+    "dom": '<"row"<"col-md-6"lB><"col-md-6"f>>rtip',
+    "buttons": [
+        { extend: 'copy', className: 'btn-sm' },
+        { extend: 'csv', className: 'btn-sm' },
+        { extend: 'excel', className: 'btn-sm' },
+        { extend: 'pdf', className: 'btn-sm' },
+        { extend: 'print', className: 'btn-sm' },
+        { extend: 'colvis', className: 'btn-sm' }
+    ]
     });
 
-    // 3. Move Buttons to the correct Bootstrap column in the wrapper
+
     table.buttons().container().appendTo('#tests_table_wrapper .col-md-6:eq(0)');
 });
 </script>
