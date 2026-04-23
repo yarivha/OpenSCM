@@ -1,31 +1,42 @@
 #!/bin/bash
 
 # --- 1. Variables ---
-PLIST_LABEL="io.openscm.scmclient"
-PLIST_PATH="/Library/LaunchDaemons/${PLIST_LABEL}.plist"
+LABEL="io.openscm.scmclient"
+PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
 BINARY_PATH="/usr/local/bin/scmclient"
+LOG_DIR="/var/log/openscm"
 
-# --- 2. Fix Permissions (Mandatory for LaunchDaemons) ---
-# If these are wrong, launchd will refuse to load the service
-/usr/sbin/chown root:wheel "$PLIST_PATH"
-/bin/chmod 644 "$PLIST_PATH"
+# --- 2. Environment Setup ---
+# Ensure log directories exist (Installer creates files, but not extra paths)
+/bin/mkdir -p "$LOG_DIR"
+/bin/chmod 755 "$LOG_DIR"
+
+# --- 3. Fix Permissions (Critical for macOS Security) ---
+# LaunchDaemons WILL fail to load if permissions are too loose
 /usr/sbin/chown root:wheel "$BINARY_PATH"
 /bin/chmod 755 "$BINARY_PATH"
 
-# --- 3. Restart the Service ---
-echo "Stopping existing $PLIST_LABEL service (if running)..."
+/usr/sbin/chown root:wheel "$PLIST_PATH"
+/bin/chmod 644 "$PLIST_PATH"
 
-# Unload stops the current process and removes it from the service list
-# We use '|| true' so the script doesn't crash on a fresh install
+# --- 4. The "Recycle" Logic ---
+echo "Recycling $LABEL service..."
+
+# A. Try the modern 'bootout' by service label (most reliable for upgrades)
+/bin/launchctl bootout system/$LABEL 2>/dev/null || true
+
+# B. Try the legacy 'unload' by path as a fallback
 /bin/launchctl unload "$PLIST_PATH" 2>/dev/null || true
 
-# Give the OS a second to release the file handles
-/bin/sleep 1
+# C. Give the kernel a moment to fully release the PID and file handles
+/bin/sleep 2
 
-echo "Starting new $PLIST_LABEL service..."
-# Load -w tells macOS to start it now and keep it enabled across reboots
-/bin/launchctl load -w "$PLIST_PATH"
+# D. Start the new version using modern 'bootstrap'
+/bin/launchctl bootstrap system "$PLIST_PATH"
+
+# E. Fallback to 'load' if bootstrap isn't available (older macOS)
+if [ $? -ne 0 ]; then
+    /bin/launchctl load -w "$PLIST_PATH"
+fi
 
 exit 0
-
-
