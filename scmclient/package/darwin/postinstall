@@ -1,14 +1,21 @@
 #!/bin/bash
-# Ensure directory exists
-mkdir -p /var/log/openscm
-chmod 755 /var/log/openscm
-mkdir -p /usr/local/etc/openscm
-chmod 755 /usr/local/etc/openscm
-mkdir -p /usr/local/etc/openscm/keys
-chmod 700 /usr/local/etc/openscm/keys
 
-# Load and start the service immediately
-/bin/launchctl bootstrap system /Library/LaunchDaemons/io.openscm.scmclient.plist 2>/dev/null || \
+# 1. Create Data/Log Directories
+# The Payload creates /usr/local/bin, but we handle logs here
+/bin/mkdir -p /var/log/openscm
+/bin/chmod 755 /var/log/openscm
+
+# 2. Fix Ownership (The "root:wheel" rule)
+# On macOS, system services MUST be owned by the 'wheel' group
+/usr/sbin/chown root:wheel /usr/local/bin/scmclient
+/usr/sbin/chown root:wheel /Library/LaunchDaemons/io.openscm.scmclient.plist
+/bin/chmod 644 /Library/LaunchDaemons/io.openscm.scmclient.plist
+
+# 3. Handle Upgrades/Restarts
+# If the service is already running, we unload it first
+/bin/launchctl unload /Library/LaunchDaemons/io.openscm.scmclient.plist 2>/dev/null
+
+# 4. Load the Service
 /bin/launchctl load -w /Library/LaunchDaemons/io.openscm.scmclient.plist
 
-
+exit 0
