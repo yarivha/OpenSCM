@@ -1,0 +1,6 @@
+<pkg-info format-version="2" identifier="$IDENTIFIER" version="$VERSION" install-location="$INSTALL_LOCATION" auth="root">
+  <payload installKBytes="$(du -sk "$ROOT_DIR" | cut -f1)" numberOfFiles="$(find "$ROOT_DIR" | wc -l)"/>
+  <scripts>
+    <postinstall file="./postinstall"/>
+  </scripts>
+</pkg-info>
