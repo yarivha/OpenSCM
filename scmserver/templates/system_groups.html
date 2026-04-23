@@ -88,7 +88,7 @@
                       {# Secondary Action: Edit #}
                       <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
                          href="{% if is_editor %}/system_groups/edit/{{ group.id }}{% else %}#{% endif %}"
-                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+			 {% if is_editor %}title="Edit Group"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
                         <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                       </a>
 
@@ -96,7 +96,7 @@
                       <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
                          onclick="{% if is_editor %}return confirm('Delete this group? Systems will be unassigned.'){% endif %}"
                          href="{% if is_editor %}/system_groups/delete/{{ group.id }}{% else %}#{% endif %}"
-                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+			 {% if is_editor %}title="Delete Group"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
                         <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                       </a>
 
