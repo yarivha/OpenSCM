@@ -1,21 +1,31 @@
 #!/bin/bash
 
-# 1. Create Data/Log Directories
-# The Payload creates /usr/local/bin, but we handle logs here
-/bin/mkdir -p /var/log/openscm
-/bin/chmod 755 /var/log/openscm
+# --- 1. Variables ---
+PLIST_LABEL="io.openscm.scmclient"
+PLIST_PATH="/Library/LaunchDaemons/${PLIST_LABEL}.plist"
+BINARY_PATH="/usr/local/bin/scmclient"
 
-# 2. Fix Ownership (The "root:wheel" rule)
-# On macOS, system services MUST be owned by the 'wheel' group
-/usr/sbin/chown root:wheel /usr/local/bin/scmclient
-/usr/sbin/chown root:wheel /Library/LaunchDaemons/io.openscm.scmclient.plist
-/bin/chmod 644 /Library/LaunchDaemons/io.openscm.scmclient.plist
+# --- 2. Fix Permissions (Mandatory for LaunchDaemons) ---
+# If these are wrong, launchd will refuse to load the service
+/usr/sbin/chown root:wheel "$PLIST_PATH"
+/bin/chmod 644 "$PLIST_PATH"
+/usr/sbin/chown root:wheel "$BINARY_PATH"
+/bin/chmod 755 "$BINARY_PATH"
 
-# 3. Handle Upgrades/Restarts
-# If the service is already running, we unload it first
-/bin/launchctl unload /Library/LaunchDaemons/io.openscm.scmclient.plist 2>/dev/null
+# --- 3. Restart the Service ---
+echo "Stopping existing $PLIST_LABEL service (if running)..."
 
-# 4. Load the Service
-/bin/launchctl load -w /Library/LaunchDaemons/io.openscm.scmclient.plist
+# Unload stops the current process and removes it from the service list
+# We use '|| true' so the script doesn't crash on a fresh install
+/bin/launchctl unload "$PLIST_PATH" 2>/dev/null || true
+
+# Give the OS a second to release the file handles
+/bin/sleep 1
+
+echo "Starting new $PLIST_LABEL service..."
+# Load -w tells macOS to start it now and keep it enabled across reboots
+/bin/launchctl load -w "$PLIST_PATH"
 
 exit 0
+
+
