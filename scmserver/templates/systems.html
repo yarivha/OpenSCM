@@ -128,14 +128,14 @@
                         
                         <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
                            href="{% if is_editor %}/systems/edit/{{ system.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Edit Required"{% endif %}>
+			   {% if is_editor %}title="Edit System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Edit Required"{% endif %}>
                           <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                         </a>
 
                         <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
                            onclick="{% if is_editor %}return confirm('Delete system?'){% else %}return false;{% endif %}" 
                            href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}"
-                           {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
+			   {% if is_editor %}title="Delete System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
                           <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                         </a>
                       {% endif %}
