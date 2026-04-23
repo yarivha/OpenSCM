@@ -181,83 +181,113 @@
 </div>
 {% endblock %}
 
+
 {% block scripts %}
 <script>
 $(function () {
-  $(document).on('click', '.view-test-btn', function() {
-    const b = $(this);
-    const filter = (b.data('filter') || 'all').toLowerCase();
-    
-    $('#m-title-head').html('<i class="fas fa-microscope mr-2"></i>' + b.data('name'));
-    $('#m-id').text(b.data('id'));
-    $('#m-desc').text(b.data('desc') || "No description provided.");
-    
-    // Rationale Fallback
-    const ratVal = b.data('rat');
-    $('#m-rat').text((ratVal && ratVal !== "None") ? ratVal : "No rationale provided.");
+    // 1. Modal Logic: Populate and show the 'View' modal
+    $(document).on('click', '.view-test-btn', function() {
+        const b = $(this);
+        const filter = (b.data('filter') || 'all').toLowerCase();
+        
+        // Header and ID
+        $('#m-title-head').html('<i class="fas fa-microscope mr-2"></i>' + b.data('name'));
+        $('#m-id').text(b.data('id'));
+        
+        // Description
+        $('#m-desc').text(b.data('desc') || "No description provided.");
+        
+        // Rationale Fallback
+        const ratVal = b.data('rat');
+        $('#m-rat').text((ratVal && ratVal !== "None") ? ratVal : "No rationale provided.");
 
-    // Remediation Fallback & Styling Sync
-    const remVal = b.data('rem');
-    const remBox = $('#m-rem');
-    if (remVal && remVal !== "None" && remVal !== "") {
-        remBox.removeClass('empty-placeholder text-muted text-sm').addClass('remediation-box').text(remVal);
-    } else {
-        remBox.removeClass('remediation-box').addClass('empty-placeholder text-muted text-sm').text("No remediation steps provided.");
-    }
-
-    const logicWord = filter === 'any' ? 'ANY' : 'ALL';
-    $('#m-filter-statement').html(`This test match <strong>${logicWord.toUpperCase()}</strong> of the following conditions:`);
-
-    const sev = (b.data('sev') || "").toLowerCase().trim();
-    const sevBadge = $('#m-sev-badge');
-    sevBadge.removeClass('badge-secondary badge-info badge-warning badge-danger badge-critical');
-    
-    if(sev === "critical") sevBadge.addClass('badge-critical').text('CRITICAL');
-    else if(sev === "high") sevBadge.addClass('badge-danger').text('HIGH');
-    else if(sev === "medium") sevBadge.addClass('badge-warning').text('MEDIUM');
-    else if(sev === "low") sevBadge.addClass('badge-info').text('LOW');
-    else sevBadge.addClass('badge-secondary').text('INFO');
-
-    const container = $('#logic-steps-container');
-    container.empty();
-    let stepCount = 0;
-
-    for (let i = 1; i <= 5; i++) {
-        let el = b.data('e' + i);
-        let co = b.data('c' + i);
-        let ex = b.data('s' + i);
-
-        if (el && el !== "None" && el !== "") {
-            if (stepCount > 0) container.append(`<div class="logic-divider"></div>`);
-            
-            container.append(`
-              <div class="logic-step-row p-3 shadow-sm d-flex align-items-center justify-content-around rounded bg-white">
-                <div class="text-center" style="width: 32%">
-                  <div class="node-circle bg-info shadow-sm"><i class="fas fa-file-code"></i></div>
-                  <small class="d-block mt-1 text-xs text-muted">SUBJECT</small>
-                  <span class="badge badge-light border text-truncate d-block">${el}</span>
-                </div>
-                <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
-                <div class="text-center" style="width: 32%">
-                  <div class="node-circle node-condition bg-warning shadow-sm"><i class="fas fa-equals"></i></div>
-                  <small class="d-block mt-1 text-xs text-muted">LOGIC</small>
-                  <span class="badge badge-light border text-truncate d-block">${co}</span>
-                </div>
-                <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
-                <div class="text-center" style="width: 32%">
-                  <div class="node-circle bg-success shadow-sm"><i class="fas fa-shield-check"></i></div>
-                  <small class="d-block mt-1 text-xs text-muted">EXPECTED</small>
-                  <span class="badge badge-light border text-truncate d-block">${ex}</span>
-                </div>
-              </div>
-            `);
-            stepCount++;
+        // Remediation Fallback & Styling Sync
+        const remVal = b.data('rem');
+        const remBox = $('#m-rem');
+        if (remVal && remVal !== "None" && remVal !== "") {
+            remBox.removeClass('empty-placeholder text-muted text-sm').addClass('remediation-box').text(remVal);
+        } else {
+            remBox.removeClass('remediation-box').addClass('empty-placeholder text-muted text-sm').text("No remediation steps provided.");
         }
-    }
-    $('#testDetailsModal').modal('show');
-  });
 
-  $("#tests_table").DataTable({ "responsive": true, "order": [[1, "asc"]] });
+        // Logic Statement (ALL vs ANY)
+        const logicWord = filter === 'any' ? 'ANY' : 'ALL';
+        $('#m-filter-statement').html(`This test matches <strong>${logicWord.toUpperCase()}</strong> of the following conditions:`);
+
+        // Severity Badge logic
+        const sev = (b.data('sev') || "").toLowerCase().trim();
+        const sevBadge = $('#m-sev-badge');
+        sevBadge.removeClass('badge-secondary badge-info badge-warning badge-danger badge-critical');
+        
+        if(sev === "critical") sevBadge.addClass('badge-critical').text('CRITICAL');
+        else if(sev === "high") sevBadge.addClass('badge-danger').text('HIGH');
+        else if(sev === "medium") sevBadge.addClass('badge-warning').text('MEDIUM');
+        else if(sev === "low") sevBadge.addClass('badge-info').text('LOW');
+        else sevBadge.addClass('badge-secondary').text('INFO');
+
+        // Logic Steps Container
+        const container = $('#logic-steps-container');
+        container.empty();
+        let stepCount = 0;
+
+        // Loop through the 5 possible conditions
+        for (let i = 1; i <= 5; i++) {
+            let el = b.data('e' + i);
+            let co = b.data('c' + i);
+            let ex = b.data('s' + i);
+
+            if (el && el !== "None" && el !== "") {
+                if (stepCount > 0) container.append(`<div class="logic-divider"></div>`);
+                
+                container.append(`
+                    <div class="logic-step-row p-3 shadow-sm d-flex align-items-center justify-content-around rounded bg-white">
+                        <div class="text-center" style="width: 32%">
+                            <div class="node-circle bg-info shadow-sm"><i class="fas fa-file-code"></i></div>
+                            <small class="d-block mt-1 text-xs text-muted">SUBJECT</small>
+                            <span class="badge badge-light border text-truncate d-block">${el}</span>
+                        </div>
+                        <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
+                        <div class="text-center" style="width: 32%">
+                            <div class="node-circle node-condition bg-warning shadow-sm"><i class="fas fa-equals"></i></div>
+                            <small class="d-block mt-1 text-xs text-muted">LOGIC</small>
+                            <span class="badge badge-light border text-truncate d-block">${co}</span>
+                        </div>
+                        <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
+                        <div class="text-center" style="width: 32%">
+                            <div class="node-circle bg-success shadow-sm"><i class="fas fa-shield-check"></i></div>
+                            <small class="d-block mt-1 text-xs text-muted">EXPECTED</small>
+                            <span class="badge badge-light border text-truncate d-block">${ex}</span>
+                        </div>
+                    </div>
+                `);
+                stepCount++;
+            }
+        }
+        $('#testDetailsModal').modal('show');
+    });
+
+    // 2. DataTables Initialization
+    const table = $("#tests_table").DataTable({
+        "responsive": true,
+        "lengthChange": false, // Usually disabled to make room for buttons
+        "autoWidth": false,
+        "order": [[1, "asc"]],
+        "columnDefs": [{ "targets": 0, "visible": false }],
+        // 'dom' is critical: B (Buttons), f (filter), r (processing), t (table), i (info), p (pagination)
+        "dom": '<"row"<"col-md-6"B><"col-md-6"f>>rtip',
+        "buttons": [
+            { extend: 'copy', className: 'btn-sm' },
+            { extend: 'csv', className: 'btn-sm' },
+            { extend: 'excel', className: 'btn-sm' },
+            { extend: 'pdf', className: 'btn-sm' },
+            { extend: 'print', className: 'btn-sm' },
+            { extend: 'colvis', className: 'btn-sm' }
+        ]
+    });
+
+    // 3. Move Buttons to the correct Bootstrap column in the wrapper
+    table.buttons().container().appendTo('#tests_table_wrapper .col-md-6:eq(0)');
 });
 </script>
 {% endblock %}
+
