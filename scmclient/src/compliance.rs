@@ -5,6 +5,7 @@ use semver::Version;
 use sysinfo::System;
 use std::process::Command;
 use std::net::TcpStream;
+use std::io::{BufRead, BufReader};
 
 
 // ============================================================
@@ -24,71 +25,46 @@ fn parse_to_semver(v: &str) -> Option<Version> {
 
 #[cfg(unix)]
 fn get_user_name_from_uid(uid: u32) -> Option<String> {
-    let output = Command::new("id")
-        .args(["-un", &uid.to_string()])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        Some(String::from_utf8_lossy(&output.stdout).trim().to_string())
-    } else {
-        None
-    }
+    uzers::get_user_by_uid(uid).map(|u| u.name().to_string_lossy().into_owned())
 }
 
 #[cfg(unix)]
 fn get_group_name_from_gid(gid: u32) -> Option<String> {
-    let output = Command::new("getent")
-        .args(["group", &gid.to_string()])
-        .output()
-        .ok()?;
-    if output.status.success() {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        stdout.split(':').next().map(|s| s.to_string())
-    } else {
-        None
-    }
+    uzers::get_group_by_gid(gid).map(|g| g.name().to_string_lossy().into_owned())
 }
 
 
-#[cfg(unix)]
 fn check_user_exists(user: &str) -> bool {
-    Command::new("id")
-        .arg(user)
-        .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // 1. Use the dedicated Users struct (this is the 0.30+ way)
+    // new_with_refreshed_list() does the initialization and the refresh in one go.
+    let users = sysinfo::Users::new_with_refreshed_list();
+    
+    // 2. Iterate directly over the users
+    // In 0.30+, get_name() is now just name()
+    users.iter().any(|u| u.name() == user)
 }
 
-#[cfg(windows)]
-fn check_user_exists(user: &str) -> bool {
-    Command::new("net")
-        .args(["user", user])
-        .stdout(std::process::Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
-}
 
 
 #[cfg(unix)]
 fn check_group_exists(group: &str) -> bool {
-    Command::new("getent")
-        .args(["group", group])
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // Native Unix call to the groups database
+    uzers::get_group_by_name(group).is_some()
 }
 
 #[cfg(windows)]
 fn check_group_exists(group: &str) -> bool {
+    // Windows groups are complex; sysinfo doesn't list them all yet.
+    // For now, sticking to 'net localgroup' is acceptable, or 
+    // using the 'windows' crate for a deep native call.
     Command::new("net")
         .args(["localgroup", group])
+        .stdout(std::process::Stdio::null())
         .status()
         .map(|s| s.success())
         .unwrap_or(false)
 }
+
 
 
 #[cfg(unix)]
@@ -205,44 +181,47 @@ fn get_package_version(package: &str) -> Option<String> {
 }
 
 
+#[cfg(unix)]
 fn get_system_domain() -> Option<String> {
-    #[cfg(unix)]
-    {
-        if let Ok(output) = Command::new("hostname").arg("-d").output() {
-            if output.status.success() {
-                let d = String::from_utf8_lossy(&output.stdout).trim().to_string();
-                if !d.is_empty() && d != "(none)" {
-                    return Some(d);
-                }
+    // Native lookup via the resolver
+    dns_lookup::get_hostname().ok().and_then(|h| {
+        if h.contains('.') {
+            h.splitn(2, '.').nth(1).map(|s| s.to_string())
+        } else {
+            None
+        }
+    })
+}
+
+#[cfg(windows)]
+fn get_system_domain() -> Option<String> {
+    // Native Windows API call (via dns-lookup crate)
+    dns_lookup::get_hostname().ok().and_then(|h| {
+        // On Windows, the domain is often found via the FQDN
+        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None).ok()?.next()?.canonname?;
+        fqdn.splitn(2, '.').nth(1).map(|s| s.to_string())
+    })
+}
+
+
+fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
+    let file = match fs::File::open(path) {
+        Ok(f) => f,
+        Err(e) => {
+            error!("Could not open file {}: {}", path, e);
+            return false;
+        }
+    };
+
+    let reader = BufReader::new(file);
+    for line in reader.lines() {
+        if let Ok(content) = line {
+            if apply_string_condition(&content, condition, expected) {
+                return true; // Found a match, stop reading!
             }
         }
-        if let Ok(content) = fs::read_to_string("/etc/resolv.conf") {
-            for line in content.lines() {
-                let trimmed = line.trim();
-                if trimmed.starts_with("domain ") || trimmed.starts_with("search ") {
-                    return trimmed.split_whitespace().nth(1).map(|s| s.to_string());
-                }
-            }
-        }
-        None
     }
-
-    #[cfg(windows)]
-    {
-        let output = Command::new("powershell")
-            .args(["-Command", "(Get-WmiObject Win32_ComputerSystem).Domain"])
-            .output()
-            .ok();
-
-        output.and_then(|o| {
-            if o.status.success() {
-                let d = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                if !d.is_empty() { Some(d) } else { None }
-            } else {
-                None
-            }
-        })
-    }
+    false
 }
 
 
@@ -468,11 +447,7 @@ pub fn evaluate(
         "file" => match selement_l.as_str() {
             "exists"     => Path::new(input).is_file(),
             "not exists" => !Path::new(input).is_file(),
-            "content"    => {
-                fs::read_to_string(input)
-                    .map(|c| apply_string_condition(&c, condition, sinput_trim))
-                    .unwrap_or(false)
-            }
+            "content"    => check_file_content(input,condition, sinput_trim),
             "owner" => {
                 #[cfg(unix)]
                 {
