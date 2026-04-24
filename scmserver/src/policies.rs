@@ -856,7 +856,7 @@ pub async fn policies_report(
         .collect();
 
     let result_rows = match sqlx::query(r#"
-        SELECT DISTINCT
+        SELECT
             s.name as system_name,
             t.name as test_name,
             r.result as status
@@ -869,6 +869,7 @@ pub async fn policies_report(
         WHERE sip.policy_id = ?
           AND tip.policy_id = ?
           AND sip.tenant_id = ?
+        GROUP BY s.name, t.name, r.result
     "#)
     .bind(id)
     .bind(id)
