@@ -150,13 +150,15 @@
                     {{ res.test_name }}
                   {% endif %}
                 </td>
-                <td class="text-center">
-                  {% if res.status == "PASS" %}
-                    <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
-                  {% else %}
-                    <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>
-                  {% endif %}
-                </td>
+		<td class="text-center">
+  		  {% if res.status == "PASS" %}
+    		    <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
+  		  {% elif res.status == "NA" %}
+    		    <span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>
+  		  {% else %}
+    		    <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>
+  		  {% endif %}
+		</td>
               </tr>
               {% endfor %}
             </tbody>
@@ -273,15 +275,21 @@
     modal.find('#modal-rational').text(rational);
     modal.find('#modal-remediation').text(remediation);
 
+
     if (status === 'PASS') {
       modal.find('#modal-status-badge').html(
         '<span class="badge badge-success"><i class="fas fa-check-circle mr-1"></i> PASS</span>'
+      );
+    } else if (status === 'NA') {
+      modal.find('#modal-status-badge').html(
+        '<span class="badge badge-secondary"><i class="fas fa-minus-circle mr-1"></i> NA</span>'
       );
     } else {
       modal.find('#modal-status-badge').html(
         '<span class="badge badge-danger"><i class="fas fa-times-circle mr-1"></i> FAIL</span>'
       );
     }
+
   });
 </script>
 {% endblock %}
