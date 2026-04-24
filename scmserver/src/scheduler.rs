@@ -124,7 +124,6 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 SELECT COUNT(*) FROM results
                 WHERE system_id = systems.id
                 AND tenant_id = systems.tenant_id
-                AND result != 'NA'    -- ← exclude NA from total
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
