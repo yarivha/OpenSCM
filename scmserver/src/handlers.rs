@@ -204,8 +204,7 @@ pub async fn clear_notifications(
 // STATUS NORMALIZATION
 // ============================================================
 
-/// Normalize result status strings to a consistent "PASS" or "FAIL".
-/// Handles legacy formats: "true", "1", "pass", "PASS".
+/// Normalize result status strings to a consistent "PASS" ,"FAIL" or "NA"
 pub fn normalize_status(raw: &str) -> &'static str {
     match raw.to_lowercase().as_str() {
         "pass" | "true" | "1" => "PASS",

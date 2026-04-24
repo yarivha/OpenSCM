@@ -900,12 +900,13 @@ pub async fn policies_report(
     let system_reports: Vec<SystemReport> = system_map
         .into_iter()
         .map(|(name, results)| {
-            let is_passed = results.iter().all(|r| r.status == "PASS");
+            let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
+                && results.iter().any(|r| r.status == "PASS");
             SystemReport { system_name: name, results, is_passed }
         })
         .collect();
 
-    let fail_count = system_reports.iter().filter(|s| !s.is_passed).count();
+    let fail_count = system_reports.iter().filter(|s| !s.is_passed && s.results.iter().any(|r| r.status != "NA")).count();
 
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
@@ -1034,7 +1035,8 @@ pub async fn policies_report_download(
     let system_reports: Vec<SystemReport> = system_map
         .into_iter()
         .map(|(name, results)| {
-            let is_passed = results.iter().all(|r| r.status == "PASS");
+            let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
+                && results.iter().any(|r| r.status == "PASS");
             SystemReport { system_name: name, results, is_passed }
         })
         .collect();
