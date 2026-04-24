@@ -207,6 +207,7 @@ pub struct SystemFailRow {
     pub compliance: f64, // Alias for compliance_score
     pub tests_passed: i32,
     pub tests_failed: i32,
+    pub tests_na: i64,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
