@@ -3,8 +3,8 @@
 [![License](https://img.shields.io/badge/license-FSL--1.1--ALv2-blue)](https://fsl.software/)
 [![Client License](https://img.shields.io/badge/client-Apache%202.0-green)](https://www.apache.org/licenses/LICENSE-2.0)
 [![Built with Rust](https://img.shields.io/badge/built%20with-Rust-orange)](https://rust-lang.org/)
-![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows%20|%20FreeBSD-lightgrey)
-![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM64%20|%20RISC--V%20|%20PowerPC64-blue)
+![Platforms](https://img.shields.io/badge/platforms-Linux%20|%20Windows%20|%20FreeBSD%20|%20macOS-lightgrey)
+![Architectures](https://img.shields.io/badge/arch-x86__64%20|%20ARM64%20|%20ARMv7%20|%20RISC--V%20|%20PowerPC64-blue)
 [![Docker](https://img.shields.io/badge/docker-openscm%2Fscmserver-blue)](https://hub.docker.com/r/openscm/scmserver)
 
 A self-hosted, privacy-first security compliance platform built in Rust.
@@ -32,10 +32,26 @@ If you find this project helpful, please consider sponsoring us to support ongoi
 - **Mutual Ed25519 Signing** — every payload is cryptographically signed in both directions
 - **UI-Driven Policy Builder** — define compliance tests visually, no scripting required
 - **Evidence-Grade Reports** — archive compliance results as formal audit evidence (PDF)
-- **Universal Platform Support** — Linux , Windows and FreeBSD on x86, ARM, RISC-V and PowerPC (macOS coming soon)
+- **Universal Platform Support** — Linux, Windows, FreeBSD and macOS on x86_64, ARM64, ARMv7, RISC-V and PowerPC64
 - **Single Binary Deployment** — server ships with all assets embedded, no setup required
 - **Scheduled Scanning** — automate compliance scans on any schedule
 - **Role-Based Access Control** — Administrator, Editor, Runner, Viewer
+
+---
+
+## Supported Platforms
+
+| Platform | Architecture | Server | Client | Package Format |
+|:---|:---|:---:|:---:|:---|
+| Linux | x86_64 | ✅ | ✅ | deb, rpm |
+| Linux | ARM64 | ✅ | ✅ | deb, rpm |
+| Linux | ARMv7 | ❌ | ✅ | deb, rpm |
+| Linux | RISC-V | ❌ | ✅ | deb, rpm |
+| Linux | PowerPC64LE | ❌ | ✅ | deb, rpm |
+| Windows | x86_64 | ✅ | ✅ | exe (NSIS) |
+| macOS | Universal (ARM64 + x86_64) | ❌ | ✅ | pkg |
+| FreeBSD | x86_64 | ❌ | ✅ | pkg |
+| Docker | amd64, arm64 | ✅ | ❌ | image |
 
 ---
 
@@ -82,14 +98,21 @@ Download the latest installer from **[openscm.io/start/downloads](https://opensc
 
 The agent can be configured to run as a Windows Service during installation.
 
-### 😈 FreeBSD / 🍎 macOS
-
-Download the latest installer from **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
-and run the following:
+### 😈 FreeBSD
 
 ```bash
 pkg add scmclient-<version>.pkg
 ```
+
+### 🍎 macOS
+
+Download the latest pkg from **[openscm.io/start/downloads](https://openscm.io/start/downloads/)** and double-click to install.
+
+Or from the terminal:
+```bash
+sudo installer -pkg scmclient-<version>.pkg -target /
+```
+
 
 ### 🐳 Docker
 
