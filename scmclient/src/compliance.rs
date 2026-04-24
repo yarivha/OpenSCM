@@ -9,6 +9,27 @@ use std::io::{BufRead, BufReader};
 
 
 // ============================================================
+// EVAL RESULT
+// ============================================================
+
+#[derive(Debug, PartialEq)]
+pub enum EvalResult {
+    Pass,
+    Fail,
+    Na,
+}
+
+impl EvalResult {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            EvalResult::Pass => "PASS",
+            EvalResult::Fail => "FAIL",
+            EvalResult::Na   => "NA",
+        }
+    }
+}
+
+// ============================================================
 // HELPERS
 // ============================================================
 
@@ -35,28 +56,18 @@ fn get_group_name_from_gid(gid: u32) -> Option<String> {
 
 
 fn check_user_exists(user: &str) -> bool {
-    // 1. Use the dedicated Users struct (this is the 0.30+ way)
-    // new_with_refreshed_list() does the initialization and the refresh in one go.
     let users = sysinfo::Users::new_with_refreshed_list();
-    
-    // 2. Iterate directly over the users
-    // In 0.30+, get_name() is now just name()
     users.iter().any(|u| u.name() == user)
 }
 
 
-
 #[cfg(unix)]
 fn check_group_exists(group: &str) -> bool {
-    // Native Unix call to the groups database
     uzers::get_group_by_name(group).is_some()
 }
 
 #[cfg(windows)]
 fn check_group_exists(group: &str) -> bool {
-    // Windows groups are complex; sysinfo doesn't list them all yet.
-    // For now, sticking to 'net localgroup' is acceptable, or 
-    // using the 'windows' crate for a deep native call.
     Command::new("net")
         .args(["localgroup", group])
         .stdout(std::process::Stdio::null())
@@ -64,7 +75,6 @@ fn check_group_exists(group: &str) -> bool {
         .map(|s| s.success())
         .unwrap_or(false)
 }
-
 
 
 #[cfg(unix)]
@@ -83,8 +93,6 @@ fn is_user_in_group(user: &str, group: &str) -> bool {
 }
 
 
-/// Check if a TCP port is open on localhost.
-/// Returns false gracefully on invalid port or connection failure.
 fn check_port_open(port: &str) -> bool {
     let addr_str = format!("127.0.0.1:{}", port);
     let addr = match addr_str.parse() {
@@ -135,7 +143,6 @@ fn check_package_exists(package: &str) -> bool {
 
 #[cfg(unix)]
 fn get_package_version(package: &str) -> Option<String> {
-    // Try Debian/Ubuntu (dpkg)
     let output = Command::new("dpkg-query")
         .args(["-W", "-f=${Version}", package])
         .output()
@@ -148,7 +155,6 @@ fn get_package_version(package: &str) -> Option<String> {
         }
     }
 
-    // Try RHEL/CentOS/Fedora (rpm)
     let output_rpm = Command::new("rpm")
         .args(["-q", "--queryformat", "%{VERSION}", package])
         .output()
@@ -183,7 +189,6 @@ fn get_package_version(package: &str) -> Option<String> {
 
 #[cfg(unix)]
 fn get_system_domain() -> Option<String> {
-    // Native lookup via the resolver
     dns_lookup::get_hostname().ok().and_then(|h| {
         if h.contains('.') {
             h.splitn(2, '.').nth(1).map(|s| s.to_string())
@@ -196,15 +201,10 @@ fn get_system_domain() -> Option<String> {
 #[cfg(windows)]
 fn get_system_domain() -> Option<String> {
     dns_lookup::get_hostname().ok().and_then(|h| {
-        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None)
-            .ok()?
-            .next()?
-            .unwrap()
-            .canonname?;
+        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None).ok()?.next()?.canonname?;
         fqdn.splitn(2, '.').nth(1).map(|s| s.to_string())
     })
 }
-
 
 
 fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
@@ -220,7 +220,7 @@ fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
     for line in reader.lines() {
         if let Ok(content) = line {
             if apply_string_condition(&content, condition, expected) {
-                return true; // Found a match, stop reading!
+                return true;
             }
         }
     }
@@ -266,7 +266,6 @@ fn calculate_sha2(path: &str) -> Result<String, std::io::Error> {
 }
 
 
-/// Apply a string condition check between actual and expected values.
 fn apply_string_condition(actual: &str, condition: &str, expected: &str) -> bool {
     match condition.trim().to_lowercase().as_str() {
         "contains"                   => actual.to_lowercase().contains(&expected.to_lowercase()),
@@ -294,7 +293,6 @@ fn apply_string_condition(actual: &str, condition: &str, expected: &str) -> bool
 }
 
 
-/// Apply a semver comparison between actual and target version strings.
 fn apply_version_condition(actual_str: &str, condition: &str, target_str: &str) -> bool {
     let actual = parse_to_semver(actual_str);
     let target = parse_to_semver(target_str);
@@ -311,7 +309,6 @@ fn apply_version_condition(actual_str: &str, condition: &str, target_str: &str) 
             }
         }
     } else {
-        // Fallback to string comparison if semver parsing fails
         match condition.trim().to_lowercase().as_str() {
             "equal" | "equals" => actual_str == target_str,
             "contains"         => actual_str.contains(target_str),
@@ -331,7 +328,7 @@ pub fn evaluate(
     selement: &str,
     condition: &str,
     sinput: &str,
-) -> bool {
+) -> EvalResult {
     let element_l   = element.trim().to_lowercase();
     let selement_l  = selement.trim().to_lowercase();
     let sinput_trim = sinput.trim();
@@ -342,11 +339,23 @@ pub fn evaluate(
         // AGENT
         // =========================================================
         "agent" => match selement_l.as_str() {
-            "version" => apply_version_condition(env!("CARGO_PKG_VERSION"), condition, sinput_trim),
-            "content" => apply_string_condition(env!("CARGO_PKG_VERSION"), condition, sinput_trim),
+            "version" => {
+                if apply_version_condition(env!("CARGO_PKG_VERSION"), condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
+            }
+            "content" => {
+                if apply_string_condition(env!("CARGO_PKG_VERSION"), condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
+            }
             _ => {
                 error!("Unsupported agent selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -354,10 +363,16 @@ pub fn evaluate(
         // ARCHITECTURE
         // =========================================================
         "architecture" => match selement_l.as_str() {
-            "content" => apply_string_condition(std::env::consts::ARCH, condition, sinput_trim),
+            "content" => {
+                if apply_string_condition(std::env::consts::ARCH, condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
+            }
             _ => {
                 error!("Unsupported architecture selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -365,16 +380,17 @@ pub fn evaluate(
         // DIRECTORY
         // =========================================================
         "directory" => match selement_l.as_str() {
-            "exists"     => Path::new(input).is_dir(),
-            "not exists" => !Path::new(input).is_dir(),
+            "exists"     => if Path::new(input).is_dir() { EvalResult::Pass } else { EvalResult::Fail },
+            "not exists" => if !Path::new(input).is_dir() { EvalResult::Pass } else { EvalResult::Fail },
             "content"    => {
-                fs::read_dir(input)
+                let result = fs::read_dir(input)
                     .map(|entries| {
                         entries
                             .filter_map(|e| e.ok())
                             .any(|e| e.file_name() == sinput_trim)
                     })
-                    .unwrap_or(false)
+                    .unwrap_or(false);
+                if result { EvalResult::Pass } else { EvalResult::Fail }
             }
             "owner" => {
                 #[cfg(unix)]
@@ -383,12 +399,17 @@ pub fn evaluate(
                     let uid = metadata.map(|m| std::os::unix::fs::MetadataExt::uid(&m));
                     if let Some(u) = uid {
                         let name = get_user_name_from_uid(u).unwrap_or_default();
-                        name == sinput_trim || u.to_string() == sinput_trim
+                        if name == sinput_trim || u.to_string() == sinput_trim {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
                     } else {
-                        false
+                        EvalResult::Fail
                     }
                 }
-                #[cfg(windows)] { false }
+                #[cfg(not(unix))]
+                { EvalResult::Na }
             }
             "group" => {
                 #[cfg(unix)]
@@ -397,16 +418,19 @@ pub fn evaluate(
                     let gid = metadata.map(|m| std::os::unix::fs::MetadataExt::gid(&m));
                     if let Some(g) = gid {
                         let name = get_group_name_from_gid(g).unwrap_or_default();
-                        // Now supports "equals", "contains", "regex", etc.
-                        apply_string_condition(&name, condition, sinput_trim) ||
-                        apply_string_condition(&g.to_string(), condition, sinput_trim)
+                        if apply_string_condition(&name, condition, sinput_trim) ||
+                           apply_string_condition(&g.to_string(), condition, sinput_trim) {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
                     } else {
-                        false
+                        EvalResult::Fail
                     }
                 }
-                #[cfg(windows)] { false }
+                #[cfg(not(unix))]
+                { EvalResult::Na }
             }
-
             "permission" | "permissions" => {
                 #[cfg(unix)]
                 {
@@ -415,18 +439,20 @@ pub fn evaluate(
                         .map(|m| m.permissions().mode() & 0o777)
                         .unwrap_or(0);
                     let expected = u32::from_str_radix(sinput_trim, 8).unwrap_or(0);
-                    match condition.trim().to_lowercase().as_str() {
+                    let result = match condition.trim().to_lowercase().as_str() {
                         "equal" | "equals" => mode == expected,
                         "more than"        => mode >= expected,
                         "less than"        => mode <= expected,
                         _ => false,
-                    }
+                    };
+                    if result { EvalResult::Pass } else { EvalResult::Fail }
                 }
-                #[cfg(windows)] { false }
+                #[cfg(not(unix))]
+                { EvalResult::Na }
             }
             _ => {
                 error!("Unsupported directory selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -436,11 +462,15 @@ pub fn evaluate(
         "domain" => match selement_l.as_str() {
             "content" => {
                 let actual = get_system_domain().unwrap_or_else(|| "local".to_string());
-                apply_string_condition(&actual, condition, sinput_trim)
+                if apply_string_condition(&actual, condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
             }
             _ => {
                 error!("Unsupported domain selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -448,9 +478,15 @@ pub fn evaluate(
         // FILE
         // =========================================================
         "file" => match selement_l.as_str() {
-            "exists"     => Path::new(input).is_file(),
-            "not exists" => !Path::new(input).is_file(),
-            "content"    => check_file_content(input,condition, sinput_trim),
+            "exists"     => if Path::new(input).is_file() { EvalResult::Pass } else { EvalResult::Fail },
+            "not exists" => if !Path::new(input).is_file() { EvalResult::Pass } else { EvalResult::Fail },
+            "content"    => {
+                if check_file_content(input, condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
+            }
             "owner" => {
                 #[cfg(unix)]
                 {
@@ -458,14 +494,16 @@ pub fn evaluate(
                         .map(|m| std::os::unix::fs::MetadataExt::uid(&m))
                         .ok();
                     if let Some(u) = uid {
-                        get_user_name_from_uid(u)
+                        let result = get_user_name_from_uid(u)
                             .map(|n| n == sinput_trim)
-                            .unwrap_or(u.to_string() == sinput_trim)
+                            .unwrap_or(u.to_string() == sinput_trim);
+                        if result { EvalResult::Pass } else { EvalResult::Fail }
                     } else {
-                        false
+                        EvalResult::Fail
                     }
                 }
-                #[cfg(windows)] { false }
+                #[cfg(not(unix))]
+                { EvalResult::Na }
             }
             "group" => {
                 #[cfg(unix)]
@@ -475,14 +513,18 @@ pub fn evaluate(
                         .ok();
                     if let Some(g) = gid {
                         let name = get_group_name_from_gid(g).unwrap_or_default();
-                        // Apply the flexible string condition logic
-                        apply_string_condition(&name, condition, sinput_trim) || 
-                        apply_string_condition(&g.to_string(), condition, sinput_trim)
+                        if apply_string_condition(&name, condition, sinput_trim) ||
+                           apply_string_condition(&g.to_string(), condition, sinput_trim) {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
                     } else {
-                        false
+                        EvalResult::Fail
                     }
                 }
-                #[cfg(windows)] { false }
+                #[cfg(not(unix))]
+                { EvalResult::Na }
             }
             "permission" | "permissions" => {
                 #[cfg(unix)]
@@ -492,14 +534,16 @@ pub fn evaluate(
                         .map(|m| m.permissions().mode() & 0o777)
                         .unwrap_or(0);
                     let expected = u32::from_str_radix(sinput_trim, 8).unwrap_or(0);
-                    match condition.trim().to_lowercase().as_str() {
+                    let result = match condition.trim().to_lowercase().as_str() {
                         "equal" | "equals" => mode == expected,
                         "more than"        => mode >= expected,
                         "less than"        => mode <= expected,
                         _ => false,
-                    }
+                    };
+                    if result { EvalResult::Pass } else { EvalResult::Fail }
                 }
-                #[cfg(windows)] { false }
+                #[cfg(not(unix))]
+                { EvalResult::Na }
             }
             "sha1" => {
                 match calculate_sha1(input) {
@@ -507,11 +551,15 @@ pub fn evaluate(
                         let actual   = actual_hash.to_lowercase();
                         let expected = sinput_trim.to_lowercase();
                         debug!("SHA1 Check - File: {} | Actual: {} | Expected: {}", input, actual, expected);
-                        apply_string_condition(&actual, condition, &expected)
+                        if apply_string_condition(&actual, condition, &expected) {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
                     }
                     Err(e) => {
                         error!("Failed to calculate SHA1 for '{}': {}", input, e);
-                        false
+                        EvalResult::Fail
                     }
                 }
             }
@@ -521,17 +569,21 @@ pub fn evaluate(
                         let actual   = actual_hash.to_lowercase();
                         let expected = sinput_trim.to_lowercase();
                         debug!("SHA256 Check - File: {} | Actual: {} | Expected: {}", input, actual, expected);
-                        apply_string_condition(&actual, condition, &expected)
+                        if apply_string_condition(&actual, condition, &expected) {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
                     }
                     Err(e) => {
                         error!("Failed to calculate SHA256 for '{}': {}", input, e);
-                        false
+                        EvalResult::Fail
                     }
                 }
             }
             _ => {
                 error!("Unsupported file selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -539,15 +591,23 @@ pub fn evaluate(
         // GROUP
         // =========================================================
         "group" => match selement_l.as_str() {
-            "exists"     => check_group_exists(input),
-            "not exists" => !check_group_exists(input),
+            "exists"     => if check_group_exists(input) { EvalResult::Pass } else { EvalResult::Fail },
+            "not exists" => if !check_group_exists(input) { EvalResult::Pass } else { EvalResult::Fail },
             "content"    => {
-                #[cfg(unix)]    { is_user_in_group(sinput_trim, input) }
-                #[cfg(windows)] { false }
+                #[cfg(unix)]
+                {
+                    if is_user_in_group(sinput_trim, input) {
+                        EvalResult::Pass
+                    } else {
+                        EvalResult::Fail
+                    }
+                }
+                #[cfg(not(unix))]
+                { EvalResult::Na }
             }
             _ => {
                 error!("Unsupported group selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -557,11 +617,15 @@ pub fn evaluate(
         "hostname" => match selement_l.as_str() {
             "content" => {
                 let actual = gethostname::gethostname().to_string_lossy().to_string();
-                apply_string_condition(&actual, condition, sinput_trim)
+                if apply_string_condition(&actual, condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
             }
             _ => {
                 error!("Unsupported hostname selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -571,27 +635,37 @@ pub fn evaluate(
         "ip" => match selement_l.as_str() {
             "exists" => {
                 match local_ip_address::list_afinet_netifas() {
-                    Ok(interfaces) => interfaces.iter().any(|(_, ip)| ip.to_string() == input),
+                    Ok(interfaces) => {
+                        if interfaces.iter().any(|(_, ip)| ip.to_string() == input) {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
+                    }
                     Err(e) => {
                         warn!("Failed to list network interfaces: {}", e);
-                        false
+                        EvalResult::Fail
                     }
                 }
             }
             "content" => {
                 match local_ip_address::list_afinet_netifas() {
-                    Ok(interfaces) => interfaces
-                        .iter()
-                        .any(|(_, ip)| apply_string_condition(&ip.to_string(), condition, sinput_trim)),
+                    Ok(interfaces) => {
+                        if interfaces.iter().any(|(_, ip)| apply_string_condition(&ip.to_string(), condition, sinput_trim)) {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
+                    }
                     Err(e) => {
                         warn!("Failed to list network interfaces: {}", e);
-                        false
+                        EvalResult::Fail
                     }
                 }
             }
             _ => {
                 error!("Unsupported ip selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -601,15 +675,23 @@ pub fn evaluate(
         "os" => match selement_l.as_str() {
             "content" => {
                 let actual = os_info::get().os_type().to_string();
-                apply_string_condition(&actual, condition, sinput_trim)
+                if apply_string_condition(&actual, condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
             }
             "version" => {
                 let actual_str = os_info::get().version().to_string();
-                apply_version_condition(&actual_str, condition, sinput_trim)
+                if apply_version_condition(&actual_str, condition, sinput_trim) {
+                    EvalResult::Pass
+                } else {
+                    EvalResult::Fail
+                }
             }
             _ => {
                 error!("Unsupported os selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -617,20 +699,26 @@ pub fn evaluate(
         // PACKAGE
         // =========================================================
         "package" => match selement_l.as_str() {
-            "exists"     => check_package_exists(input),
-            "not exists" => !check_package_exists(input),
+            "exists"     => if check_package_exists(input) { EvalResult::Pass } else { EvalResult::Fail },
+            "not exists" => if !check_package_exists(input) { EvalResult::Pass } else { EvalResult::Fail },
             "version"    => {
                 match get_package_version(input) {
-                    Some(actual_ver) => apply_version_condition(&actual_ver, condition, sinput_trim),
+                    Some(actual_ver) => {
+                        if apply_version_condition(&actual_ver, condition, sinput_trim) {
+                            EvalResult::Pass
+                        } else {
+                            EvalResult::Fail
+                        }
+                    }
                     None => {
                         debug!("Package '{}' not installed — version check fails.", input);
-                        false
+                        EvalResult::Fail
                     }
                 }
             }
             _ => {
                 error!("Unsupported package selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -638,11 +726,11 @@ pub fn evaluate(
         // PORT
         // =========================================================
         "port" => match selement_l.as_str() {
-            "exists"     => check_port_open(input),
-            "not exists" => !check_port_open(input),
+            "exists"     => if check_port_open(input) { EvalResult::Pass } else { EvalResult::Fail },
+            "not exists" => if !check_port_open(input) { EvalResult::Pass } else { EvalResult::Fail },
             _ => {
                 error!("Unsupported port selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -659,11 +747,11 @@ pub fn evaluate(
                 .any(|p| p.name().to_lowercase().contains(&input.to_lowercase()));
 
             match selement_l.as_str() {
-                "exists"     => is_running,
-                "not exists" => !is_running,
+                "exists"     => if is_running { EvalResult::Pass } else { EvalResult::Fail },
+                "not exists" => if !is_running { EvalResult::Pass } else { EvalResult::Fail },
                 _ => {
                     error!("Unsupported process selement: '{}'", selement);
-                    false
+                    EvalResult::Na
                 }
             }
         }
@@ -676,37 +764,48 @@ pub fn evaluate(
                 #[cfg(windows)]
                 {
                     let cmd = format!("Test-Path 'HKLM:\\{}'", input);
-                    Command::new("powershell")
+                    if Command::new("powershell")
                         .args(["-Command", &cmd])
                         .status()
                         .map(|s| s.success())
                         .unwrap_or(false)
+                    {
+                        EvalResult::Pass
+                    } else {
+                        EvalResult::Fail
+                    }
                 }
-                #[cfg(unix)] { false }
+                #[cfg(not(windows))]
+                { EvalResult::Na }
             }
             "not exists" => {
                 #[cfg(windows)]
                 {
                     let cmd = format!("Test-Path 'HKLM:\\{}'", input);
-                    !Command::new("powershell")
+                    if !Command::new("powershell")
                         .args(["-Command", &cmd])
                         .status()
                         .map(|s| s.success())
                         .unwrap_or(true)
+                    {
+                        EvalResult::Pass
+                    } else {
+                        EvalResult::Fail
+                    }
                 }
-                #[cfg(unix)] { false }
+                #[cfg(not(windows))]
+                { EvalResult::Na }
             }
             "content" => {
                 #[cfg(windows)]
                 {
-                    // input format: "SOFTWARE\\MyApp\\Settings|ValueName"
                     let parts: Vec<&str> = input.splitn(2, '|').collect();
                     if parts.len() != 2 {
                         error!(
                             "Registry content check requires 'path|ValueName' format, got: '{}'",
                             input
                         );
-                        return false;
+                        return EvalResult::Fail;
                     }
                     let reg_path   = parts[0];
                     let value_name = parts[1];
@@ -718,18 +817,24 @@ pub fn evaluate(
                         .args(["-Command", &cmd])
                         .output()
                         .ok();
-                    output
-                        .map(|o| {
+                    match output {
+                        Some(o) => {
                             let actual = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                            apply_string_condition(&actual, condition, sinput_trim)
-                        })
-                        .unwrap_or(false)
+                            if apply_string_condition(&actual, condition, sinput_trim) {
+                                EvalResult::Pass
+                            } else {
+                                EvalResult::Fail
+                            }
+                        }
+                        None => EvalResult::Fail,
+                    }
                 }
-                #[cfg(unix)] { false }
+                #[cfg(not(windows))]
+                { EvalResult::Na }
             }
             _ => {
                 error!("Unsupported registry selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -737,11 +842,11 @@ pub fn evaluate(
         // USER
         // =========================================================
         "user" => match selement_l.as_str() {
-            "exists"     => check_user_exists(input),
-            "not exists" => !check_user_exists(input),
+            "exists"     => if check_user_exists(input) { EvalResult::Pass } else { EvalResult::Fail },
+            "not exists" => if !check_user_exists(input) { EvalResult::Pass } else { EvalResult::Fail },
             _ => {
                 error!("Unsupported user selement: '{}'", selement);
-                false
+                EvalResult::Na
             }
         },
 
@@ -750,7 +855,7 @@ pub fn evaluate(
         // =========================================================
         _ => {
             error!("Unknown element type: '{}'", element);
-            false
+            EvalResult::Na
         }
     }
 }

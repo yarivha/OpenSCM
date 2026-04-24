@@ -11,7 +11,7 @@ use rand::rngs::OsRng;
 
 use crate::models::{UnsignedPayload, SignedRequest, SignedResponse, Test, ComplianceResult};
 use crate::config::{Config, key_path};
-use crate::compliance::evaluate;
+use crate::compliance::{evaluate, EvalResult};
 
 
 // ============================================================
@@ -145,15 +145,38 @@ async fn process_compliance_tests(
             }
         }
 
+        
         let final_result = if results.is_empty() {
             "NA".to_string()
         } else {
-            let passed = match test.filter.as_deref().unwrap_or("all") {
-                "any" => results.iter().any(|&r| r),
-                _     => results.iter().all(|&r| r),
-            };
-            if passed { "PASS".to_string() } else { "FAIL".to_string() }
+            match test.filter.as_deref().unwrap_or("all") {
+                "any" => {
+                    // ANY: if at least one PASS → PASS
+                    // if all NA → NA
+                    // otherwise FAIL
+                    if results.iter().any(|r| *r == EvalResult::Pass) {
+                        "PASS".to_string()
+                    } else if results.iter().all(|r| *r == EvalResult::Na) {
+                        "NA".to_string()
+                    } else {
+                        "FAIL".to_string()
+                    }
+                }
+                _ => {
+                    // ALL: if any FAIL → FAIL
+                    // if all NA → NA
+                    // if all PASS (or mix of PASS+NA) → PASS
+                    if results.iter().any(|r| *r == EvalResult::Fail) {
+                        "FAIL".to_string()
+                    } else if results.iter().all(|r| *r == EvalResult::Na) {
+                        "NA".to_string()
+                    } else {
+                        "PASS".to_string()
+                    }
+                }
+            }
         };
+
 
         debug!("Test ID {} result: {}", test_id, final_result);
 
