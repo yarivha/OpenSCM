@@ -40,93 +40,188 @@ async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
 }
 
 
+
 pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation (Active Systems Only)...");
 
     let mut tx = pool.begin().await?;
 
-    // 1. Update TEST stats (only counting results from active systems)
+    // =========================================================
+    // 0. PURGE GHOST RESULTS
+    // Delete results for tests no longer assigned to a system
+    // =========================================================
+    sqlx::query(r#"
+        DELETE FROM results
+        WHERE NOT EXISTS (
+            SELECT 1
+            FROM systems_in_groups sig
+            JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+                AND sig.tenant_id = sip.tenant_id
+            JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
+                AND sip.tenant_id = tip.tenant_id
+            WHERE sig.system_id = results.system_id
+              AND tip.test_id   = results.test_id
+              AND sig.tenant_id = results.tenant_id
+        )
+    "#)
+    .execute(&mut *tx)
+    .await?;
+
+    // =========================================================
+    // 1. Update TEST stats (active systems only, per tenant)
+    // =========================================================
     sqlx::query(r#"
         UPDATE tests SET
             systems_passed = (
                 SELECT COUNT(*) FROM results r
-                JOIN systems s ON r.system_id = s.id
-                WHERE r.test_id = tests.id AND r.result = 'PASS' AND s.status = 'active'
+                JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
+                WHERE r.test_id    = tests.id
+                  AND r.tenant_id  = tests.tenant_id
+                  AND r.result     = 'PASS'
+                  AND s.status     = 'active'
             ),
             systems_failed = (
                 SELECT COUNT(*) FROM results r
-                JOIN systems s ON r.system_id = s.id
-                WHERE r.test_id = tests.id AND r.result = 'FAIL' AND s.status = 'active'
+                JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
+                WHERE r.test_id    = tests.id
+                  AND r.tenant_id  = tests.tenant_id
+                  AND r.result     = 'FAIL'
+                  AND s.status     = 'active'
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
                 ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END FROM results r
-                JOIN systems s ON r.system_id = s.id
-                WHERE r.test_id = tests.id AND s.status = 'active'
+                END
+                FROM results r
+                JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
+                WHERE r.test_id   = tests.id
+                  AND r.tenant_id = tests.tenant_id
+                  AND s.status    = 'active'
             )
     "#)
     .execute(&mut *tx)
     .await?;
 
-    // 2. Update SYSTEM stats (only for active systems)
-    // Use -1.0 for systems with no results (not scanned) instead of 0.0
+    // =========================================================
+    // 2. Update SYSTEM stats (active systems only, per tenant)
+    // =========================================================
     sqlx::query(r#"
         UPDATE systems SET
             tests_passed = (
-                SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'PASS'
+                SELECT COUNT(*) FROM results
+                WHERE system_id = systems.id
+                  AND tenant_id = systems.tenant_id
+                  AND result    = 'PASS'
             ),
             tests_failed = (
-                SELECT COUNT(*) FROM results WHERE system_id = systems.id AND result = 'FAIL'
+                SELECT COUNT(*) FROM results
+                WHERE system_id = systems.id
+                  AND tenant_id = systems.tenant_id
+                  AND result    = 'FAIL'
             ),
             total_tests = (
-                SELECT COUNT(*) FROM results WHERE system_id = systems.id
+                SELECT COUNT(*) FROM results
+                WHERE system_id = systems.id
+                  AND tenant_id = systems.tenant_id
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
                 ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END FROM results WHERE system_id = systems.id
+                END
+                FROM results
+                WHERE system_id = systems.id
+                  AND tenant_id = systems.tenant_id
             )
         WHERE status = 'active'
     "#)
     .execute(&mut *tx)
     .await?;
 
-    // 3. Update POLICY stats
+    // =========================================================
+    // 3. Update POLICY stats (SQLite compatible, per tenant)
+    // =========================================================
     sqlx::query(r#"
-        UPDATE policies
-        SET
-            systems_passed = subquery.passed,
-            systems_failed = subquery.failed,
-            compliance_score = subquery.score
-        FROM (
-            SELECT
-                p.id as policy_id,
-                COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) as passed,
-                COUNT(CASE WHEN fails > 0 THEN 1 END) as failed,
-                CASE
+        UPDATE policies SET
+            systems_passed = (
+                SELECT COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END)
+                FROM (
+                    SELECT
+                        s.id as system_id,
+                        COUNT(r.result) as total_results,
+                        SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
+                    FROM systems_in_policy sip
+                    JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+                        AND sip.tenant_id = sig.tenant_id
+                    JOIN systems s ON sig.system_id = s.id
+                        AND sig.tenant_id = s.tenant_id
+                    LEFT JOIN results r ON r.system_id = s.id
+                        AND r.tenant_id = s.tenant_id
+                        AND r.test_id IN (
+                            SELECT test_id FROM tests_in_policy
+                            WHERE policy_id = policies.id
+                              AND tenant_id = policies.tenant_id
+                        )
+                    WHERE sip.policy_id = policies.id
+                      AND sip.tenant_id = policies.tenant_id
+                      AND s.status = 'active'
+                    GROUP BY s.id
+                ) sub
+            ),
+            systems_failed = (
+                SELECT COUNT(CASE WHEN fails > 0 THEN 1 END)
+                FROM (
+                    SELECT
+                        s.id as system_id,
+                        SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
+                    FROM systems_in_policy sip
+                    JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+                        AND sip.tenant_id = sig.tenant_id
+                    JOIN systems s ON sig.system_id = s.id
+                        AND sig.tenant_id = s.tenant_id
+                    LEFT JOIN results r ON r.system_id = s.id
+                        AND r.tenant_id = s.tenant_id
+                        AND r.test_id IN (
+                            SELECT test_id FROM tests_in_policy
+                            WHERE policy_id = policies.id
+                              AND tenant_id = policies.tenant_id
+                        )
+                    WHERE sip.policy_id = policies.id
+                      AND sip.tenant_id = policies.tenant_id
+                      AND s.status = 'active'
+                    GROUP BY s.id
+                ) sub
+            ),
+            compliance_score = (
+                SELECT CASE
                     WHEN COUNT(CASE WHEN total_results > 0 THEN 1 END) = 0 THEN -1.0
-                    ELSE (CAST(COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) AS REAL) /
-                          COUNT(CASE WHEN total_results > 0 THEN 1 END)) * 100
-                END as score
-            FROM policies p
-            JOIN systems_in_policy sip ON p.id = sip.policy_id
-            JOIN systems_in_groups sig ON sip.group_id = sig.group_id
-            JOIN systems s ON sig.system_id = s.id
-            LEFT JOIN (
-                SELECT
-                    r.system_id,
-                    tip.policy_id,
-                    COUNT(*) as total_results,
-                    SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
-                FROM results r
-                JOIN tests_in_policy tip ON r.test_id = tip.test_id
-                GROUP BY r.system_id, tip.policy_id
-            ) res ON (res.system_id = s.id AND res.policy_id = p.id)
-            WHERE s.status = 'active'
-            GROUP BY p.id
-        ) AS subquery
-        WHERE policies.id = subquery.policy_id
+                    ELSE (
+                        CAST(COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) AS REAL) /
+                        COUNT(CASE WHEN total_results > 0 THEN 1 END)
+                    ) * 100
+                END
+                FROM (
+                    SELECT
+                        s.id as system_id,
+                        COUNT(r.result) as total_results,
+                        SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
+                    FROM systems_in_policy sip
+                    JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+                        AND sip.tenant_id = sig.tenant_id
+                    JOIN systems s ON sig.system_id = s.id
+                        AND sig.tenant_id = s.tenant_id
+                    LEFT JOIN results r ON r.system_id = s.id
+                        AND r.tenant_id = s.tenant_id
+                        AND r.test_id IN (
+                            SELECT test_id FROM tests_in_policy
+                            WHERE policy_id = policies.id
+                              AND tenant_id = policies.tenant_id
+                        )
+                    WHERE sip.policy_id = policies.id
+                      AND sip.tenant_id = policies.tenant_id
+                      AND s.status = 'active'
+                    GROUP BY s.id
+                ) sub
+            )
     "#)
     .execute(&mut *tx)
     .await?;
@@ -136,6 +231,8 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
     info!("Compliance recalculation complete.");
     Ok(())
 }
+
+
 
 
 pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
