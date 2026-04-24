@@ -35,6 +35,20 @@ fn get_user_name_from_uid(uid: u32) -> Option<String> {
     }
 }
 
+#[cfg(unix)]
+fn get_group_name_from_gid(gid: u32) -> Option<String> {
+    let output = Command::new("getent")
+        .args(["group", &gid.to_string()])
+        .output()
+        .ok()?;
+    if output.status.success() {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        stdout.split(':').next().map(|s| s.to_string())
+    } else {
+        None
+    }
+}
+
 
 #[cfg(unix)]
 fn check_user_exists(user: &str) -> bool {
@@ -394,6 +408,23 @@ pub fn evaluate(
                 }
                 #[cfg(windows)] { false }
             }
+            "group" => {
+                #[cfg(unix)]
+                {
+                    let metadata = fs::metadata(input).ok();
+                    let gid = metadata.map(|m| std::os::unix::fs::MetadataExt::gid(&m));
+                    if let Some(g) = gid {
+                        let name = get_group_name_from_gid(g).unwrap_or_default();
+                        // Now supports "equals", "contains", "regex", etc.
+                        apply_string_condition(&name, condition, sinput_trim) ||
+                        apply_string_condition(&g.to_string(), condition, sinput_trim)
+                    } else {
+                        false
+                    }
+                }
+                #[cfg(windows)] { false }
+            }
+
             "permission" | "permissions" => {
                 #[cfg(unix)]
                 {
@@ -452,6 +483,23 @@ pub fn evaluate(
                         get_user_name_from_uid(u)
                             .map(|n| n == sinput_trim)
                             .unwrap_or(u.to_string() == sinput_trim)
+                    } else {
+                        false
+                    }
+                }
+                #[cfg(windows)] { false }
+            }
+            "group" => {
+                #[cfg(unix)]
+                {
+                    let gid = fs::metadata(input)
+                        .map(|m| std::os::unix::fs::MetadataExt::gid(&m))
+                        .ok();
+                    if let Some(g) = gid {
+                        let name = get_group_name_from_gid(g).unwrap_or_default();
+                        // Apply the flexible string condition logic
+                        apply_string_condition(&name, condition, sinput_trim) || 
+                        apply_string_condition(&g.to_string(), condition, sinput_trim)
                     } else {
                         false
                     }
