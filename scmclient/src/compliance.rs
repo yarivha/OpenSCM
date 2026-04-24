@@ -195,13 +195,16 @@ fn get_system_domain() -> Option<String> {
 
 #[cfg(windows)]
 fn get_system_domain() -> Option<String> {
-    // Native Windows API call (via dns-lookup crate)
     dns_lookup::get_hostname().ok().and_then(|h| {
-        // On Windows, the domain is often found via the FQDN
-        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None).ok()?.next()?.canonname?;
+        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None)
+            .ok()?
+            .next()?
+            .unwrap()
+            .canonname?;
         fqdn.splitn(2, '.').nth(1).map(|s| s.to_string())
     })
 }
+
 
 
 fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
