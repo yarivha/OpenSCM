@@ -1,0 +1,19 @@
+#!/bin/bash
+
+# --- 1. Variables ---
+LABEL="io.openscm.scmclient"
+PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
+
+# --- 2. Stop and unload the service ---
+echo "Stopping $LABEL service..."
+
+# A. Try modern bootout first
+/bin/launchctl bootout system/$LABEL 2>/dev/null || true
+
+# B. Fallback to legacy unload
+/bin/launchctl unload "$PLIST_PATH" 2>/dev/null || true
+
+# C. Give the kernel a moment to fully release the PID and file handles
+/bin/sleep 2
+
+exit 0
