@@ -861,17 +861,23 @@ pub async fn policies_report(
             t.name as test_name,
             r.result as status
         FROM results r
-        JOIN systems s ON r.system_id = s.id
-        JOIN tests t ON r.test_id = t.id
-        JOIN systems_in_groups sig ON s.id = sig.system_id
-        JOIN systems_in_policy sip ON sig.group_id = sip.group_id
-        JOIN tests_in_policy tip ON t.id = tip.test_id
-        WHERE sip.policy_id = ?
-          AND tip.policy_id = ?
-          AND sip.tenant_id = ?
-        GROUP BY s.name, t.name, r.result
+        JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
+        JOIN tests t ON r.test_id = t.id AND r.tenant_id = t.tenant_id
+        WHERE r.tenant_id = ?
+          AND r.test_id IN (
+              SELECT test_id FROM tests_in_policy
+              WHERE policy_id = ? AND tenant_id = ?
+          )
+          AND r.system_id IN (
+              SELECT sig.system_id FROM systems_in_groups sig
+              JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+                  AND sig.tenant_id = sip.tenant_id
+              WHERE sip.policy_id = ? AND sip.tenant_id = ?
+          )
     "#)
+    .bind(&auth.tenant_id)
     .bind(id)
+    .bind(&auth.tenant_id)
     .bind(id)
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
