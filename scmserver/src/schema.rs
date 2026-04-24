@@ -187,6 +187,27 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
     
     
+     // Create conditions table
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS conditions (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            test_id INTEGER NOT NULL,
+            name TEXT,
+            description TEXT,
+            type TEXT NOT NULL,
+            element TEXT NOT NULL,
+            input TEXT NOT NULL,
+            selement TEXT NOT NULL,
+            condition TEXT,
+            sinput TEXT,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+            FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+
 
     // Create policies table
     sqlx::query(
