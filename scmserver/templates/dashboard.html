@@ -203,9 +203,10 @@
 			{% endif %}
                       </td>
                       <td class="text-center">
-                        <small class="text-success font-weight-bold">{{ sys.tests_passed }} OK</small> / 
-                        <small class="text-danger font-weight-bold">{{ sys.tests_failed }} FAIL</small>
-                      </td>
+    			<small class="text-success font-weight-bold">{{ sys.tests_passed }} OK</small> / 
+    			<small class="text-danger font-weight-bold">{{ sys.tests_failed }} FAIL</small> /
+    			<small class="text-muted font-weight-bold">{{ sys.tests_na }} NA</small>
+		      </td>
                     </tr>
                     {% endfor %}
                   {% endif %}
