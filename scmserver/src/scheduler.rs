@@ -89,14 +89,15 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                   AND s.status     = 'active'
             ),
             compliance_score = (
-                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
-                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END
-                FROM results r
-                JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
-                WHERE r.test_id   = tests.id
-                  AND r.tenant_id = tests.tenant_id
-                  AND s.status    = 'active'
+            SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
+            ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+            END
+            FROM results r
+            JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
+            WHERE r.test_id   = tests.id
+            AND r.tenant_id = tests.tenant_id
+            AND s.status    = 'active'
+            AND r.result    != 'NA'    -- ← exclude NA
             )
     "#)
     .execute(&mut *tx)
@@ -122,7 +123,8 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
             total_tests = (
                 SELECT COUNT(*) FROM results
                 WHERE system_id = systems.id
-                  AND tenant_id = systems.tenant_id
+                AND tenant_id = systems.tenant_id
+                AND result != 'NA'    -- ← exclude NA from total
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
@@ -130,7 +132,8 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 END
                 FROM results
                 WHERE system_id = systems.id
-                  AND tenant_id = systems.tenant_id
+                AND tenant_id = systems.tenant_id
+                AND result != 'NA'    -- ← exclude NA from denominator
             )
         WHERE status = 'active'
     "#)
