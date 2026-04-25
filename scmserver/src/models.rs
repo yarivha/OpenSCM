@@ -54,7 +54,7 @@ pub struct SystemInsideGroup {
     pub group_id:  i32,
 }
 
-#[derive(Debug, Serialize, Deserialize, FromRow, Default)]
+#[derive(Debug, Serialize, Deserialize, FromRow, Default, Clone)]
 pub struct Test {
     pub id: Option<i32>,
     pub name: String,
@@ -63,6 +63,7 @@ pub struct Test {
     pub remediation: Option<String>,
     pub severity: Option<String>,
     pub filter: Option<String>,
+    pub app_filter: Option<String>,
     pub element_1: Option<String>,
     pub input_1: Option<String>,
     pub selement_1: Option<String>,
@@ -88,6 +89,28 @@ pub struct Test {
     pub selement_5: Option<String>,
     pub condition_5: Option<String>,
     pub sinput_5: Option<String>,
+}
+
+
+#[derive(Debug, sqlx::FromRow, Serialize, Deserialize, Clone)]
+pub struct TestCondition {
+    pub id: i64,
+    pub tenant_id: String,
+    pub test_id: i64,
+    pub r#type: String,
+    pub element: String,
+    pub input: String,
+    pub selement: String,
+    pub condition: Option<String>,
+    pub sinput: Option<String>,
+}
+
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct TestWithConditions {
+    #[serde(flatten)]
+    pub test: Test,
+    pub applicability: Option<Vec<TestCondition>>,
 }
 
 
