@@ -35,7 +35,7 @@ use crate::handlers::{not_found, clear_notifications};
 use crate::config::{Config, config_path,private_key_path, db_path};
 
 // Schema
-use crate::schema::initialize_database;
+use crate::schema::{initialize_database, run_migrations};
 
 // Auth
 use crate::auth::{login, login_submit, logout};
@@ -251,6 +251,11 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Enable foreign keys and init schema
     sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
     initialize_database(&pool).await?;
+
+
+    // Run schema migrations
+    run_migrations(&pool).await.expect("Schema migration failed");
+
 
     // ---------------------------------------------------------
     // 4. Batch Compliance Worker (The Debouncer)
