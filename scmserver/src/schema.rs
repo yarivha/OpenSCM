@@ -12,6 +12,17 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Init Database......");
 
 
+    // schema_info
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS schema_info (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL
+        )"
+    )
+    .execute(pool)
+    .await?;
+
+
     //  Tenants Table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tenants (
@@ -389,14 +400,30 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Create conditions table
     sqlx::query(   
         "CREATE TABLE IF NOT EXISTS conditions (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
-            description TEXT
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id TEXT NOT NULL DEFAULT 'default',
+                test_id INTEGER NOT NULL,
+                name TEXT,
+                description TEXT,
+                type TEXT NOT NULL,
+                element TEXT NOT NULL,
+                input TEXT NOT NULL,
+                selement TEXT NOT NULL,
+                condition TEXT,
+                sinput TEXT,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+                FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
+
        )",
     )
     .execute(pool)
     .await?;
 
+
+
+// --------------------------------------
+//  Insert default settings 
+// --------------------------------------
 
 
     // Insert the default CE tenant
@@ -425,7 +452,6 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         "INSERT OR IGNORE INTO settings (tenant_id, key, value, description) VALUES
-        ('default', 'schema_version', '1', 'Current database schema version'),
         ('default', 'offline_threshold', '600', 'Seconds without activity before system is marked offline'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
         ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status')"
@@ -518,4 +544,55 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 } 
 
 
+// DB Migration 
+pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    // Create schema_info if it doesn't exist
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS schema_info (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL
+        )"
+    )
+    .execute(pool)
+    .await?;
 
+    // Seed with 0 if empty
+    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 0)")
+        .execute(pool)
+        .await?;
+
+    let version: i64 = sqlx::query_scalar("SELECT version FROM schema_info")
+        .fetch_one(pool)
+        .await?;
+
+    info!("Current schema version: {}", version);
+
+    // v0 → v1: bump only, base schema already applied by schema.rs
+    if version < 1 {
+        sqlx::query("UPDATE schema_info SET version = 1")
+            .execute(pool)
+            .await?;
+        info!("Schema version set to 1.");
+    }
+
+    // v1 → v2 (0.1.5 → 0.1.6)
+    if version < 2 {
+        info!("Running schema migration v1 → v2...");
+
+        // Ignore error if column already exists (new install)
+        let _ = sqlx::query("ALTER TABLE tests ADD COLUMN app_filter TEXT DEFAULT 'all'")
+            .execute(pool)
+            .await;
+
+        sqlx::query("UPDATE schema_info SET version = 2")
+            .execute(pool)
+            .await?;
+
+        info!("Schema migration v1 → v2 complete.");
+    }
+
+    // v2 → v3 (future)
+    // if version < 3 { ... }
+
+    Ok(())
+}
