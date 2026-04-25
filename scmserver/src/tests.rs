@@ -9,7 +9,7 @@ use urlencoding;
 use tracing::{info, error};
 use bytes::Bytes;
 
-use crate::models::{ErrorQuery, Test, Element, SElement, Condition, UserRole, AuthSession};
+use crate::models::{ErrorQuery, Test, TestCondition, Element, SElement, Condition, UserRole, AuthSession};
 use crate::auth::{self};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
@@ -55,13 +55,14 @@ async fn fetch_lookup_tables(
         .await?;
 
     let conditions = condition_rows
-        .into_iter()
-        .map(|row| Condition {
-            id: row.get("id"),
-            name: row.get("name"),
-            description: None,
-        })
-        .collect();
+    .into_iter()
+    .map(|row| Condition {
+        id: row.get("id"),
+        name: row.get("name"),
+        description: None,
+    })
+    .collect();
+
 
     Ok((elements, selements, conditions))
 }
@@ -76,6 +77,7 @@ fn map_test_row(row: &sqlx::sqlite::SqliteRow) -> Test {
         rational: row.get("rational"),
         remediation: row.get("remediation"),
         filter: row.get("filter"),
+        app_filter: row.get("app_filter"),
         element_1: row.get("element_1"),
         input_1: row.get("input_1"),
         selement_1: row.get("selement_1"),
@@ -107,7 +109,7 @@ fn map_test_row(row: &sqlx::sqlite::SqliteRow) -> Test {
 /// Extract all test fields from parsed form data.
 fn extract_test_fields(
     form_data: &std::collections::HashMap<String, Vec<String>>,
-) -> Result<(String, String, String, String, String, String,
+) -> Result<(String, String, String, String, String, String, String,
              String, String, String, String, String,
              String, String, String, String, String,
              String, String, String, String, String,
@@ -139,6 +141,7 @@ fn extract_test_fields(
         get_opt("rational"),
         get_opt("remediation"),
         get_opt("filter"),
+        get_opt("app_filter"),
         get_or_none("element_1"),   get_opt("input_1"),   get_or_none("selement_1"),   get_or_none("condition_1"),   get_opt("sinput_1"),
         get_or_none("element_2"),   get_opt("input_2"),   get_or_none("selement_2"),   get_or_none("condition_2"),   get_opt("sinput_2"),
         get_or_none("element_3"),   get_opt("input_3"),   get_or_none("selement_3"),   get_or_none("condition_3"),   get_opt("sinput_3"),
@@ -166,7 +169,7 @@ pub async fn tests(
     let rows_result = sqlx::query(
         "SELECT
             id, name, description, severity,
-            rational, remediation, filter,
+            rational, remediation, filter,app_filter,
             element_1, input_1, selement_1, condition_1, sinput_1,
             element_2, input_2, selement_2, condition_2, sinput_2,
             element_3, input_3, selement_3, condition_3, sinput_3,
@@ -265,7 +268,7 @@ pub async fn tests_add_save(
     let form_data = parse_form_data(&raw_string);
 
     let (
-        name, description, severity, rational, remediation, filter,
+        name, description, severity, rational, remediation, filter, app_filter,
         element_1, input_1, selement_1, condition_1, sinput_1,
         element_2, input_2, selement_2, condition_2, sinput_2,
         element_3, input_3, selement_3, condition_3, sinput_3,
@@ -280,16 +283,24 @@ pub async fn tests_add_save(
         }
     };
 
+    // Get applicability type and filter
+    let app_type = form_data.get("app_type")
+        .and_then(|v| v.first())
+        .map(|s| s.as_str())
+        .unwrap_or("always");
+
+
+    // Insert test
     let result = sqlx::query(
         "INSERT INTO tests (
-            tenant_id, name, description, severity, rational, remediation, filter,
+            tenant_id, name, description, severity, rational, remediation, filter, app_filter,
             element_1, input_1, selement_1, condition_1, sinput_1,
             element_2, input_2, selement_2, condition_2, sinput_2,
             element_3, input_3, selement_3, condition_3, sinput_3,
             element_4, input_4, selement_4, condition_4, sinput_4,
             element_5, input_5, selement_5, condition_5, sinput_5
         ) VALUES (
-            ?, ?, ?, ?, ?, ?, ?,
+            ?, ?, ?, ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?,
             ?, ?, ?, ?, ?,
@@ -304,6 +315,7 @@ pub async fn tests_add_save(
     .bind(&rational)
     .bind(&remediation)
     .bind(&filter)
+    .bind(&app_filter)
     .bind(&element_1).bind(&input_1).bind(&selement_1).bind(&condition_1).bind(&sinput_1)
     .bind(&element_2).bind(&input_2).bind(&selement_2).bind(&condition_2).bind(&sinput_2)
     .bind(&element_3).bind(&input_3).bind(&selement_3).bind(&condition_3).bind(&sinput_3)
@@ -312,10 +324,63 @@ pub async fn tests_add_save(
     .execute(&mut *tx)
     .await;
 
-    if let Err(e) = result {
-        let encoded = urlencoding::encode(&format!("Database insert error: {}", e)).to_string();
-        tx.rollback().await.ok();
-        return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
+    let test_id = match result {
+        Ok(r) => r.last_insert_rowid(),
+        Err(e) => {
+            let encoded = urlencoding::encode(&format!("Database insert error: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
+        }
+    };
+
+    // Save applicability conditions if conditional
+    if app_type == "conditional" {
+        for i in 1..=3 {
+            let element = form_data.get(&format!("app_element_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+
+            if element.is_empty() || element == "-- Select --" {
+                continue;
+            }
+
+            let input = form_data.get(&format!("app_input_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+            let selement = form_data.get(&format!("app_selement_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+            let condition = form_data.get(&format!("app_condition_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+            let sinput = form_data.get(&format!("app_sinput_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+
+            if let Err(e) = sqlx::query(
+                "INSERT INTO test_conditions (tenant_id, test_id, type, element, input, selement, condition, sinput)
+                 VALUES (?, ?, 'applicability', ?, ?, ?, ?, ?)",
+            )
+            .bind(&auth.tenant_id)
+            .bind(test_id)
+            .bind(&element)
+            .bind(&input)
+            .bind(&selement)
+            .bind(&condition)
+            .bind(&sinput)
+            .execute(&mut *tx)
+            .await
+            {
+                let encoded = urlencoding::encode(&format!("Error saving applicability condition: {}", e)).to_string();
+                tx.rollback().await.ok();
+                return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
+            }
+        }
     }
 
     if let Err(e) = tx.commit().await {
@@ -326,6 +391,8 @@ pub async fn tests_add_save(
     info!("Test '{}' created by '{}'.", name, auth.username);
     Redirect::to("/tests").into_response()
 }
+
+
 
 
 pub async fn tests_delete(
@@ -357,6 +424,7 @@ pub async fn tests_delete(
 }
 
 
+
 pub async fn tests_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -370,7 +438,7 @@ pub async fn tests_edit(
 
     let row_result = sqlx::query(
         "SELECT
-            id, name, description, severity, rational, remediation, filter,
+            id, name, description, severity, rational, remediation, filter, app_filter,
             element_1, input_1, selement_1, condition_1, sinput_1,
             element_2, input_2, selement_2, condition_2, sinput_2,
             element_3, input_3, selement_3, condition_3, sinput_3,
@@ -397,6 +465,26 @@ pub async fn tests_edit(
 
     let test = map_test_row(&row);
 
+    // Fetch applicability conditions
+    let app_conditions = match sqlx::query_as::<_, TestCondition>(
+        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
+         FROM test_conditions
+         WHERE test_id = ? AND tenant_id = ? AND type = 'applicability'
+         ORDER BY id ASC
+         LIMIT 3",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to fetch applicability conditions for test {}: {}", id, e);
+            vec![]
+        }
+    };
+
     let mut context = Context::new();
 
     match fetch_lookup_tables(&*pool).await {
@@ -412,6 +500,7 @@ pub async fn tests_edit(
     }
 
     context.insert("test", &test);
+    context.insert("app_conditions", &app_conditions);
     render_template(&tera, Some(&pool), "tests_edit.html", context, Some(auth))
         .await
         .into_response()
@@ -451,7 +540,7 @@ pub async fn tests_edit_save(
     let form_data = parse_form_data(&raw_string);
 
     let (
-        name, description, severity, rational, remediation, filter,
+        name, description, severity, rational, remediation, filter, app_filter,
         element_1, input_1, selement_1, condition_1, sinput_1,
         element_2, input_2, selement_2, condition_2, sinput_2,
         element_3, input_3, selement_3, condition_3, sinput_3,
@@ -466,9 +555,17 @@ pub async fn tests_edit_save(
         }
     };
 
+    // Get applicability type and filter
+    let app_type = form_data.get("app_type")
+        .and_then(|v| v.first())
+        .map(|s| s.as_str())
+        .unwrap_or("always");
+
+
+    // Update test
     let result = sqlx::query(
         "UPDATE tests SET
-            name = ?, description = ?, severity = ?, rational = ?, remediation = ?, filter = ?,
+            name = ?, description = ?, severity = ?, rational = ?, remediation = ?, filter = ?, app_filter = ?,
             element_1 = ?, input_1 = ?, selement_1 = ?, condition_1 = ?, sinput_1 = ?,
             element_2 = ?, input_2 = ?, selement_2 = ?, condition_2 = ?, sinput_2 = ?,
             element_3 = ?, input_3 = ?, selement_3 = ?, condition_3 = ?, sinput_3 = ?,
@@ -482,6 +579,7 @@ pub async fn tests_edit_save(
     .bind(&rational)
     .bind(&remediation)
     .bind(&filter)
+    .bind(&app_filter)
     .bind(&element_1).bind(&input_1).bind(&selement_1).bind(&condition_1).bind(&sinput_1)
     .bind(&element_2).bind(&input_2).bind(&selement_2).bind(&condition_2).bind(&sinput_2)
     .bind(&element_3).bind(&input_3).bind(&selement_3).bind(&condition_3).bind(&sinput_3)
@@ -498,6 +596,70 @@ pub async fn tests_edit_save(
         return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
     }
 
+    // Delete existing applicability conditions and re-insert
+    if let Err(e) = sqlx::query(
+        "DELETE FROM test_conditions WHERE test_id = ? AND tenant_id = ? AND type = 'applicability'"
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .execute(&mut *tx)
+    .await
+    {
+        let encoded = urlencoding::encode(&format!("Error clearing applicability conditions: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
+    }
+
+    // Re-insert applicability conditions if conditional
+    if app_type == "conditional" {
+        for i in 1..=3 {
+            let element = form_data.get(&format!("app_element_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+
+            if element.is_empty() || element == "-- Select --" {
+                continue;
+            }
+
+            let input = form_data.get(&format!("app_input_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+            let selement = form_data.get(&format!("app_selement_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+            let condition = form_data.get(&format!("app_condition_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+            let sinput = form_data.get(&format!("app_sinput_{}", i))
+                .and_then(|v| v.first())
+                .cloned()
+                .unwrap_or_default();
+
+            if let Err(e) = sqlx::query(
+                "INSERT INTO test_conditions (tenant_id, test_id, type, element, input, selement, condition, sinput)
+                 VALUES (?, ?, 'applicability', ?, ?, ?, ?, ?)",
+            )
+            .bind(&auth.tenant_id)
+            .bind(id)
+            .bind(&element)
+            .bind(&input)
+            .bind(&selement)
+            .bind(&condition)
+            .bind(&sinput)
+            .execute(&mut *tx)
+            .await
+            {
+                let encoded = urlencoding::encode(&format!("Error saving applicability condition: {}", e)).to_string();
+                tx.rollback().await.ok();
+                return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
+            }
+        }
+    }
+
     if let Err(e) = tx.commit().await {
         let encoded = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
         return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
@@ -507,3 +669,5 @@ pub async fn tests_edit_save(
     info!("Test ID {} updated by '{}'.", id, auth.username);
     Redirect::to("/tests").into_response()
 }
+
+

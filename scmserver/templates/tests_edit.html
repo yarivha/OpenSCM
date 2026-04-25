@@ -72,6 +72,10 @@
 
       <form method="post" action="/tests/edit/{{ test.id }}">
         <div class="row">
+
+          <!-- ================================================ -->
+          <!-- CARD 1: Test Identity & Metadata                  -->
+          <!-- ================================================ -->
           <div class="col-md-12">
             <div class="card card-primary card-outline shadow-sm">
               <div class="card-header"><h3 class="card-title">Test Settings</h3></div>
@@ -120,6 +124,114 @@
             </div>
           </div>
 
+          <!-- ================================================ -->
+          <!-- CARD 2: Applicability                             -->
+          <!-- ================================================ -->
+          <div class="col-md-12">
+            <div class="card card-warning card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-filter mr-2"></i>Applicability</h3>
+              </div>
+              <div class="card-body">
+
+                <!-- Toggle -->
+                <div class="mb-3">
+                  <div class="custom-control custom-radio">
+                    <input type="radio" id="app_always" name="app_type" value="always" class="custom-control-input"
+                      {% if app_conditions | length == 0 %}checked{% endif %}
+                      onchange="toggleApplicability()">
+                    <label class="custom-control-label" for="app_always">
+                      <strong>Always applicable</strong> — run this test on all systems
+                    </label>
+                  </div>
+                  <div class="custom-control custom-radio mt-2">
+                    <input type="radio" id="app_conditional" name="app_type" value="conditional" class="custom-control-input"
+                      {% if app_conditions | length > 0 %}checked{% endif %}
+                      onchange="toggleApplicability()">
+                    <label class="custom-control-label" for="app_conditional">
+                      <strong>Conditional</strong> — only run if the following conditions are met
+                    </label>
+                  </div>
+                </div>
+
+                <!-- Applicability Conditions -->
+                <div id="applicabilitySection" {% if app_conditions | length == 0 %}style="display: none;"{% endif %}>
+                  <div class="logic-container">
+                    <div class="d-flex align-items-center mb-4">
+                      <h5 class="m-0">Run this test if </h5>
+                      <select name="app_filter" class="form-control mx-2" style="width: auto;">
+                        <option value="all" {% if test.app_filter == "all" %}selected{% endif %}>ALL</option>
+                        <option value="any" {% if test.app_filter == "any" %}selected{% endif %}>ANY</option>
+                      </select>
+                      <h5 class="m-0"> of the following conditions are met:</h5>
+                    </div>
+
+                    <div id="appConditionsContainer">
+                      {% for i in [1, 2, 3] %}
+                      {% set ac = app_conditions | nth(n=loop.index0) %}
+                      <div class="condition-row mb-3 row align-items-end shadow-sm" data-id="app_cond_{{ i }}"
+                        {% if not ac %}style="display: none;"{% endif %}>
+                        <div class="col-md-2">
+                          <div class="condition-label">Subject</div>
+                          <select class="form-control" name="app_element_{{ i }}">
+                            <option value="">-- Select --</option>
+                            {% for element in elements %}
+                              <option {% if ac and ac.element == element.name %}selected{% endif %}>{{ element.name }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                        <div class="col-md-2">
+                          <div class="condition-label">Parameter</div>
+                          <input type="text" class="form-control" name="app_input_{{ i }}"
+                            value="{% if ac %}{{ ac.input }}{% endif %}" placeholder="e.g. apache2">
+                        </div>
+                        <div class="col-md-2">
+                          <div class="condition-label">Sub-Element</div>
+                          <select name="app_selement_{{ i }}" class="form-control">
+                            <option value="">-- None --</option>
+                            {% for selement in selements %}
+                              <option {% if ac and ac.selement == selement.name %}selected{% endif %}>{{ selement.name }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                        <div class="col-md-2">
+                          <div class="condition-label">Operator</div>
+                          <select class="form-control" name="app_condition_{{ i }}">
+                            <option value="">-- Select --</option>
+                            {% for condition in conditions %}
+                              <option {% if ac and ac.condition == condition.name %}selected{% endif %}>{{ condition.name }}</option>
+                            {% endfor %}
+                          </select>
+                        </div>
+                        <div class="col-md-3">
+                          <div class="condition-label">Expected Value</div>
+                          <input type="text" class="form-control" name="app_sinput_{{ i }}"
+                            value="{% if ac %}{{ ac.sinput }}{% endif %}" placeholder="e.g. installed">
+                        </div>
+                        <div class="col-md-1 text-right">
+                          {% if i != 1 %}
+                          <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeAppCondition(this)" title="Delete Row">
+                            <i class="fas fa-trash"></i>
+                          </button>
+                          {% endif %}
+                        </div>
+                      </div>
+                      {% endfor %}
+                    </div>
+
+                    <button type="button" class="btn btn-outline-warning btn-sm mt-2" onclick="addAppCondition()">
+                      <i class="fas fa-plus mr-1"></i> Add Applicability Condition
+                    </button>
+                  </div>
+                </div>
+
+              </div>
+            </div>
+          </div>
+
+          <!-- ================================================ -->
+          <!-- CARD 3: Logical Conditions                        -->
+          <!-- ================================================ -->
           <div class="col-md-12">
             <div class="card card-info card-outline shadow-sm">
               <div class="card-header">
@@ -241,6 +353,7 @@
               </div>
             </div>
           </div>
+
         </div>
       </form>
     </div>
@@ -250,12 +363,73 @@
 
 {% block scripts %}
 <script>
+
+  // ============================================================
+  // APPLICABILITY
+  // ============================================================
+
+  function toggleApplicability() {
+    const isConditional = document.getElementById('app_conditional').checked;
+    document.getElementById('applicabilitySection').style.display = isConditional ? '' : 'none';
+  }
+
+  const maxAppConditions = 3;
+  let usedAppIndexes = new Set();
+
+  document.addEventListener('DOMContentLoaded', function() {
+    document.querySelectorAll('#appConditionsContainer .condition-row').forEach(row => {
+      if (row.style.display !== 'none') {
+        const id = parseInt(row.getAttribute('data-id').replace('app_cond_', ''));
+        usedAppIndexes.add(id);
+      }
+    });
+  });
+
+  function getNextAvailableAppIndex() {
+    for (let i = 1; i <= maxAppConditions; i++) {
+      if (!usedAppIndexes.has(i)) return i;
+    }
+    return -1;
+  }
+
+  function addAppCondition() {
+    if (usedAppIndexes.size >= maxAppConditions) {
+      alert("Maximum of 3 applicability conditions reached.");
+      return;
+    }
+    const id = getNextAvailableAppIndex();
+    if (id === -1) return;
+    usedAppIndexes.add(id);
+    const row = document.querySelector(`.condition-row[data-id="app_cond_${id}"]`);
+    if (row) {
+      row.style.display = '';
+      row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+    }
+  }
+
+  function removeAppCondition(button) {
+    const row = button.closest('.condition-row');
+    if (row) {
+      const dataId = row.getAttribute('data-id');
+      const conditionId = parseInt(dataId.replace('app_cond_', ''));
+      row.querySelectorAll('input, select').forEach(el => {
+        if (el.tagName === 'SELECT') el.selectedIndex = 0;
+        else el.value = '';
+      });
+      row.style.display = 'none';
+      usedAppIndexes.delete(conditionId);
+    }
+  }
+
+  // ============================================================
+  // TEST CONDITIONS
+  // ============================================================
+
   const maxConditions = 5;
   let usedIndexes = new Set();
 
-  // Initialize usedIndexes based on what's visible on page load
   document.addEventListener('DOMContentLoaded', function() {
-    document.querySelectorAll('.condition-row').forEach(row => {
+    document.querySelectorAll('#conditionsContainer .condition-row').forEach(row => {
       if (row.style.display !== 'none') {
         const id = parseInt(row.getAttribute('data-id').replace('cond_', ''));
         usedIndexes.add(id);
@@ -291,13 +465,10 @@
     if (row) {
       const dataId = row.getAttribute('data-id');
       const conditionId = parseInt(dataId.replace('cond_', ''));
-
-      // Clear values
       row.querySelectorAll('input, select').forEach(el => {
         if (el.tagName === 'SELECT') el.selectedIndex = 0;
         else el.value = '';
       });
-
       row.style.display = 'none';
       usedIndexes.delete(conditionId);
     }
