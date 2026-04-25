@@ -5,8 +5,7 @@ use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
 
-use crate::models::{SignedRequest, SignedResult, UnsignedPayload, SignedResponse};
-use crate::models::Test;
+use crate::models::{SignedRequest, SignedResult, UnsignedPayload, SignedResponse, Test, TestCondition, TestWithConditions};
 
 
 #[derive(sqlx::FromRow)]
@@ -16,12 +15,12 @@ struct AuthCheck {
 }
 
 
+
 // ============================================================
 // HELPERS
 // ============================================================
 
 /// Sign a JSON payload using the tenant's active Ed25519 private key.
-/// Uses serde_json serialization for cross-platform determinism.
 pub async fn sign_response(
     pool: &SqlitePool,
     tenant_id: &str,
@@ -42,7 +41,6 @@ pub async fn sign_response(
 
     let signing_key = SigningKey::from_bytes(&key_array);
 
-    // Use serde_json for deterministic cross-platform serialization
     let payload_bytes = serde_json::to_vec(&payload)?;
     let signature = signing_key.sign(&payload_bytes);
     let signature_base64 = general_purpose::STANDARD.encode(signature.to_bytes());
@@ -54,8 +52,6 @@ pub async fn sign_response(
 }
 
 
-/// Decode and validate a base64-encoded Ed25519 public key.
-/// Returns a proper error instead of panicking on malformed input.
 fn decode_public_key(base64_key: &str) -> Result<VerifyingKey, String> {
     let bytes = general_purpose::STANDARD
         .decode(base64_key)
@@ -70,8 +66,6 @@ fn decode_public_key(base64_key: &str) -> Result<VerifyingKey, String> {
 }
 
 
-/// Decode and validate a base64-encoded Ed25519 signature.
-/// Returns a proper error instead of panicking on malformed input.
 fn decode_signature(base64_sig: &str) -> Result<Signature, String> {
     let bytes = general_purpose::STANDARD
         .decode(base64_sig)
@@ -85,8 +79,6 @@ fn decode_signature(base64_sig: &str) -> Result<Signature, String> {
 }
 
 
-/// Verify a payload signature against a public key.
-/// Uses serde_json serialization for cross-platform determinism.
 fn verify_signature<T: serde::Serialize>(
     payload: &T,
     signature_b64: &str,
@@ -114,7 +106,6 @@ pub async fn send(
 ) -> impl IntoResponse {
     let payload = &signed_req.payload;
 
-    // Fallback to 'default' for backward compatibility with old clients
     let tenant_id = if payload.tenant_id.is_empty() {
         "default"
     } else {
@@ -172,7 +163,6 @@ pub async fn send(
     // STEP 2: REGISTRATION (ID == 0)
     // =========================================================
     if id == 0 {
-        // Validate public key format before storing
         if let Some(ref pub_key) = payload.public_key {
             if decode_public_key(pub_key).is_err() {
                 warn!(
@@ -264,7 +254,6 @@ pub async fn send(
             }
         };
 
-        // Verify signature
         debug!("Verifying signature for Agent ID {} (Tenant: {}).", id, tenant_id);
         if let Err(err) = verify_signature(payload, &signed_req.signature, &auth.key) {
             warn!(
@@ -279,7 +268,6 @@ pub async fn send(
         }
         debug!("Signature verified for Agent ID {}.", id);
 
-        // Process by status
         match auth.status.as_deref().unwrap_or("pending") {
             "approved" | "active" => {
                 let mut tx = match pool.begin().await {
@@ -342,6 +330,32 @@ pub async fn send(
                     }
                 };
 
+                // Attach applicability conditions to each test
+                let mut tests_with_conditions: Vec<TestWithConditions> = Vec::new();
+                for test in tests {
+                    let test_id = test.id.unwrap_or(0);
+                    let applicability = match sqlx::query_as::<_, TestCondition>(
+                        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
+                         FROM test_conditions
+                         WHERE test_id = ? AND tenant_id = ? AND type = 'applicability'
+                         ORDER BY id ASC",
+                    )
+                    .bind(test_id)
+                    .bind(tenant_id)
+                    .fetch_all(&pool)
+                    .await
+                    {
+                        Ok(conditions) if !conditions.is_empty() => Some(conditions),
+                        Ok(_) => None,
+                        Err(e) => {
+                            error!("Failed to fetch applicability conditions for test {}: {}", test_id, e);
+                            None
+                        }
+                    };
+
+                    tests_with_conditions.push(TestWithConditions { test, applicability });
+                }
+
                 // Clear delivered commands
                 if let Err(e) = sqlx::query(
                     "DELETE FROM commands WHERE system_id = ? AND tenant_id = ?",
@@ -372,15 +386,15 @@ pub async fn send(
                 info!(
                     "Heartbeat from Agent ID {} — {} test(s) dispatched.",
                     id,
-                    tests.len()
+                    tests_with_conditions.len()
                 );
 
                 response_data = serde_json::json!({
                     "status": "approved",
                     "id": id,
                     "tenant_id": tenant_id,
-                    "command": if tests.is_empty() { "NONE" } else { "TEST" },
-                    "data": tests
+                    "command": if tests_with_conditions.is_empty() { "NONE" } else { "TEST" },
+                    "data": tests_with_conditions
                 });
 
                 // Attach server public key for client verification
@@ -412,7 +426,6 @@ pub async fn send(
             }
 
             _ => {
-                // Pending — update last_seen only
                 if let Err(e) = sqlx::query(
                     "UPDATE systems SET last_seen=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?",
                 )
@@ -466,7 +479,6 @@ pub async fn receive_result(
         payload.client_id, tenant_id, payload.test_id
     );
 
-    // Fetch public key with tenant filter
     let db_pubkey = match sqlx::query_scalar::<_, String>(
         "SELECT key FROM systems WHERE id = ? AND tenant_id = ?",
     )
@@ -500,7 +512,6 @@ pub async fn receive_result(
         }
     };
 
-    // Verify result signature
     if let Err(err) = verify_signature(payload, &signed_req.signature, &db_pubkey) {
         error!(
             "SECURITY ALERT: Invalid signature on results from Agent ID {} (Tenant: '{}'): {}",
@@ -518,7 +529,6 @@ pub async fn receive_result(
         payload.client_id, tenant_id
     );
 
-    // Store result with upsert
     let now = chrono::Utc::now().to_string();
     if let Err(e) = sqlx::query(
         r#"INSERT INTO results (tenant_id, system_id, test_id, result, last_updated)
@@ -550,10 +560,8 @@ pub async fn receive_result(
         payload.client_id, payload.test_id, payload.result, tenant_id
     );
 
-    // Signal compliance recalculation
     let _ = sync_tx.send(()).await;
 
-    // Sign and return response
     let response_data = serde_json::json!({"status": "ok"});
     match sign_response(&pool, tenant_id, response_data).await {
         Ok(signed) => (StatusCode::OK, Json(signed)).into_response(),
