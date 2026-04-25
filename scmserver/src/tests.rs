@@ -9,7 +9,7 @@ use urlencoding;
 use tracing::{info, error};
 use bytes::Bytes;
 
-use crate::models::{ErrorQuery, Test, TestCondition, Element, SElement, Condition, UserRole, AuthSession};
+use crate::models::{ErrorQuery, Test, TestWithConditions, TestCondition, Element, SElement, Condition, UserRole, AuthSession};
 use crate::auth::{self};
 use crate::handlers::render_template;
 use crate::handlers::parse_form_data;
@@ -169,7 +169,7 @@ pub async fn tests(
     let rows_result = sqlx::query(
         "SELECT
             id, name, description, severity,
-            rational, remediation, filter,app_filter,
+            rational, remediation, filter, app_filter,
             element_1, input_1, selement_1, condition_1, sinput_1,
             element_2, input_2, selement_2, condition_2, sinput_2,
             element_3, input_3, selement_3, condition_3, sinput_3,
@@ -189,22 +189,50 @@ pub async fn tests(
             error!("Failed to fetch tests: {}", e);
             let mut context = Context::new();
             context.insert("error_message", "Failed to load tests.");
-            context.insert("tests", &Vec::<Test>::new());
+            context.insert("tests", &Vec::<TestWithConditions>::new());
             return render_template(&tera, Some(&pool), "tests.html", context, Some(auth))
                 .await
                 .into_response();
         }
     };
 
+    // Fetch all applicability conditions in one query
+    let all_app_conditions = sqlx::query_as::<_, TestCondition>(
+        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
+         FROM test_conditions
+         WHERE tenant_id = ? AND type = 'applicability'
+         ORDER BY test_id, id ASC",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await
+    .unwrap_or_default();
+
+    // Build TestWithConditions list
+    let tests_with_conditions: Vec<TestWithConditions> = tests.into_iter().map(|t| {
+        let app = if let Some(id) = t.id {
+            let conds: Vec<TestCondition> = all_app_conditions
+                .iter()
+                .filter(|c| c.test_id == id as i64)
+                .cloned()
+                .collect();
+            if conds.is_empty() { None } else { Some(conds) }
+        } else {
+            None
+        };
+        TestWithConditions { test: t, applicability: app }
+    }).collect();
+
     let mut context = Context::new();
     if let Some(msg) = query.error_message {
         context.insert("error_message", &msg);
     }
-    context.insert("tests", &tests);
+    context.insert("tests", &tests_with_conditions);
     render_template(&tera, Some(&pool), "tests.html", context, Some(auth))
         .await
         .into_response()
 }
+
 
 
 pub async fn tests_add(

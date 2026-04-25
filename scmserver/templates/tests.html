@@ -22,6 +22,8 @@
     background: #272b30; color: #f8f9fa; padding: 10px; font-family: monospace; 
     border-radius: 4px; font-size: 0.85rem; max-height: 110px; overflow-y: auto; 
   }
+
+  .app-step-row { border-left: 5px solid #ffc107; background: #fff; }
   
   /* Placeholder styling to match rationale/description font when empty */
   .empty-placeholder { font-family: inherit; color: #adb5bd !important; background: transparent !important; padding: 0 !important; }
@@ -95,23 +97,38 @@
                 </td>
                 <td class="text-right">
                   <button type="button" class="btn btn-primary btn-sm view-test-btn" 
-                    data-id="{{ test.id }}" data-name="{{ test.name }}"
-                    data-desc="{{ test.description }}" data-sev="{{ test.severity }}"
-                    data-rat="{{ test.rational }}" data-rem="{{ test.remediation }}"
+                    data-id="{{ test.id }}"
+                    data-name="{{ test.name }}"
+                    data-desc="{{ test.description }}"
+                    data-sev="{{ test.severity }}"
+                    data-rat="{{ test.rational }}"
+                    data-rem="{{ test.remediation }}"
                     data-filter="{{ test.filter }}"
+                    data-app-filter="{{ test.app_filter }}"
                     data-e1="{{ test.element_1 }}" data-c1="{{ test.condition_1 }}" data-s1="{{ test.sinput_1 }}"
                     data-e2="{{ test.element_2 }}" data-c2="{{ test.condition_2 }}" data-s2="{{ test.sinput_2 }}"
                     data-e3="{{ test.element_3 }}" data-c3="{{ test.condition_3 }}" data-s3="{{ test.sinput_3 }}"
                     data-e4="{{ test.element_4 }}" data-c4="{{ test.condition_4 }}" data-s4="{{ test.sinput_4 }}"
-                    data-e5="{{ test.element_5 }}" data-c5="{{ test.condition_5 }}" data-s5="{{ test.sinput_5 }}">
+                    data-e5="{{ test.element_5 }}" data-c5="{{ test.condition_5 }}" data-s5="{{ test.sinput_5 }}"
+                    {% if test.applicability %}
+                      data-app-count="{{ test.applicability | length }}"
+                      {% for ac in test.applicability %}
+                        data-ae{{ loop.index }}="{{ ac.element }}"
+                        data-asel{{ loop.index }}="{{ ac.selement }}"
+                        data-ac{{ loop.index }}="{{ ac.condition }}"
+                        data-as{{ loop.index }}="{{ ac.sinput }}"
+                      {% endfor %}
+                    {% else %}
+                      data-app-count="0"
+                    {% endif %}>
                     <i class="fas fa-eye mr-1"></i> View
                   </button>
                   <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-		     href="{% if is_editor %}/tests/edit/{{ test.id }}{% else %}#{% endif %}"
-		     {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
-		     <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
-		  </a>
-		  <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}"
+                     href="{% if is_editor %}/tests/edit/{{ test.id }}{% else %}#{% endif %}"
+                     {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
+                     <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
+                  </a>
+                  <a class="btn btn-danger btn-sm {% if not is_editor %}disabled{% endif %}"
                      onclick="{% if is_editor %}return confirm('Delete test? All historical data will be lost.'){% else %}return false;{% endif %}"
                      href="{% if is_editor %}/tests/delete/{{ test.id }}{% else %}#{% endif %}"
                      {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed;" title="Permission Required"{% endif %}>
@@ -166,6 +183,17 @@
 
         <hr>
 
+        <!-- Applicability Section -->
+        <div id="m-applicability-section" style="display:none;" class="mb-4">
+          <div class="text-center mb-3">
+            <h5 class="font-weight-bold mb-1"><i class="fas fa-filter text-warning mr-1"></i> Applicability</h5>
+            <div id="m-app-filter-statement" class="text-sm text-muted"></div>
+          </div>
+          <div id="app-steps-container" class="px-2 pb-2"></div>
+          <hr>
+        </div>
+
+        <!-- Logic Section -->
         <div class="text-center mb-4">
           <h5 class="font-weight-bold mb-1">Logic Flow Execution</h5>
           <div id="m-filter-statement" class="text-sm"></div>
@@ -225,12 +253,60 @@ $(function () {
         else if(sev === "low") sevBadge.addClass('badge-info').text('LOW');
         else sevBadge.addClass('badge-secondary').text('INFO');
 
-        // Logic Steps Container
+        // =====================================================
+        // APPLICABILITY SECTION
+        // =====================================================
+        const appCount = parseInt(b.data('app-count') || 0);
+        const appFilter = (b.data('app-filter') || 'all').toUpperCase();
+        const appSection = $('#m-applicability-section');
+        const appContainer = $('#app-steps-container');
+        appContainer.empty();
+
+        if (appCount > 0) {
+            appSection.show();
+            $('#m-app-filter-statement').html(`Run this test only if <strong>${appFilter}</strong> of the following conditions are met:`);
+
+            for (let i = 1; i <= appCount; i++) {
+                const ae  = b.data('ae'  + i) || '';
+                const asel = b.data('asel' + i) || '';
+                const ac  = b.data('ac'  + i) || '';
+                const as_ = b.data('as'  + i) || '';
+
+                if (i > 1) appContainer.append(`<div class="logic-divider" style="border-left-color: #ffc107;"></div>`);
+
+                appContainer.append(`
+                    <div class="app-step-row p-3 shadow-sm d-flex align-items-center justify-content-around rounded bg-white">
+                        <div class="text-center" style="width: 32%">
+                            <div class="node-circle bg-warning shadow-sm"><i class="fas fa-filter"></i></div>
+                            <small class="d-block mt-1 text-xs text-muted">SUBJECT</small>
+                            <span class="badge badge-light border text-truncate d-block">${ae}</span>
+                        </div>
+                        <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
+                        <div class="text-center" style="width: 32%">
+                            <div class="node-circle node-condition bg-secondary shadow-sm"><i class="fas fa-equals"></i></div>
+                            <small class="d-block mt-1 text-xs text-muted">LOGIC</small>
+                            <span class="badge badge-light border text-truncate d-block">${ac || asel}</span>
+                        </div>
+                        <div class="text-muted"><i class="fas fa-chevron-right"></i></div>
+                        <div class="text-center" style="width: 32%">
+                            <div class="node-circle bg-success shadow-sm"><i class="fas fa-check"></i></div>
+                            <small class="d-block mt-1 text-xs text-muted">EXPECTED</small>
+                            <span class="badge badge-light border text-truncate d-block">${as_ || '—'}</span>
+                        </div>
+                    </div>
+                `);
+            }
+        } else {
+            appSection.hide();
+        }
+
+        // =====================================================
+        // LOGIC STEPS
+        // =====================================================
         const container = $('#logic-steps-container');
         container.empty();
         let stepCount = 0;
 
-        // Loop through the 5 possible conditions
         for (let i = 1; i <= 5; i++) {
             let el = b.data('e' + i);
             let co = b.data('c' + i);
@@ -263,32 +339,29 @@ $(function () {
                 stepCount++;
             }
         }
+
         $('#testDetailsModal').modal('show');
     });
 
     // 2. DataTables Initialization
     const table = $("#tests_table").DataTable({
-    "responsive": true,
-    "lengthChange": true,
-    "autoWidth": false,
-    "order": [[1, "asc"]],
-    "columnDefs": [{ "targets": 0, "visible": false }],
-    // Layout: 'l' and 'B' are now together in the first 6-columns
-    // 'f' (filter) stays in the right 6-columns
-    "dom": '<"row"<"col-md-6"lB><"col-md-6"f>>rtip',
-    "buttons": [
-        { extend: 'copy', className: 'btn-sm' },
-        { extend: 'csv', className: 'btn-sm' },
-        { extend: 'excel', className: 'btn-sm' },
-        { extend: 'pdf', className: 'btn-sm' },
-        { extend: 'print', className: 'btn-sm' },
-        { extend: 'colvis', className: 'btn-sm' }
-    ]
+        "responsive": true,
+        "lengthChange": true,
+        "autoWidth": false,
+        "order": [[1, "asc"]],
+        "columnDefs": [{ "targets": 0, "visible": false }],
+        "dom": '<"row"<"col-md-6"lB><"col-md-6"f>>rtip',
+        "buttons": [
+            { extend: 'copy', className: 'btn-sm' },
+            { extend: 'csv', className: 'btn-sm' },
+            { extend: 'excel', className: 'btn-sm' },
+            { extend: 'pdf', className: 'btn-sm' },
+            { extend: 'print', className: 'btn-sm' },
+            { extend: 'colvis', className: 'btn-sm' }
+        ]
     });
-
 
     table.buttons().container().appendTo('#tests_table_wrapper .col-md-6:eq(0)');
 });
 </script>
 {% endblock %}
-
