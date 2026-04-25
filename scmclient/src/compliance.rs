@@ -696,6 +696,7 @@ pub fn evaluate(
         "os" => match selement_l.as_str() {
             "content" => {
                 let actual = os_info::get().os_type().to_string();
+                debug!("OS actual value: '{}'", actual);
                 if apply_string_condition(&actual, condition, sinput_trim) {
                     EvalResult::Pass
                 } else {

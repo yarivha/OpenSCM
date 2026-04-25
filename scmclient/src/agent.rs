@@ -171,6 +171,10 @@ async fn process_compliance_tests(
         // APPLICABILITY CHECK
         // =====================================================
         if let Some(app_conditions) = &test.applicability {
+            for c in app_conditions {
+        debug!("Applicability condition: element='{}', selement='{}', condition='{}', sinput='{:?}'",
+            c.element, c.selement, c.condition.as_deref().unwrap_or(""), c.sinput);
+    }
             if !app_conditions.is_empty() {
                 let app_results: Vec<EvalResult> = app_conditions.iter()
                     .map(|c| evaluate(
@@ -181,6 +185,21 @@ async fn process_compliance_tests(
                         c.sinput.as_deref().unwrap_or(""),
                     ))
                     .collect();
+                
+                for (i, r) in app_results.iter().enumerate() {
+                    debug!("Applicability result {}: {:?}", i, r);
+                }
+
+                let is_applicable = match test.app_filter.as_deref().unwrap_or("all") {
+                    "any" => app_results.iter().any(|r| *r == EvalResult::Pass),
+                    _ => {
+                        app_results.iter().all(|r| *r == EvalResult::Pass || *r == EvalResult::Na)
+                        && app_results.iter().any(|r| *r == EvalResult::Pass)
+                    }
+                };
+
+                debug!("Test ID {} is_applicable: {}", test_id, is_applicable);
+
 
                 let is_applicable = match test.app_filter.as_deref().unwrap_or("all") {
                     "any" => app_results.iter().any(|r| *r == EvalResult::Pass),
@@ -213,18 +232,17 @@ async fn process_compliance_tests(
         let mut results = Vec::new();
         for (e, i, se, c, si) in conditions {
             if let (Some(el), Some(inp), Some(sel)) = (e, i, se) {
-                if el == "None" {
+                if el == "None" ||  el.is_empty() {
                     continue;
                 }
-                let cond = c.as_deref().unwrap_or("");
-                if cond.is_empty() || cond == "None" {
+                if sel == "None" || sel.is_empty() {
                     continue;
                 }
                 results.push(evaluate(
                     el,
                     inp,
                     sel,
-                    cond,
+                    c.as_deref().unwrap_or(""),
                     si.as_deref().unwrap_or(""),
                 ));
             }
