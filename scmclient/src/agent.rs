@@ -95,6 +95,51 @@ fn write_private_file(path: &PathBuf, contents: &str) -> Result<(), Box<dyn std:
 }
 
 
+/// Send a compliance result to the server.
+async fn send_result(
+    client_id_int: i64,
+    tenant_id: &str,
+    test_id: i64,
+    result: &str,
+    signing_key: &SigningKey,
+    http_client: &reqwest::Client,
+    result_url: &str,
+) {
+    let payload = ComplianceResult {
+        client_id: client_id_int,
+        tenant_id: tenant_id.to_string(),
+        test_id,
+        result: result.to_string(),
+    };
+
+    let signature = match sign_payload(&payload, signing_key) {
+        Ok(sig) => sig,
+        Err(e) => {
+            error!("Failed to sign result for test {}: {}", test_id, e);
+            return;
+        }
+    };
+
+    let req = SignedRequest { payload, signature };
+
+    match http_client.post(result_url).json(&req).send().await {
+        Ok(resp) if resp.status().is_success() => {
+            debug!("Test {} result sent successfully.", test_id);
+        }
+        Ok(resp) => {
+            error!(
+                "Server rejected result for test {} with status: {}",
+                test_id,
+                resp.status()
+            );
+        }
+        Err(e) => {
+            error!("Failed to send result for test {}: {}", test_id, e);
+        }
+    }
+}
+
+
 // ============================================================
 // COMPLIANCE TEST PROCESSING
 // ============================================================
@@ -121,6 +166,42 @@ async fn process_compliance_tests(
     for test in tests {
         let test_id = test.id.unwrap_or(0);
         debug!("Starting evaluation of test ID {}", test_id);
+
+        // =====================================================
+        // APPLICABILITY CHECK
+        // =====================================================
+        if let Some(app_conditions) = &test.applicability {
+            if !app_conditions.is_empty() {
+                let app_results: Vec<EvalResult> = app_conditions.iter()
+                    .map(|c| evaluate(
+                        &c.element,
+                        &c.input,
+                        &c.selement,
+                        c.condition.as_deref().unwrap_or(""),
+                        c.sinput.as_deref().unwrap_or(""),
+                    ))
+                    .collect();
+
+                let is_applicable = match test.app_filter.as_deref().unwrap_or("all") {
+                    "any" => app_results.iter().any(|r| *r == EvalResult::Pass),
+                    _ => {
+                        app_results.iter().all(|r| *r == EvalResult::Pass || *r == EvalResult::Na)
+                        && app_results.iter().any(|r| *r == EvalResult::Pass)
+                    }
+                };
+
+                if !is_applicable {
+                    debug!("Test ID {} is not applicable — sending NA.", test_id);
+                    send_result(client_id_int, tenant_id, test_id, "NA", signing_key, http_client, result_url).await;
+                    debug!("Completed evaluation of test ID {}", test_id);
+                    continue;
+                }
+            }
+        }
+
+        // =====================================================
+        // TEST EVALUATION
+        // =====================================================
         let conditions = [
             (&test.element_1, &test.input_1, &test.selement_1, &test.condition_1, &test.sinput_1),
             (&test.element_2, &test.input_2, &test.selement_2, &test.condition_2, &test.sinput_2),
@@ -135,25 +216,25 @@ async fn process_compliance_tests(
                 if el == "None" {
                     continue;
                 }
+                let cond = c.as_deref().unwrap_or("");
+                if cond.is_empty() || cond == "None" {
+                    continue;
+                }
                 results.push(evaluate(
                     el,
                     inp,
                     sel,
-                    c.as_deref().unwrap_or(""),
+                    cond,
                     si.as_deref().unwrap_or(""),
                 ));
             }
         }
 
-        
         let final_result = if results.is_empty() {
             "NA".to_string()
         } else {
             match test.filter.as_deref().unwrap_or("all") {
                 "any" => {
-                    // ANY: if at least one PASS → PASS
-                    // if all NA → NA
-                    // otherwise FAIL
                     if results.iter().any(|r| *r == EvalResult::Pass) {
                         "PASS".to_string()
                     } else if results.iter().all(|r| *r == EvalResult::Na) {
@@ -163,9 +244,6 @@ async fn process_compliance_tests(
                     }
                 }
                 _ => {
-                    // ALL: if any FAIL → FAIL
-                    // if all NA → NA
-                    // if all PASS (or mix of PASS+NA) → PASS
                     if results.iter().any(|r| *r == EvalResult::Fail) {
                         "FAIL".to_string()
                     } else if results.iter().all(|r| *r == EvalResult::Na) {
@@ -177,46 +255,8 @@ async fn process_compliance_tests(
             }
         };
 
-
         debug!("Test ID {} result: {}", test_id, final_result);
-
-        let payload = ComplianceResult {
-            client_id: client_id_int,
-            tenant_id: tenant_id.to_string(),
-            test_id,
-            result: final_result,
-        };
-
-        // Sign with serde_json for cross-platform determinism
-        let signature = match sign_payload(&payload, signing_key) {
-            Ok(sig) => sig,
-            Err(e) => {
-                error!("Failed to sign result for test {}: {}", test_id, e);
-                continue;
-            }
-        };
-
-        let req = SignedRequest {
-            payload,
-            signature,
-        };
-
-        match http_client.post(result_url).json(&req).send().await {
-            Ok(resp) if resp.status().is_success() => {
-                debug!("Test {} result sent successfully.", test_id);
-            }
-            Ok(resp) => {
-                error!(
-                    "Server rejected result for test {} with status: {}",
-                    test_id,
-                    resp.status()
-                );
-            }
-            Err(e) => {
-                error!("Failed to send result for test {}: {}", test_id, e);
-            }
-        }
-
+        send_result(client_id_int, tenant_id, test_id, &final_result, signing_key, http_client, result_url).await;
         debug!("Completed evaluation of test ID {}", test_id);
     }
 }
@@ -249,7 +289,6 @@ pub async fn send_system_info(
         let signing_key   = SigningKey::generate(&mut csprng);
         let verifying_key = VerifyingKey::from(&signing_key);
 
-        // Write private key with restricted permissions
         write_private_file(
             &priv_path,
             &general_purpose::STANDARD.encode(signing_key.to_bytes()),
@@ -310,7 +349,6 @@ pub async fn send_system_info(
         public_key: if needs_handshake { Some(public_base64.clone()) } else { None },
     };
 
-    // Sign with serde_json for cross-platform determinism
     let signature = sign_payload(&unsigned_payload, &signing_key)?;
 
     let request = SignedRequest {
