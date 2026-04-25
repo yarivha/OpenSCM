@@ -19,15 +19,6 @@ pub enum EvalResult {
     Na,
 }
 
-impl EvalResult {
-    pub fn as_str(&self) -> &'static str {
-        match self {
-            EvalResult::Pass => "PASS",
-            EvalResult::Fail => "FAIL",
-            EvalResult::Na   => "NA",
-        }
-    }
-}
 
 // ============================================================
 // HELPERS
