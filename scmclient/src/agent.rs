@@ -120,7 +120,7 @@ async fn process_compliance_tests(
 
     for test in tests {
         let test_id = test.id.unwrap_or(0);
-
+        debug!("Starting evaluation of test ID {}", test_id);
         let conditions = [
             (&test.element_1, &test.input_1, &test.selement_1, &test.condition_1, &test.sinput_1),
             (&test.element_2, &test.input_2, &test.selement_2, &test.condition_2, &test.sinput_2),
@@ -216,6 +216,8 @@ async fn process_compliance_tests(
                 error!("Failed to send result for test {}: {}", test_id, e);
             }
         }
+
+        debug!("Completed evaluation of test ID {}", test_id);
     }
 }
 

@@ -208,6 +208,26 @@ fn get_system_domain() -> Option<String> {
 
 
 fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
+    // Guard: reject directories
+    if Path::new(path).is_dir() {
+        // Search all files in directory for the content
+        let dir = match fs::read_dir(path) {
+            Ok(d) => d,
+            Err(e) => {
+                error!("Could not read directory {}: {}", path, e);
+                return false;
+            }
+        };
+        for entry in dir.filter_map(|e| e.ok()) {
+            if entry.path().is_file() {
+                if check_file_content(entry.path().to_str().unwrap_or(""), condition, expected) {
+                    return true;
+                }
+            }
+        }
+        return false;
+    }
+
     let file = match fs::File::open(path) {
         Ok(f) => f,
         Err(e) => {
@@ -226,6 +246,7 @@ fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
     }
     false
 }
+
 
 
 fn calculate_sha1(path: &str) -> Result<String, std::io::Error> {
