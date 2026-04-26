@@ -102,14 +102,16 @@ fn check_package_exists(package: &str) -> bool {
     use std::process::Stdio;
 
     // Try dpkg (Debian/Ubuntu)
-    let dpkg = Command::new("dpkg-query")
-        .args(["-W", "-f='${Status}'", package])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false);
-    if dpkg { return true; }
+    let dpkg_output = Command::new("dpkg-query")
+        .args(["-W", "-f=${Status}", package])
+        .output();
+
+    if let Ok(output) = dpkg_output {
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        if stdout.contains("install ok installed") {
+            return true;
+        }
+    }
 
     // Try rpm (RHEL/Fedora/openSUSE)
     let rpm = Command::new("rpm")
