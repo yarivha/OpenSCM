@@ -43,10 +43,10 @@ If you find this project helpful, please consider sponsoring us to support ongoi
 
 | Platform | Architecture | Server | Client | Package Format |
 |:---|:---|:---:|:---:|:---|
-| Linux | x86_64 | ✅ | ✅ | deb, rpm |
-| Linux | ARM64 | ✅ | ✅ | deb, rpm |
-| Linux | ARMv7 | ❌ | ✅ | deb, rpm |
-| Linux | RISC-V | ❌ | ✅ | deb, rpm |
+| Linux | x86_64 | ✅ | ✅ | deb, rpm, pkg |
+| Linux | ARM64 | ✅ | ✅ | deb, rpm, pkg |
+| Linux | ARMv7 | ❌ | ✅ | deb, rpm, pkg |
+| Linux | RISC-V | ❌ | ✅ | deb, rpm, pkg |
 | Linux | PowerPC64LE | ❌ | ✅ | deb, rpm |
 | Windows | x86_64 | ✅ | ✅ | exe (NSIS) |
 | macOS | Universal (ARM64 + x86_64) | ❌ | ✅ | pkg |
