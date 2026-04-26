@@ -5,6 +5,8 @@
   .bootstrap-duallistbox-container .btn-group > .btn { border-radius: 4px; margin-bottom: 5px; }
   .info-container { margin-bottom: 5px; font-weight: bold; color: #6c757d; }
   .policy-id-badge { font-size: 0.9rem; vertical-align: middle; }
+  #schedule-config-area { transition: all 0.3s ease; }
+  #report-schedule-config-area { transition: all 0.3s ease; }
 </style>
 {% endblock %}
 
@@ -103,6 +105,9 @@
           </div>
         </div>
 
+        <!-- ================================================ -->
+        <!-- AUTO-SCAN SCHEDULE                                -->
+        <!-- ================================================ -->
         <div class="row">
           <div class="col-md-12">
             <div class="card card-warning card-outline shadow-sm">
@@ -123,7 +128,6 @@
                     <div class="form-group">
                       <label for="frequency">Interval</label>
                       <select name="frequency" id="frequency" class="form-control">
-                        {# Guard against null schedule by using 'schedule and ...' #}
                         <option value="daily" {% if schedule and schedule.frequency == 'daily' %}selected{% endif %}>Daily</option>
                         <option value="weekly" {% if schedule and schedule.frequency == 'weekly' %}selected{% endif %}>Weekly</option>
                         <option value="monthly" {% if schedule and schedule.frequency == 'monthly' %}selected{% endif %}>Monthly</option>
@@ -131,7 +135,6 @@
                       </select>
                     </div>
                   </div>
-
                   <div class="col-md-4" id="cron-input-group" {% if not schedule or schedule.frequency != 'custom' %}style="display: none;"{% endif %}>
                     <div class="form-group">
                       <label>Cron Expression</label>
@@ -139,7 +142,6 @@
                              value="{{ schedule.cron_expression | default(value='') }}" placeholder="0 0 * * *">
                     </div>
                   </div>
-
                   <div class="col-md-4">
                     <div class="form-group">
                       <label>Next Execution Time</label>
@@ -161,9 +163,67 @@
           </div>
         </div>
 
+        <!-- ================================================ -->
+        <!-- AUTO-REPORT SCHEDULE                              -->
+        <!-- ================================================ -->
+        <div class="row">
+          <div class="col-md-12">
+            <div class="card card-secondary card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-file-chart mr-2"></i>Report Scheduling</h3>
+                <div class="card-tools">
+                  <div class="custom-control custom-switch mt-1">
+                    <input type="checkbox" class="custom-control-input" id="report_schedule_enabled" name="report_schedule_enabled"
+                           {% if report_schedule and report_schedule.enabled %}checked{% endif %}>
+                    <label class="custom-control-label" for="report_schedule_enabled">Enable Auto-Report</label>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card-body" id="report-schedule-config-area" {% if not report_schedule or not report_schedule.enabled %}style="display: none;"{% endif %}>
+                <div class="row">
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label for="report_frequency">Interval</label>
+                      <select name="report_frequency" id="report_frequency" class="form-control">
+                        <option value="daily" {% if report_schedule and report_schedule.frequency == 'daily' %}selected{% endif %}>Daily</option>
+                        <option value="weekly" {% if report_schedule and report_schedule.frequency == 'weekly' %}selected{% endif %}>Weekly</option>
+                        <option value="monthly" {% if report_schedule and report_schedule.frequency == 'monthly' %}selected{% endif %}>Monthly</option>
+                        <option value="custom" {% if report_schedule and report_schedule.frequency == 'custom' %}selected{% endif %}>Custom (Cron)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="col-md-4" id="report-cron-input-group" {% if not report_schedule or report_schedule.frequency != 'custom' %}style="display: none;"{% endif %}>
+                    <div class="form-group">
+                      <label>Cron Expression</label>
+                      <input type="text" name="report_cron_val" class="form-control"
+                             value="{{ report_schedule.cron_expression | default(value='') }}" placeholder="0 0 * * *">
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label>Next Execution Time</label>
+                      <input type="datetime-local" name="report_next_run"
+                             value="{{ report_schedule.next_run | default(value='') }}" class="form-control">
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="card-footer text-muted text-sm" id="report-schedule-status-msg">
+                {% if report_schedule and report_schedule.enabled %}
+                  <i class="fas fa-calendar-check text-success mr-1"></i> Auto-Report is currently <strong>Active</strong>.
+                {% else %}
+                  <i class="fas fa-info-circle mr-1"></i> Reports are currently saved <strong>manually only</strong>.
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="row pb-5">
-	  <div class="col-12">
-	    <div class="text-right">
+          <div class="col-12">
+            <div class="text-right">
               <a href="/policies" class="btn btn-secondary px-4">Cancel</a>
               <button type="submit" class="btn btn-success px-5 ml-2">
                 <i class="fas fa-save mr-1"></i> Update Policy
@@ -191,7 +251,7 @@
       filterPlaceHolder: 'Filter...'
     });
 
-    // 2. Handle Schedule Toggle logic
+    // 2. Handle Auto-Scan Toggle
     $('#schedule_enabled').on('change', function() {
       if($(this).is(':checked')) {
         $('#schedule-config-area').slideDown();
@@ -202,12 +262,32 @@
       }
     });
 
-    // 3. Handle Frequency dropdown visibility
+    // 3. Handle Auto-Scan Cron Visibility
     $('#frequency').on('change', function() {
       if($(this).val() === 'custom') {
         $('#cron-input-group').fadeIn();
       } else {
         $('#cron-input-group').fadeOut();
+      }
+    });
+
+    // 4. Handle Auto-Report Toggle
+    $('#report_schedule_enabled').on('change', function() {
+      if($(this).is(':checked')) {
+        $('#report-schedule-config-area').slideDown();
+        $('#report-schedule-status-msg').html('<i class="fas fa-calendar-check text-success mr-1"></i> Auto-Report is <strong>Enabled</strong>. Reports will be saved on the defined schedule.');
+      } else {
+        $('#report-schedule-config-area').slideUp();
+        $('#report-schedule-status-msg').html('<i class="fas fa-info-circle mr-1"></i> Reports are currently saved <strong>manually only</strong>.');
+      }
+    });
+
+    // 5. Handle Auto-Report Cron Visibility
+    $('#report_frequency').on('change', function() {
+      if($(this).val() === 'custom') {
+        $('#report-cron-input-group').fadeIn();
+      } else {
+        $('#report-cron-input-group').fadeOut();
       }
     });
   });

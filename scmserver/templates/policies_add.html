@@ -4,8 +4,8 @@
 <style>
   .bootstrap-duallistbox-container .btn-group > .btn { border-radius: 4px; margin-bottom: 5px; }
   .info-container { margin-bottom: 5px; font-weight: bold; color: #6c757d; }
-  /* Animation for the schedule section */
   #schedule-config-area { transition: all 0.3s ease; }
+  #report-schedule-config-area { transition: all 0.3s ease; }
 </style>
 {% endblock %}
 
@@ -89,6 +89,9 @@
           </div>
         </div>
 
+        <!-- ================================================ -->
+        <!-- AUTO-SCAN SCHEDULE                                -->
+        <!-- ================================================ -->
         <div class="row">
           <div class="col-md-12">
             <div class="card card-warning card-outline shadow-sm">
@@ -136,6 +139,56 @@
           </div>
         </div>
 
+        <!-- ================================================ -->
+        <!-- AUTO-REPORT SCHEDULE                              -->
+        <!-- ================================================ -->
+        <div class="row">
+          <div class="col-md-12">
+            <div class="card card-secondary card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-file-chart mr-2"></i>Report Scheduling</h3>
+                <div class="card-tools">
+                  <div class="custom-control custom-switch mt-1">
+                    <input type="checkbox" class="custom-control-input" id="report_schedule_enabled" name="report_schedule_enabled">
+                    <label class="custom-control-label" for="report_schedule_enabled">Enable Auto-Report</label>
+                  </div>
+                </div>
+              </div>
+              <div class="card-body" id="report-schedule-config-area" style="display: none;">
+                <div class="row">
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label for="report_frequency">Interval</label>
+                      <select name="report_frequency" id="report_frequency" class="form-control">
+                        <option value="daily">Daily</option>
+                        <option value="weekly">Weekly</option>
+                        <option value="monthly">Monthly</option>
+                        <option value="custom">Custom (Cron)</option>
+                      </select>
+                    </div>
+                  </div>
+                  <div class="col-md-4" id="report-cron-input-group" style="display: none;">
+                    <div class="form-group">
+                      <label>Cron Expression</label>
+                      <input type="text" name="report_cron_val" class="form-control" placeholder="0 0 * * *">
+                      <small class="text-muted text-xs">min hour day month day-of-week</small>
+                    </div>
+                  </div>
+                  <div class="col-md-4">
+                    <div class="form-group">
+                      <label>First Execution Time</label>
+                      <input type="datetime-local" name="report_next_run" class="form-control">
+                    </div>
+                  </div>
+                </div>
+              </div>
+              <div class="card-footer text-muted text-sm" id="report-schedule-status-msg">
+                <i class="fas fa-info-circle mr-1"></i> Reports are currently saved <strong>manually only</strong>.
+              </div>
+            </div>
+          </div>
+        </div>
+
         <div class="row pb-5">
           <div class="col-12">
             <div class="card shadow-sm">
@@ -166,7 +219,7 @@
       filterPlaceHolder: 'Filter list...'
     });
 
-    // 2. Handle the Schedule Toggle
+    // 2. Handle the Auto-Scan Toggle
     $('#schedule_enabled').on('change', function() {
       if($(this).is(':checked')) {
         $('#schedule-config-area').slideDown();
@@ -177,12 +230,32 @@
       }
     });
 
-    // 3. Handle Cron Field Visibility
+    // 3. Handle Auto-Scan Cron Field Visibility
     $('#frequency').on('change', function() {
       if($(this).val() === 'custom') {
         $('#cron-input-group').fadeIn();
       } else {
         $('#cron-input-group').fadeOut();
+      }
+    });
+
+    // 4. Handle the Auto-Report Toggle
+    $('#report_schedule_enabled').on('change', function() {
+      if($(this).is(':checked')) {
+        $('#report-schedule-config-area').slideDown();
+        $('#report-schedule-status-msg').html('<i class="fas fa-calendar-check text-success mr-1"></i> Auto-Report is <strong>Enabled</strong>. Reports will be saved on the defined schedule.');
+      } else {
+        $('#report-schedule-config-area').slideUp();
+        $('#report-schedule-status-msg').html('<i class="fas fa-info-circle mr-1"></i> Reports are currently saved <strong>manually only</strong>.');
+      }
+    });
+
+    // 5. Handle Auto-Report Cron Field Visibility
+    $('#report_frequency').on('change', function() {
+      if($(this).val() === 'custom') {
+        $('#report-cron-input-group').fadeIn();
+      } else {
+        $('#report-cron-input-group').fadeOut();
       }
     });
   });
