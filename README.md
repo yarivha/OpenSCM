@@ -47,7 +47,7 @@ If you find this project helpful, please consider sponsoring us to support ongoi
 | Linux | ARM64 | ✅ | ✅ | deb, rpm, pkg |
 | Linux | ARMv7 | ❌ | ✅ | deb, rpm, pkg |
 | Linux | RISC-V | ❌ | ✅ | deb, rpm, pkg |
-| Linux | PowerPC64LE | ❌ | ✅ | deb, rpm |
+| Linux | PowerPC64LE | ❌ | ✅ | deb, rpm, pkg |
 | Windows | x86_64 | ✅ | ✅ | exe (NSIS) |
 | macOS | Universal (ARM64 + x86_64) | ❌ | ✅ | pkg |
 | FreeBSD | x86_64 | ❌ | ✅ | pkg |
