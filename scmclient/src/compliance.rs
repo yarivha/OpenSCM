@@ -101,6 +101,7 @@ fn check_port_open(port: &str) -> bool {
 fn check_package_exists(package: &str) -> bool {
     use std::process::Stdio;
 
+    // Try dpkg (Debian/Ubuntu)
     let dpkg = Command::new("dpkg-query")
         .args(["-W", "-f='${Status}'", package])
         .stdout(Stdio::null())
@@ -108,13 +109,21 @@ fn check_package_exists(package: &str) -> bool {
         .status()
         .map(|s| s.success())
         .unwrap_or(false);
+    if dpkg { return true; }
 
-    if dpkg {
-        return true;
-    }
-
-    Command::new("rpm")
+    // Try rpm (RHEL/Fedora/openSUSE)
+    let rpm = Command::new("rpm")
         .args(["-q", package])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if rpm { return true; }
+
+    // Try pacman (Arch Linux)
+    Command::new("pacman")
+        .args(["-Q", package])
         .stdout(Stdio::null())
         .stderr(Stdio::null())
         .status()
@@ -132,8 +141,10 @@ fn check_package_exists(package: &str) -> bool {
 }
 
 
+
 #[cfg(unix)]
 fn get_package_version(package: &str) -> Option<String> {
+    // Try dpkg (Debian/Ubuntu)
     let output = Command::new("dpkg-query")
         .args(["-W", "-f=${Version}", package])
         .output()
@@ -146,6 +157,7 @@ fn get_package_version(package: &str) -> Option<String> {
         }
     }
 
+    // Try rpm (RHEL/Fedora/openSUSE)
     let output_rpm = Command::new("rpm")
         .args(["-q", "--queryformat", "%{VERSION}", package])
         .output()
@@ -157,8 +169,25 @@ fn get_package_version(package: &str) -> Option<String> {
         }
     }
 
+    // Try pacman (Arch Linux)
+    let output_pacman = Command::new("pacman")
+        .args(["-Q", package])
+        .output()
+        .ok();
+
+    if let Some(o) = output_pacman {
+        if o.status.success() {
+            // pacman -Q returns "package version" e.g. "nginx 1.24.0-1"
+            let out = String::from_utf8_lossy(&o.stdout);
+            if let Some(ver) = out.split_whitespace().nth(1) {
+                return Some(ver.to_string());
+            }
+        }
+    }
+
     None
 }
+
 
 #[cfg(windows)]
 fn get_package_version(package: &str) -> Option<String> {
