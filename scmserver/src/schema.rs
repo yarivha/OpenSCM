@@ -243,18 +243,19 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
      // Create policy schedules table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS policy_schedules (
-        id INTEGER PRIMARY KEY AUTOINCREMENT,
-        tenant_id TEXT NOT NULL DEFAULT 'default',
-        policy_id INTEGER NOT NULL UNIQUE, -- This UNIQUE keyword is the fix
-        type TEXT NOT NULL DEFAULT 'scan'
-        enabled BOOLEAN NOT NULL DEFAULT 1,
-        frequency TEXT NOT NULL,
-        cron_expression TEXT,
-        next_run DATETIME NOT NULL,
-        last_run DATETIME,
-        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-        FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
-        FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            policy_id INTEGER NOT NULL,
+            schedule_type TEXT NOT NULL DEFAULT 'scan',
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            frequency TEXT NOT NULL,
+            cron_expression TEXT,
+            next_run DATETIME NOT NULL,
+            last_run DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(policy_id, type),
+            FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
@@ -585,20 +586,49 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     if version < 3 {
         info!("Running schema migration v2 → v3...");
 
-        sqlx::query("ALTER TABLE policy_schedules ADD COLUMN type TEXT NOT NULL DEFAULT 'scan'")
-            .execute(pool)
-            .await?;
+        let mut migration_tx = pool.begin().await?;
 
-        // Populate existing records as 'scan'
-        sqlx::query("UPDATE policy_schedules SET type = 'scan'")
-            .execute(pool)
-            .await?;
+        // Clean up any leftover from previous failed attempt
+        sqlx::query("DROP TABLE IF EXISTS policy_schedules_old")
+            .execute(&mut *migration_tx).await?;
+
+        sqlx::query("ALTER TABLE policy_schedules RENAME TO policy_schedules_old")
+            .execute(&mut *migration_tx).await?;
+
+        sqlx::query(r#"CREATE TABLE policy_schedules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            policy_id INTEGER NOT NULL,
+            schedule_type TEXT NOT NULL DEFAULT 'scan',
+            enabled BOOLEAN NOT NULL DEFAULT 1,
+            frequency TEXT NOT NULL,
+            cron_expression TEXT,
+            next_run DATETIME NOT NULL,
+            last_run DATETIME,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(policy_id, type),
+            FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )"#)
+        .execute(&mut *migration_tx).await?;
+
+        sqlx::query(
+            "INSERT INTO policy_schedules (id, tenant_id, policy_id, type, enabled, frequency, cron_expression, next_run, last_run, created_at)
+            SELECT id, tenant_id, policy_id, 'scan', enabled, frequency, cron_expression, next_run, last_run, created_at
+            FROM policy_schedules_old"
+        )
+        .execute(&mut *migration_tx).await?;
+
+        sqlx::query("DROP TABLE policy_schedules_old")
+            .execute(&mut *migration_tx).await?;
 
         sqlx::query("UPDATE schema_info SET version = 3")
-            .execute(pool)
-            .await?;
+            .execute(&mut *migration_tx).await?;
+
+        migration_tx.commit().await?;
 
         info!("Schema migration v2 → v3 complete.");
+
     }
 
     Ok(())
