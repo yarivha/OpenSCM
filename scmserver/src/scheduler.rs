@@ -40,7 +40,6 @@ async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
 }
 
 
-
 pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation (Active Systems Only)...");
 
@@ -89,15 +88,15 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                   AND s.status     = 'active'
             ),
             compliance_score = (
-            SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
-            ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-            END
-            FROM results r
-            JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
-            WHERE r.test_id   = tests.id
-            AND r.tenant_id = tests.tenant_id
-            AND s.status    = 'active'
-            AND r.result    != 'NA'    -- ← exclude NA
+                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
+                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+                END
+                FROM results r
+                JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
+                WHERE r.test_id   = tests.id
+                  AND r.tenant_id = tests.tenant_id
+                  AND s.status    = 'active'
+                  AND r.result    != 'NA'
             )
     "#)
     .execute(&mut *tx)
@@ -123,7 +122,7 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
             total_tests = (
                 SELECT COUNT(*) FROM results
                 WHERE system_id = systems.id
-                AND tenant_id = systems.tenant_id
+                  AND tenant_id = systems.tenant_id
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
@@ -131,8 +130,8 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 END
                 FROM results
                 WHERE system_id = systems.id
-                AND tenant_id = systems.tenant_id
-                AND result != 'NA'    -- ← exclude NA from denominator
+                  AND tenant_id = systems.tenant_id
+                  AND result != 'NA'
             )
         WHERE status = 'active'
     "#)
@@ -141,15 +140,17 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
 
     // =========================================================
     // 3. Update POLICY stats (SQLite compatible, per tenant)
+    // NA-aware: systems with only NA results are excluded from
+    // both numerator and denominator of compliance score
     // =========================================================
     sqlx::query(r#"
         UPDATE policies SET
             systems_passed = (
-                SELECT COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END)
+                SELECT COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END)
                 FROM (
                     SELECT
                         s.id as system_id,
-                        COUNT(r.result) as total_results,
+                        SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) as passes,
                         SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
                     FROM systems_in_policy sip
                     JOIN systems_in_groups sig ON sip.group_id = sig.group_id
@@ -195,16 +196,17 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
             ),
             compliance_score = (
                 SELECT CASE
-                    WHEN COUNT(CASE WHEN total_results > 0 THEN 1 END) = 0 THEN -1.0
+                    -- No systems with PASS or FAIL results → Not Scanned
+                    WHEN COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) = 0 THEN -1.0
                     ELSE (
-                        CAST(COUNT(CASE WHEN total_results > 0 AND fails = 0 THEN 1 END) AS REAL) /
-                        COUNT(CASE WHEN total_results > 0 THEN 1 END)
+                        CAST(COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END) AS REAL) /
+                        COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END)
                     ) * 100
                 END
                 FROM (
                     SELECT
                         s.id as system_id,
-                        COUNT(r.result) as total_results,
+                        SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) as passes,
                         SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
                     FROM systems_in_policy sip
                     JOIN systems_in_groups sig ON sip.group_id = sig.group_id

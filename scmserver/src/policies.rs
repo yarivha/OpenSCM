@@ -64,7 +64,10 @@ pub async fn policies(
                 COALESCE(
                     ROUND(
                         SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) * 100.0
-                        / NULLIF(COUNT(system_results.system_id), 0),
+                        / NULLIF(
+                            SUM(CASE WHEN system_status IN ('passed', 'failed') THEN 1 ELSE 0 END),
+                            0
+                        ),
                         2
                     ),
                     -1.0
@@ -80,6 +83,8 @@ pub async fn policies(
                 CASE
                     WHEN SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) > 0
                         THEN 'failed'
+                    WHEN SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) = 0
+                        THEN 'na' 
                     ELSE 'passed'
                 END AS system_status
             FROM tests_in_policy tip
