@@ -192,7 +192,11 @@ fn get_system_domain() -> Option<String> {
 #[cfg(windows)]
 fn get_system_domain() -> Option<String> {
     dns_lookup::get_hostname().ok().and_then(|h| {
-        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None).ok()?.next()?.canonname?;
+        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None)
+            .ok()?
+            .next()?
+            .unwrap()
+            .canonname?;
         fqdn.splitn(2, '.').nth(1).map(|s| s.to_string())
     })
 }
