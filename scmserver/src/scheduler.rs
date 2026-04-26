@@ -6,7 +6,7 @@ use tracing::{info, error};
 use crate::models::PolicySchedule;
 use crate::policies::execute_policy_run_logic;
 use crate::handlers::add_notification;
-
+use crate::reports::save_policy_report_logic;
 
 /// Internal helper for date math
 fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
@@ -316,6 +316,7 @@ pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Er
 }
 
 
+
 pub async fn start_background_scheduler(pool: SqlitePool) {
     // Startup compliance sync
     let startup_pool = pool.clone();
@@ -342,39 +343,50 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             let now_str = now.format("%Y-%m-%dT%H:%M").to_string();
             let current_hour = now.hour() as i32;
 
-            // --- TASK A: POLICY SCAN SCHEDULER (every 60s) ---
-            let due_policies = match sqlx::query_as::<_, PolicySchedule>(
+            // --- TASK A: POLICY SCHEDULER (scan + report) ---
+            let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
                 "SELECT * FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
             )
             .bind(&now_str)
             .fetch_all(&loop_pool)
             .await
             {
-                Ok(policies) => policies,
+                Ok(s) => s,
                 Err(e) => {
-                    error!("Failed to fetch due policies from scheduler: {}", e);
+                    error!("Failed to fetch due schedules: {}", e);
                     vec![]
                 }
             };
 
-            for schedule in due_policies {
+            for schedule in due_schedules {
                 info!(
-                    "Scheduler: Triggering Policy ID {} at '{}'",
-                    schedule.policy_id, now_str
+                    "Scheduler: Triggering Policy ID {} type='{}' at '{}'",
+                    schedule.policy_id, schedule.schedule_type, now_str
                 );
 
-                match execute_policy_run_logic(
-                    schedule.policy_id,
-                    &loop_pool,
-                    &schedule.tenant_id,
-                )
-                .await
-                {
-                    Ok(_) => {
-                        // Update next run time
-                        let next_run_time =
-                            calculate_next_run(&schedule.frequency, &schedule.next_run);
+                let result = match schedule.schedule_type.as_str() {
+                    "report" => {
+                        save_policy_report_logic(
+                            schedule.policy_id as i64,
+                            &loop_pool,
+                            &schedule.tenant_id,
+                            "Scheduler",
+                        )
+                        .await
+                    }
+                    _ => {
+                        execute_policy_run_logic(
+                            schedule.policy_id,
+                            &loop_pool,
+                            &schedule.tenant_id,
+                        )
+                        .await
+                    }
+                };
 
+                match result {
+                    Ok(_) => {
+                        let next_run_time = calculate_next_run(&schedule.frequency, &schedule.next_run);
                         if let Err(e) = sqlx::query(
                             "UPDATE policy_schedules SET next_run = ?, last_run = ? WHERE id = ?",
                         )
@@ -384,59 +396,32 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                         .execute(&loop_pool)
                         .await
                         {
-                            error!(
-                                "Failed to update schedule for policy {}: {}",
-                                schedule.policy_id, e
-                            );
+                            error!("Failed to update schedule for policy {}: {}", schedule.policy_id, e);
                         } else {
-                            info!(
-                                "Scheduled scan successfully initiated for Policy ID: {}",
-                                schedule.policy_id
-                            );
-                        }
-
-                        // Notify all tenant admins of successful scheduled run
-                        for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
-                            add_notification(
-                                &loop_pool,
-                                &schedule.tenant_id,
-                                "info",
-                                owner_id,
-                                &format!(
-                                    "Scheduled policy run completed for Policy ID {}.",
-                                    schedule.policy_id
-                                ),
-                            )
-                            .await;
+                            let msg = match schedule.schedule_type.as_str() {
+                                "report" => format!("Scheduled report saved for Policy ID {}.", schedule.policy_id),
+                                _ => format!("Scheduled scan completed for Policy ID {}.", schedule.policy_id),
+                            };
+                            info!("{}", msg);
+                            for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
+                                add_notification(&loop_pool, &schedule.tenant_id, "info", owner_id, &msg).await;
+                            }
                         }
                     }
-
                     Err(e) => {
-                        error!(
-                            "Scheduled execution failed for policy {}: {}",
-                            schedule.policy_id, e
+                        error!("Scheduled {} failed for policy {}: {}", schedule.schedule_type, schedule.policy_id, e);
+                        let msg = format!(
+                            "Scheduled {} FAILED for Policy ID {}. Error: {}",
+                            schedule.schedule_type, schedule.policy_id, e
                         );
-
-                        // Notify all tenant admins of failed scheduled run
                         for owner_id in get_policy_owners(&loop_pool, &schedule.tenant_id).await {
-                            add_notification(
-                                &loop_pool,
-                                &schedule.tenant_id,
-                                "warning",
-                                owner_id,
-                                &format!(
-                                    "Scheduled policy run FAILED for Policy ID {}. Error: {}",
-                                    schedule.policy_id, e
-                                ),
-                            )
-                            .await;
+                            add_notification(&loop_pool, &schedule.tenant_id, "warning", owner_id, &msg).await;
                         }
                     }
                 }
             }
 
-
-            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT (for trend graphs) ---
+            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT ---
             if now.minute() == 0 && current_hour != last_snapshot_hour {
                 info!("Running hourly compliance aggregation snapshot...");
                 if let Err(e) = record_compliance_history(&loop_pool).await {
@@ -449,3 +434,5 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
         }
     });
 }
+
+

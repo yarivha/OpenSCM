@@ -34,12 +34,10 @@ pub async fn policies(
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
-    // Check authorization
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
 
-    // Get applicable settings 
     let compliance_sat: i64 = sqlx::query_scalar(
         "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_sat'"
     )
@@ -56,8 +54,6 @@ pub async fn policies(
     .await
     .unwrap_or(60);
 
-
-    // Get policies information
     let rows = match sqlx::query(r#"
         SELECT
             p.id AS policy_id,
@@ -123,8 +119,6 @@ pub async fn policies(
         })
         .collect();
 
-
-    // Create context to send HTML
     let mut context = Context::new();
     if let Some(msg) = query.error_message {
         context.insert("error_message", &msg);
@@ -253,20 +247,19 @@ pub async fn policies_add_save(
     let tests = form_data.get("tests").cloned().unwrap_or_default();
     let system_groups = form_data.get("system_groups").cloned().unwrap_or_default();
 
-    let schedule_enabled = form_data
-        .get("schedule_enabled")
-        .and_then(|v| v.first())
-        .map(|v| v == "on")
-        .unwrap_or(false);
-    let frequency = form_data
-        .get("frequency")
-        .and_then(|v| v.first())
-        .cloned()
-        .unwrap_or_else(|| "daily".to_string());
+    // Auto-Scan schedule
+    let schedule_enabled = form_data.get("schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
+    let frequency = form_data.get("frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
     let cron_val = form_data.get("cron_val").and_then(|v| v.first()).cloned();
     let next_run = form_data.get("next_run").and_then(|v| v.first()).cloned();
 
-    // Insert policy with tenant_id
+    // Auto-Report schedule
+    let report_schedule_enabled = form_data.get("report_schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
+    let report_frequency = form_data.get("report_frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
+    let report_cron_val = form_data.get("report_cron_val").and_then(|v| v.first()).cloned();
+    let report_next_run = form_data.get("report_next_run").and_then(|v| v.first()).cloned();
+
+    // Insert policy
     let result = sqlx::query(
         "INSERT INTO policies (tenant_id, name, version, description) VALUES (?, ?, ?, ?)",
     )
@@ -286,15 +279,12 @@ pub async fn policies_add_save(
         }
     };
 
-    // Insert schedule if enabled
+    // Insert auto-scan schedule if enabled
     if schedule_enabled {
-        let start_time = next_run
-            .filter(|s| !s.is_empty())
-            .unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
-
+        let start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
         if let Err(e) = sqlx::query(
-            "INSERT INTO policy_schedules (tenant_id, policy_id, enabled, frequency, cron_expression, next_run)
-             VALUES (?, ?, ?, ?, ?, ?)",
+            "INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
+             VALUES (?, ?, 'scan', ?, ?, ?, ?)",
         )
         .bind(&auth.tenant_id)
         .bind(policy_id)
@@ -306,6 +296,28 @@ pub async fn policies_add_save(
         .await
         {
             let encoded = urlencoding::encode(&format!("Schedule error: {}", e)).to_string();
+            tx.rollback().await.ok();
+            return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
+        }
+    }
+
+    // Insert auto-report schedule if enabled
+    if report_schedule_enabled {
+        let start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
+        if let Err(e) = sqlx::query(
+            "INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
+             VALUES (?, ?, 'report', ?, ?, ?, ?)",
+        )
+        .bind(&auth.tenant_id)
+        .bind(policy_id)
+        .bind(1)
+        .bind(&report_frequency)
+        .bind(&report_cron_val)
+        .bind(&start_time)
+        .execute(&mut *tx)
+        .await
+        {
+            let encoded = urlencoding::encode(&format!("Report schedule error: {}", e)).to_string();
             tx.rollback().await.ok();
             return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
         }
@@ -342,8 +354,7 @@ pub async fn policies_add_save(
             .execute(&mut *tx)
             .await
             {
-                let encoded =
-                    urlencoding::encode(&format!("Failed to add system group: {}", e)).to_string();
+                let encoded = urlencoding::encode(&format!("Failed to add system group: {}", e)).to_string();
                 tx.rollback().await.ok();
                 return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
             }
@@ -395,9 +406,21 @@ pub async fn policies_edit(
         description: row.get("description"),
     };
 
+    // Fetch scan schedule
     let schedule_row = sqlx::query_as::<_, PolicySchedule>(
         "SELECT id, tenant_id, policy_id, enabled, frequency, cron_expression, next_run, last_run
-         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ?",
+         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'scan'",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .fetch_optional(&*pool)
+    .await
+    .unwrap_or(None);
+
+    // Fetch report schedule
+    let report_schedule_row = sqlx::query_as::<_, PolicySchedule>(
+        "SELECT id, tenant_id, policy_id, enabled, frequency, cron_expression, next_run, last_run
+         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'report'",
     )
     .bind(id)
     .bind(&auth.tenant_id)
@@ -413,19 +436,8 @@ pub async fn policies_edit(
     .await;
 
     let test_groups: Vec<Test> = match tests_result {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|r| Test {
-                id: r.get("id"),
-                name: r.get("name"),
-                severity: r.get("severity"),
-                ..Default::default()
-            })
-            .collect(),
-        Err(e) => {
-            error!("Failed to fetch tests for policy edit {}: {}", id, e);
-            vec![]
-        }
+        Ok(rows) => rows.into_iter().map(|r| Test { id: r.get("id"), name: r.get("name"), severity: r.get("severity"), ..Default::default() }).collect(),
+        Err(e) => { error!("Failed to fetch tests for policy edit {}: {}", id, e); vec![] }
     };
 
     let groups_result = sqlx::query(
@@ -436,18 +448,8 @@ pub async fn policies_edit(
     .await;
 
     let system_groups: Vec<SystemGroup> = match groups_result {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|r| SystemGroup {
-                id: r.get("id"),
-                name: r.get("name"),
-                ..Default::default()
-            })
-            .collect(),
-        Err(e) => {
-            error!("Failed to fetch system groups for policy edit {}: {}", id, e);
-            vec![]
-        }
+        Ok(rows) => rows.into_iter().map(|r| SystemGroup { id: r.get("id"), name: r.get("name"), ..Default::default() }).collect(),
+        Err(e) => { error!("Failed to fetch system groups for policy edit {}: {}", id, e); vec![] }
     };
 
     let tip_result = sqlx::query(
@@ -459,17 +461,8 @@ pub async fn policies_edit(
     .await;
 
     let tests_in_policy: Vec<TestInsidePolicy> = match tip_result {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|r| TestInsidePolicy {
-                policy_id: r.get("policy_id"),
-                test_id: r.get("test_id"),
-            })
-            .collect(),
-        Err(e) => {
-            error!("Failed to fetch tests in policy {}: {}", id, e);
-            vec![]
-        }
+        Ok(rows) => rows.into_iter().map(|r| TestInsidePolicy { policy_id: r.get("policy_id"), test_id: r.get("test_id") }).collect(),
+        Err(e) => { error!("Failed to fetch tests in policy {}: {}", id, e); vec![] }
     };
 
     let sip_result = sqlx::query(
@@ -481,22 +474,14 @@ pub async fn policies_edit(
     .await;
 
     let systems_in_policy: Vec<SystemInsidePolicy> = match sip_result {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|r| SystemInsidePolicy {
-                policy_id: r.get("policy_id"),
-                group_id: r.get("group_id"),
-            })
-            .collect(),
-        Err(e) => {
-            error!("Failed to fetch systems in policy {}: {}", id, e);
-            vec![]
-        }
+        Ok(rows) => rows.into_iter().map(|r| SystemInsidePolicy { policy_id: r.get("policy_id"), group_id: r.get("group_id") }).collect(),
+        Err(e) => { error!("Failed to fetch systems in policy {}: {}", id, e); vec![] }
     };
 
     let mut context = Context::new();
     context.insert("policy", &policy);
     context.insert("schedule", &schedule_row);
+    context.insert("report_schedule", &report_schedule_row);
     context.insert("tests", &test_groups);
     context.insert("system_groups", &system_groups);
     context.insert("tests_in_policy", &tests_in_policy);
@@ -532,93 +517,81 @@ pub async fn policies_edit_save(
 
     let name = match form_data.get("name").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
         Some(v) => v.to_string(),
-        None => {
-            tx.rollback().await.ok();
-            return Redirect::to("/policies?error_message=Policy+name+is+required").into_response();
-        }
+        None => { tx.rollback().await.ok(); return Redirect::to("/policies?error_message=Policy+name+is+required").into_response(); }
     };
 
     let version = match form_data.get("version").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
         Some(v) => v.to_string(),
-        None => {
-            tx.rollback().await.ok();
-            return Redirect::to("/policies?error_message=Version+is+required").into_response();
-        }
+        None => { tx.rollback().await.ok(); return Redirect::to("/policies?error_message=Version+is+required").into_response(); }
     };
 
-    let description = form_data
-        .get("description")
-        .and_then(|v| v.first())
-        .map(|s| s.trim().to_string())
-        .filter(|s| !s.is_empty());
+    let description = form_data.get("description").and_then(|v| v.first()).map(|s| s.trim().to_string()).filter(|s| !s.is_empty());
 
-    let schedule_enabled = form_data
-        .get("schedule_enabled")
-        .and_then(|v| v.first())
-        .map(|v| v == "on")
-        .unwrap_or(false);
-    let frequency = form_data
-        .get("frequency")
-        .and_then(|v| v.first())
-        .cloned()
-        .unwrap_or_else(|| "daily".to_string());
+    // Auto-Scan schedule
+    let schedule_enabled = form_data.get("schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
+    let frequency = form_data.get("frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
     let cron_val = form_data.get("cron_val").and_then(|v| v.first()).cloned();
     let next_run = form_data.get("next_run").and_then(|v| v.first()).cloned();
+
+    // Auto-Report schedule
+    let report_schedule_enabled = form_data.get("report_schedule_enabled").and_then(|v| v.first()).map(|v| v == "on").unwrap_or(false);
+    let report_frequency = form_data.get("report_frequency").and_then(|v| v.first()).cloned().unwrap_or_else(|| "daily".to_string());
+    let report_cron_val = form_data.get("report_cron_val").and_then(|v| v.first()).cloned();
+    let report_next_run = form_data.get("report_next_run").and_then(|v| v.first()).cloned();
 
     // Update policy metadata
     if let Err(e) = sqlx::query(
         "UPDATE policies SET name = ?, version = ?, description = ? WHERE id = ? AND tenant_id = ?",
     )
-    .bind(&name)
-    .bind(&version)
-    .bind(&description)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .execute(&mut *tx)
-    .await
+    .bind(&name).bind(&version).bind(&description).bind(id).bind(&auth.tenant_id)
+    .execute(&mut *tx).await
     {
         let encoded = urlencoding::encode(&format!("Error updating policy: {}", e)).to_string();
         tx.rollback().await.ok();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Upsert schedule
-    let start_time = next_run
-        .filter(|s| !s.is_empty())
-        .unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
-
+    // Upsert auto-scan schedule
+    let scan_start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
     if let Err(e) = sqlx::query(r#"
-        INSERT INTO policy_schedules (tenant_id, policy_id, enabled, frequency, cron_expression, next_run)
-        VALUES (?, ?, ?, ?, ?, ?)
-        ON CONFLICT(policy_id) DO UPDATE SET
+        INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
+        VALUES (?, ?, 'scan', ?, ?, ?, ?)
+        ON CONFLICT(policy_id, schedule_type) DO UPDATE SET
             enabled = excluded.enabled,
             frequency = excluded.frequency,
             cron_expression = excluded.cron_expression,
             next_run = excluded.next_run
     "#)
-    .bind(&auth.tenant_id)
-    .bind(id)
-    .bind(schedule_enabled)
-    .bind(&frequency)
-    .bind(&cron_val)
-    .bind(&start_time)
-    .execute(&mut *tx)
-    .await
+    .bind(&auth.tenant_id).bind(id).bind(schedule_enabled).bind(&frequency).bind(&cron_val).bind(&scan_start_time)
+    .execute(&mut *tx).await
     {
-        let encoded =
-            urlencoding::encode(&format!("Schedule update error: {}", e)).to_string();
+        let encoded = urlencoding::encode(&format!("Schedule update error: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
+    }
+
+    // Upsert auto-report schedule
+    let report_start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
+    if let Err(e) = sqlx::query(r#"
+        INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
+        VALUES (?, ?, 'report', ?, ?, ?, ?)
+        ON CONFLICT(policy_id, schedule_type) DO UPDATE SET
+            enabled = excluded.enabled,
+            frequency = excluded.frequency,
+            cron_expression = excluded.cron_expression,
+            next_run = excluded.next_run
+    "#)
+    .bind(&auth.tenant_id).bind(id).bind(report_schedule_enabled).bind(&report_frequency).bind(&report_cron_val).bind(&report_start_time)
+    .execute(&mut *tx).await
+    {
+        let encoded = urlencoding::encode(&format!("Report schedule update error: {}", e)).to_string();
         tx.rollback().await.ok();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
     // Clear and re-insert tests
-    if let Err(e) = sqlx::query(
-        "DELETE FROM tests_in_policy WHERE policy_id = ? AND tenant_id = ?",
-    )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .execute(&mut *tx)
-    .await
+    if let Err(e) = sqlx::query("DELETE FROM tests_in_policy WHERE policy_id = ? AND tenant_id = ?")
+        .bind(id).bind(&auth.tenant_id).execute(&mut *tx).await
     {
         let encoded = urlencoding::encode(&format!("Error clearing tests: {}", e)).to_string();
         tx.rollback().await.ok();
@@ -630,14 +603,9 @@ pub async fn policies_edit_save(
             if let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
             )
-            .bind(&auth.tenant_id)
-            .bind(id)
-            .bind(test_id)
-            .execute(&mut *tx)
-            .await
+            .bind(&auth.tenant_id).bind(id).bind(test_id).execute(&mut *tx).await
             {
-                let encoded =
-                    urlencoding::encode(&format!("Error adding test: {}", e)).to_string();
+                let encoded = urlencoding::encode(&format!("Error adding test: {}", e)).to_string();
                 tx.rollback().await.ok();
                 return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
             }
@@ -645,16 +613,10 @@ pub async fn policies_edit_save(
     }
 
     // Clear and re-insert system groups
-    if let Err(e) = sqlx::query(
-        "DELETE FROM systems_in_policy WHERE policy_id = ? AND tenant_id = ?",
-    )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .execute(&mut *tx)
-    .await
+    if let Err(e) = sqlx::query("DELETE FROM systems_in_policy WHERE policy_id = ? AND tenant_id = ?")
+        .bind(id).bind(&auth.tenant_id).execute(&mut *tx).await
     {
-        let encoded =
-            urlencoding::encode(&format!("Error clearing system groups: {}", e)).to_string();
+        let encoded = urlencoding::encode(&format!("Error clearing system groups: {}", e)).to_string();
         tx.rollback().await.ok();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
@@ -664,14 +626,9 @@ pub async fn policies_edit_save(
             if let Err(e) = sqlx::query(
                 "INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)",
             )
-            .bind(&auth.tenant_id)
-            .bind(id)
-            .bind(group_id)
-            .execute(&mut *tx)
-            .await
+            .bind(&auth.tenant_id).bind(id).bind(group_id).execute(&mut *tx).await
             {
-                let encoded =
-                    urlencoding::encode(&format!("Error adding system group: {}", e)).to_string();
+                let encoded = urlencoding::encode(&format!("Error adding system group: {}", e)).to_string();
                 tx.rollback().await.ok();
                 return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
             }
@@ -692,19 +649,12 @@ pub async fn policies_edit_save(
             WHERE sig.tenant_id = ?
         )
     "#)
-    .bind(&auth.tenant_id)
-    .bind(&auth.tenant_id)
-    .execute(&mut *tx)
-    .await
+    .bind(&auth.tenant_id).bind(&auth.tenant_id).execute(&mut *tx).await
     {
         let encoded = urlencoding::encode(&format!("Error cleaning up results: {}", e)).to_string();
         tx.rollback().await.ok();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
-
-
-
-
 
     if let Err(e) = tx.commit().await {
         let encoded = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
@@ -728,8 +678,6 @@ pub async fn policies_delete(
         return redir;
     }
 
-
-    // Before DELETE FROM policies:
     if let Err(e) = sqlx::query(r#"
         DELETE FROM results
         WHERE system_id IN (
@@ -744,26 +692,15 @@ pub async fn policies_delete(
             AND tip.policy_id != ?
         )
     "#)
-    .bind(&auth.tenant_id)
-    .bind(&auth.tenant_id)
-    .bind(id)
-    .execute(&pool)
-    .await
+    .bind(&auth.tenant_id).bind(&auth.tenant_id).bind(id).execute(&pool).await
     {
         error!("Failed to clean up results for deleted policy {}: {}", id, e);
         let encoded = urlencoding::encode(&format!("Error cleaning up results: {}", e)).to_string();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-
-    // ON DELETE CASCADE handles related records automatically
-    if let Err(e) = sqlx::query(
-        "DELETE FROM policies WHERE id = ? AND tenant_id = ?",
-    )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .execute(&pool)
-    .await
+    if let Err(e) = sqlx::query("DELETE FROM policies WHERE id = ? AND tenant_id = ?")
+        .bind(id).bind(&auth.tenant_id).execute(&pool).await
     {
         error!("Failed to delete policy {}: {}", id, e);
         let encoded = urlencoding::encode(&format!("Error deleting policy: {}", e)).to_string();
@@ -814,17 +751,11 @@ pub async fn policies_report(
     let policy_row = match sqlx::query(
         "SELECT id, name, version, description FROM policies WHERE id = ? AND tenant_id = ?",
     )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_optional(&*pool)
-    .await
+    .bind(id).bind(&auth.tenant_id).fetch_optional(&*pool).await
     {
         Ok(Some(row)) => row,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            error!(error = ?e, policy_id = %id, "Failed to fetch policy details");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!(error = ?e, policy_id = %id, "Failed to fetch policy details"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
     let test_rows = match sqlx::query(r#"
@@ -833,27 +764,18 @@ pub async fn policies_report(
         JOIN tests_in_policy tip ON t.id = tip.test_id
         WHERE tip.policy_id = ? AND tip.tenant_id = ?
     "#)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_all(&*pool)
-    .await
+    .bind(id).bind(&auth.tenant_id).fetch_all(&*pool).await
     {
         Ok(rows) => rows,
-        Err(e) => {
-            error!(error = ?e, policy_id = %id, "Failed to fetch tests for policy report");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!(error = ?e, policy_id = %id, "Failed to fetch tests for policy report"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
-    let tests_metadata: Vec<TestMeta> = test_rows
-        .into_iter()
-        .map(|row| TestMeta {
-            name: row.get("name"),
-            description: row.get("description"),
-            rational: row.get("rational"),
-            remediation: row.get("remediation"),
-        })
-        .collect();
+    let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| TestMeta {
+        name: row.get("name"),
+        description: row.get("description"),
+        rational: row.get("rational"),
+        remediation: row.get("remediation"),
+    }).collect();
 
     let result_rows = match sqlx::query(r#"
         SELECT
@@ -875,43 +797,27 @@ pub async fn policies_report(
               WHERE sip.policy_id = ? AND sip.tenant_id = ?
           )
     "#)
-    .bind(&auth.tenant_id)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_all(&*pool)
-    .await
+    .bind(&auth.tenant_id).bind(id).bind(&auth.tenant_id).bind(id).bind(&auth.tenant_id)
+    .fetch_all(&*pool).await
     {
         Ok(rows) => rows,
-        Err(e) => {
-            error!(error = ?e, policy_id = %id, "Failed to fetch policy results");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!(error = ?e, policy_id = %id, "Failed to fetch policy results"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
     let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
     for row in result_rows {
-        let system_name = row
-            .get::<Option<String>, _>("system_name")
-            .unwrap_or_else(|| "Unknown System".to_string());
+        let system_name = row.get::<Option<String>, _>("system_name").unwrap_or_else(|| "Unknown System".to_string());
         let test_name: String = row.get("test_name");
         let status_raw: String = row.get("status");
         let status = normalize_status(&status_raw).to_string();
-        system_map
-            .entry(system_name)
-            .or_insert_with(Vec::new)
-            .push(IndividualResult { test_name, status });
+        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult { test_name, status });
     }
 
-    let system_reports: Vec<SystemReport> = system_map
-        .into_iter()
-        .map(|(name, results)| {
-            let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
-                && results.iter().any(|r| r.status == "PASS");
-            SystemReport { system_name: name, results, is_passed }
-        })
-        .collect();
+    let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
+        let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
+            && results.iter().any(|r| r.status == "PASS");
+        SystemReport { system_name: name, results, is_passed }
+    }).collect();
 
     let fail_count = system_reports.iter().filter(|s| !s.is_passed && s.results.iter().any(|r| r.status != "NA")).count();
 
@@ -919,9 +825,7 @@ pub async fn policies_report(
         policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
         version: policy_row.get("version"),
-        description: policy_row
-            .get::<Option<String>, _>("description")
-            .unwrap_or_default(),
+        description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
         submission_date: Local::now().format("%Y-%m-%d %H:%M").to_string(),
         submitter_name: auth.username.clone(),
         tests_metadata,
@@ -950,17 +854,11 @@ pub async fn policies_report_download(
     let policy_row = match sqlx::query(
         "SELECT id, name, version, description FROM policies WHERE id = ? AND tenant_id = ?",
     )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_optional(&pool)
-    .await
+    .bind(id).bind(&auth.tenant_id).fetch_optional(&pool).await
     {
         Ok(Some(row)) => row,
         Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            error!("Failed to fetch policy {} for PDF: {}", id, e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!("Failed to fetch policy {} for PDF: {}", id, e); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
     let test_rows = match sqlx::query(r#"
@@ -969,33 +867,18 @@ pub async fn policies_report_download(
         JOIN tests_in_policy tip ON t.id = tip.test_id
         WHERE tip.policy_id = ? AND tip.tenant_id = ?
     "#)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_all(&pool)
-    .await
+    .bind(id).bind(&auth.tenant_id).fetch_all(&pool).await
     {
         Ok(rows) => rows,
-        Err(e) => {
-            error!("Failed to fetch tests for PDF {}: {}", id, e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!("Failed to fetch tests for PDF {}: {}", id, e); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
-    let tests_metadata: Vec<TestMeta> = test_rows
-        .into_iter()
-        .map(|row| TestMeta {
-            name: row.get("name"),
-            description: row
-                .get::<Option<String>, _>("description")
-                .unwrap_or_default(),
-            rational: row
-                .get::<Option<String>, _>("rational")
-                .unwrap_or_default(),
-            remediation: row
-                .get::<Option<String>, _>("remediation")
-                .unwrap_or_default(),
-        })
-        .collect();
+    let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| TestMeta {
+        name: row.get("name"),
+        description: row.get::<Option<String>, _>("description").unwrap_or_default(),
+        rational: row.get::<Option<String>, _>("rational").unwrap_or_default(),
+        remediation: row.get::<Option<String>, _>("remediation").unwrap_or_default(),
+    }).collect();
 
     let result_rows = match sqlx::query(r#"
         SELECT DISTINCT
@@ -1012,49 +895,32 @@ pub async fn policies_report_download(
           AND tip.policy_id = ?
           AND sip.tenant_id = ?
     "#)
-    .bind(id)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_all(&pool)
-    .await
+    .bind(id).bind(id).bind(&auth.tenant_id).fetch_all(&pool).await
     {
         Ok(rows) => rows,
-        Err(e) => {
-            error!("Failed to fetch results for PDF {}: {}", id, e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!("Failed to fetch results for PDF {}: {}", id, e); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
     let mut system_map: BTreeMap<String, Vec<IndividualResult>> = BTreeMap::new();
     for row in result_rows {
-        let system_name = row
-            .get::<Option<String>, _>("system_name")
-            .unwrap_or_else(|| "Unknown System".to_string());
+        let system_name = row.get::<Option<String>, _>("system_name").unwrap_or_else(|| "Unknown System".to_string());
         let test_name: String = row.get("test_name");
         let status_raw: String = row.get("status");
         let status = normalize_status(&status_raw).to_string();
-        system_map
-            .entry(system_name)
-            .or_insert_with(Vec::new)
-            .push(IndividualResult { test_name, status });
+        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult { test_name, status });
     }
 
-    let system_reports: Vec<SystemReport> = system_map
-        .into_iter()
-        .map(|(name, results)| {
-            let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
-                && results.iter().any(|r| r.status == "PASS");
-            SystemReport { system_name: name, results, is_passed }
-        })
-        .collect();
+    let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
+        let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
+            && results.iter().any(|r| r.status == "PASS");
+        SystemReport { system_name: name, results, is_passed }
+    }).collect();
 
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
         policy_name: policy_row.get("name"),
         version: policy_row.get("version"),
-        description: policy_row
-            .get::<Option<String>, _>("description")
-            .unwrap_or_default(),
+        description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
         submission_date: Local::now().format("%b %d, %Y %I:%M %p").to_string(),
         submitter_name: auth.username.clone(),
         tests_metadata,
@@ -1062,16 +928,11 @@ pub async fn policies_report_download(
     };
 
     // PDF Generation
-    const FONT_REGULAR: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
-    const FONT_BOLD: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
-    const FONT_ITALIC: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
-    const FONT_BOLD_ITALIC: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
-    const LOGO_BYTES: &[u8] =
-        include_bytes!("../static/dist/img/Logo_report.jpg");
+    const FONT_REGULAR: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
+    const FONT_BOLD: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
+    const FONT_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
+    const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
+    const LOGO_BYTES: &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
 
     let font_family = match (
         fonts::FontData::new(FONT_REGULAR.to_vec(), None),
@@ -1079,52 +940,28 @@ pub async fn policies_report_download(
         fonts::FontData::new(FONT_ITALIC.to_vec(), None),
         fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None),
     ) {
-        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) => fonts::FontFamily {
-            regular,
-            bold,
-            italic,
-            bold_italic,
-        },
-        _ => {
-            error!("Failed to load PDF fonts");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) => fonts::FontFamily { regular, bold, italic, bold_italic },
+        _ => { error!("Failed to load PDF fonts"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
     let mut doc = genpdf::Document::new(font_family);
-
     let cursor = std::io::Cursor::new(LOGO_BYTES);
     let mut logo = match elements::Image::from_reader(cursor) {
         Ok(img) => img,
-        Err(e) => {
-            error!("Failed to load PDF logo: {}", e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!("Failed to load PDF logo: {}", e); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
-    doc.set_title(format!(
-        "OpenSCM Compliance Report - {}",
-        report_data.policy_name
-    ));
+    doc.set_title(format!("OpenSCM Compliance Report - {}", report_data.policy_name));
     let mut decorator = genpdf::SimplePageDecorator::new();
     decorator.set_margins(15);
     doc.set_page_decorator(decorator);
 
-    // Title
     let mut title = elements::Paragraph::new("OpenSCM Compliance Report");
     title.set_alignment(genpdf::Alignment::Center);
-    doc.push(title.styled(
-        style::Style::new()
-            .with_font_size(30)
-            .bold()
-            .with_color(style::Color::Rgb(0, 0, 128)),
-    ));
+    doc.push(title.styled(style::Style::new().with_font_size(30).bold().with_color(style::Color::Rgb(0, 0, 128))));
     doc.push(elements::Break::new(2.0));
 
-    let mut submitter = elements::Paragraph::new(format!(
-        "Generated on {} by {}",
-        report_data.submission_date, report_data.submitter_name
-    ));
+    let mut submitter = elements::Paragraph::new(format!("Generated on {} by {}", report_data.submission_date, report_data.submitter_name));
     submitter.set_alignment(genpdf::Alignment::Center);
     doc.push(submitter);
     doc.push(elements::Break::new(0.5));
@@ -1134,38 +971,23 @@ pub async fn policies_report_download(
     doc.push(logo);
     doc.push(elements::Break::new(1.0));
 
-    // Report details table
     doc.push(elements::Text::new("Report Details").styled(style::Style::new().bold().with_font_size(14)));
     doc.push(elements::Break::new(0.5));
     let mut details_table = elements::TableLayout::new(vec![1, 3]);
     details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
-
     if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Policy Name").styled(style::Style::new().bold())),
-        Box::new(elements::Paragraph::new(format!(
-            " {} v{}",
-            report_data.policy_name, report_data.version
-        ))),
-    ]) {
-        error!("Failed to add policy name row to PDF: {}", e);
-    }
-
+        Box::new(elements::Paragraph::new(format!(" {} v{}", report_data.policy_name, report_data.version))),
+    ]) { error!("Failed to add policy name row to PDF: {}", e); }
     if let Err(e) = details_table.push_row(vec![
         Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
         Box::new(elements::Paragraph::new(format!(" {}", report_data.description))),
-    ]) {
-        error!("Failed to add description row to PDF: {}", e);
-    }
-
+    ]) { error!("Failed to add description row to PDF: {}", e); }
     doc.push(details_table);
     doc.push(elements::PageBreak::new());
 
-    // Per-system audit section
     for system in report_data.system_reports {
-        doc.push(
-            elements::Text::new(format!("Host Name: {}", system.system_name))
-                .styled(style::Style::new().bold().with_font_size(14)),
-        );
+        doc.push(elements::Text::new(format!("Host Name: {}", system.system_name)).styled(style::Style::new().bold().with_font_size(14)));
         doc.push(elements::Break::new(0.5));
 
         let compliant_count = system.results.iter().filter(|r| r.status == "PASS").count();
@@ -1173,99 +995,50 @@ pub async fn policies_report_download(
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
-
         if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
-            Box::new(
-                elements::Text::new(if system.is_passed {
-                    " Compliant"
-                } else {
-                    " Non-Compliant"
-                })
-                .styled(
-                    style::Style::new()
-                        .with_color(if system.is_passed {
-                            style::Color::Rgb(0, 128, 0)
-                        } else {
-                            style::Color::Rgb(200, 0, 0)
-                        })
-                        .bold(),
-                ),
-            ),
-        ]) {
-            error!("Failed to add compliance status row to PDF: {}", e);
-        }
-
+            Box::new(elements::Text::new(if system.is_passed { " Compliant" } else { " Non-Compliant" }).styled(
+                style::Style::new().with_color(if system.is_passed { style::Color::Rgb(0, 128, 0) } else { style::Color::Rgb(200, 0, 0) }).bold(),
+            )),
+        ]) { error!("Failed to add compliance status row to PDF: {}", e); }
         if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
             Box::new(elements::Text::new(format!(" Critical - {}", violation_count))),
-        ]) {
-            error!("Failed to add violation count row to PDF: {}", e);
-        }
-
+        ]) { error!("Failed to add violation count row to PDF: {}", e); }
         if let Err(e) = summary_table.push_row(vec![
             Box::new(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
             Box::new(elements::Text::new(format!(" {}", compliant_count))),
-        ]) {
-            error!("Failed to add compliant count row to PDF: {}", e);
-        }
-
+        ]) { error!("Failed to add compliant count row to PDF: {}", e); }
         doc.push(summary_table);
         doc.push(elements::Break::new(1.0));
 
-        // Rules breakdown
-        doc.push(
-            elements::Text::new("Audit Rules Detailed Breakdown")
-                    .styled(style::Style::new().bold().with_font_size(14)),    
-        );
+        doc.push(elements::Text::new("Audit Rules Detailed Breakdown").styled(style::Style::new().bold().with_font_size(14)));
         doc.push(elements::Break::new(0.5));
         let mut rules_table = elements::TableLayout::new(vec![4, 1]);
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
-
         if let Err(e) = rules_table.push_row(vec![
             Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
             Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
-        ]) {
-            error!("Failed to add rules table header to PDF: {}", e);
-        }
+        ]) { error!("Failed to add rules table header to PDF: {}", e); }
 
         for res in &system.results {
             let is_pass = res.status == "PASS";
-            let (status_text, status_color) = if is_pass {
-                ("PASS", style::Color::Rgb(0, 128, 0))
-            } else {
-                ("FAIL", style::Color::Rgb(200, 0, 0))
-            };
-
+            let (status_text, status_color) = if is_pass { ("PASS", style::Color::Rgb(0, 128, 0)) } else { ("FAIL", style::Color::Rgb(200, 0, 0)) };
             if let Err(e) = rules_table.push_row(vec![
                 Box::new(elements::Paragraph::new(format!(" {}", res.test_name))),
-                Box::new(
-                    elements::Text::new(status_text)
-                        .styled(style::Style::new().with_color(status_color).bold()),
-                ),
-            ]) {
-                error!("Failed to add rule row to PDF: {}", e);
-            }
+                Box::new(elements::Text::new(status_text).styled(style::Style::new().with_color(status_color).bold())),
+            ]) { error!("Failed to add rule row to PDF: {}", e); }
         }
-
         doc.push(rules_table);
         doc.push(elements::PageBreak::new());
     }
 
     doc.push(elements::Break::new(2.0));
-    doc.push(
-        elements::Paragraph::new(
-            "Note: This report contains confidential information about your infrastructure \
-             and should be treated as such. Unauthorized distribution is strictly prohibited.",
-        )
-        .styled(
-            style::Style::new()
-                .with_font_size(10)
-                .with_color(style::Color::Rgb(100, 100, 100)),
-        ),
-    );
+    doc.push(elements::Paragraph::new(
+        "Note: This report contains confidential information about your infrastructure \
+         and should be treated as such. Unauthorized distribution is strictly prohibited.",
+    ).styled(style::Style::new().with_font_size(10).with_color(style::Color::Rgb(100, 100, 100))));
 
-    // Render PDF
     let mut buffer = Vec::new();
     if let Err(e) = doc.render(&mut buffer) {
         error!("Failed to render PDF for policy {}: {}", id, e);
@@ -1275,15 +1048,9 @@ pub async fn policies_report_download(
     Response::builder()
         .status(StatusCode::OK)
         .header(header::CONTENT_TYPE, "application/pdf")
-        .header(
-            header::CONTENT_DISPOSITION,
-            format!("attachment; filename=\"OpenSCM_Report_{}.pdf\"", id),
-        )
+        .header(header::CONTENT_DISPOSITION, format!("attachment; filename=\"OpenSCM_Report_{}.pdf\"", id))
         .body(axum::body::Body::from(buffer))
-        .unwrap_or_else(|e| {
-            error!("Failed to build PDF response: {}", e);
-            StatusCode::INTERNAL_SERVER_ERROR.into_response()
-        })
+        .unwrap_or_else(|e| { error!("Failed to build PDF response: {}", e); StatusCode::INTERNAL_SERVER_ERROR.into_response() })
 }
 
 
@@ -1305,11 +1072,7 @@ pub async fn execute_policy_run_logic(
         WHERE sip.policy_id = ?
           AND sip.tenant_id = ?
     "#)
-    .bind(tenant_id)
-    .bind(id)
-    .bind(tenant_id)
-    .execute(pool)
-    .await?;
-
+    .bind(tenant_id).bind(id).bind(tenant_id)
+    .execute(pool).await?;
     Ok(())
 }

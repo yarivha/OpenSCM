@@ -81,64 +81,52 @@ pub async fn reports(
 }
 
 
-pub async fn reports_save(
-    auth: AuthSession,
-    Path(id): Path<i64>,
-    Extension(pool): Extension<SqlitePool>,
-) -> impl IntoResponse {
 
-    if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
-        return redir;
-    }
+/// Core logic for saving a policy report — called by both the HTTP handler and the scheduler.
+pub async fn save_policy_report_logic(
+    id: i64,
+    pool: &SqlitePool,
+    tenant_id: &str,
+    submitter_name: &str,
+) -> Result<(), sqlx::Error> {
 
-    // Fetch policy header — verify tenant ownership
+    // Fetch policy header
     let policy_row = match sqlx::query(
         "SELECT name, version, description FROM policies WHERE id = ? AND tenant_id = ?",
     )
     .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_optional(&pool)
-    .await
+    .bind(tenant_id)
+    .fetch_optional(pool)
+    .await?
     {
-        Ok(Some(row)) => row,
-        Ok(None) => return Redirect::to("/policies?error_message=Policy+not+found").into_response(),
-        Err(e) => {
-            error!("Failed to fetch policy {} for report save: {}", id, e);
-            return Redirect::to("/policies?error_message=Database+error").into_response();
+        Some(row) => row,
+        None => {
+            error!("Policy {} not found for report save.", id);
+            return Ok(());
         }
     };
 
     // Fetch tests metadata
-    let test_rows = match sqlx::query(r#"
+    let test_rows = sqlx::query(r#"
         SELECT t.name, t.description, t.rational, t.remediation
         FROM tests t
         JOIN tests_in_policy tp ON t.id = tp.test_id
         WHERE tp.policy_id = ? AND tp.tenant_id = ?
     "#)
     .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_all(&pool)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            error!("Failed to fetch tests for report save {}: {}", id, e);
-            return Redirect::to("/policies?error_message=Failed+to+fetch+tests").into_response();
-        }
-    };
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
 
-    let tests_metadata: Vec<TestMeta> = test_rows
-        .into_iter()
-        .map(|row| TestMeta {
-            name: row.get("name"),
-            description: row.get("description"),
-            rational: row.get("rational"),
-            remediation: row.get("remediation"),
-        })
-        .collect();
+    let tests_metadata: Vec<TestMeta> = test_rows.into_iter().map(|row| TestMeta {
+        name: row.get("name"),
+        description: row.get("description"),
+        rational: row.get("rational"),
+        remediation: row.get("remediation"),
+    }).collect();
 
     // Fetch system results
-    let raw_results = match sqlx::query(r#"
+    let raw_results = sqlx::query(r#"
         SELECT
             s.name AS system_name,
             t.name AS test_name,
@@ -150,18 +138,11 @@ pub async fn reports_save(
         WHERE tip.policy_id = ? AND tip.tenant_id = ?
     "#)
     .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_all(&pool)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            error!("Failed to fetch results for report save {}: {}", id, e);
-            return Redirect::to("/policies?error_message=Failed+to+fetch+results").into_response();
-        }
-    };
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
 
-    // Group results by system using BTreeMap for consistent ordering
+    // Group results by system
     let mut reports_map: BTreeMap<String, SystemReport> = BTreeMap::new();
     for row in raw_results {
         let s_name: String = row.get("system_name");
@@ -176,62 +157,63 @@ pub async fn reports_save(
             is_passed: true,
         });
 
-        entry.results.push(IndividualResult {
-            test_name: t_name,
-            status,
-        });
-
-        if !passed {
-            entry.is_passed = false;
-        }
+        entry.results.push(IndividualResult { test_name: t_name, status });
+        if !passed { entry.is_passed = false; }
     }
 
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();
 
-    // Serialize to JSON for storage
-    let tests_json = match serde_json::to_string(&tests_metadata) {
-        Ok(j) => j,
-        Err(e) => {
-            error!("Failed to serialize tests metadata: {}", e);
-            return Redirect::to("/policies?error_message=Failed+to+serialize+report").into_response();
-        }
-    };
+    // Serialize
+    let tests_json = serde_json::to_string(&tests_metadata)
+        .map_err(|e| sqlx::Error::Protocol(format!("Failed to serialize tests: {}", e)))?;
+    let results_json = serde_json::to_string(&system_reports)
+        .map_err(|e| sqlx::Error::Protocol(format!("Failed to serialize results: {}", e)))?;
 
-    let results_json = match serde_json::to_string(&system_reports) {
-        Ok(j) => j,
-        Err(e) => {
-            error!("Failed to serialize system reports: {}", e);
-            return Redirect::to("/policies?error_message=Failed+to+serialize+report").into_response();
-        }
-    };
-
-    // Archive the snapshot
-    match sqlx::query(r#"
+    // Save report
+    sqlx::query(r#"
         INSERT INTO reports
             (tenant_id, policy_name, policy_version, policy_description,
              submitter_name, tests_metadata, report_results)
         VALUES (?, ?, ?, ?, ?, ?, ?)
     "#)
-    .bind(&auth.tenant_id)
+    .bind(tenant_id)
     .bind(policy_row.get::<String, _>("name"))
     .bind(policy_row.get::<String, _>("version"))
     .bind(policy_row.get::<Option<String>, _>("description"))
-    .bind(&auth.username)
+    .bind(submitter_name)
     .bind(tests_json)
     .bind(results_json)
-    .execute(&pool)
-    .await
-    {
+    .execute(pool)
+    .await?;
+
+    info!("Report saved for policy {} by '{}'.", id, submitter_name);
+    Ok(())
+}
+
+
+/// HTTP handler — saves a compliance report snapshot for a policy.
+pub async fn reports_save(
+    auth: AuthSession,
+    Path(id): Path<i64>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
+        return redir;
+    }
+
+    match save_policy_report_logic(id, &pool, &auth.tenant_id, &auth.username).await {
         Ok(_) => {
             info!("Report saved for policy {} by '{}'.", id, auth.username);
             Redirect::to("/policies?success_message=Report+saved").into_response()
         }
         Err(e) => {
-            error!("Failed to archive report for policy {}: {}", id, e);
+            error!("Failed to save report for policy {}: {}", id, e);
             Redirect::to("/policies?error_message=Failed+to+save+report").into_response()
         }
     }
 }
+
 
 
 pub async fn reports_view(

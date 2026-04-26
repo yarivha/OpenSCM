@@ -128,6 +128,7 @@ pub struct PolicySchedule {
     pub tenant_id: String,
     pub policy_id: i32,
     pub enabled: bool, // sqlx handles SQLite 0/1 to bool automatically
+    pub schedule_type: String, // "scan" or "report"
     pub frequency: String, // "daily", "weekly", "monthly", "custom"
     pub cron_expression: Option<String>, // Only used for "custom"
     pub next_run: String, // Stored as ISO 8601 string in SQLite

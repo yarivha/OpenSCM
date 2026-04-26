@@ -253,7 +253,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             next_run DATETIME NOT NULL,
             last_run DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(policy_id, type),
+            UNIQUE(policy_id, schedule_type),
             FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
@@ -606,14 +606,14 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             next_run DATETIME NOT NULL,
             last_run DATETIME,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            UNIQUE(policy_id, type),
+            UNIQUE(policy_id, schedule_type),
             FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )"#)
         .execute(&mut *migration_tx).await?;
 
         sqlx::query(
-            "INSERT INTO policy_schedules (id, tenant_id, policy_id, type, enabled, frequency, cron_expression, next_run, last_run, created_at)
+            "INSERT INTO policy_schedules (id, tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run, last_run, created_at)
             SELECT id, tenant_id, policy_id, 'scan', enabled, frequency, cron_expression, next_run, last_run, created_at
             FROM policy_schedules_old"
         )
