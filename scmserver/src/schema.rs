@@ -246,6 +246,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         id INTEGER PRIMARY KEY AUTOINCREMENT,
         tenant_id TEXT NOT NULL DEFAULT 'default',
         policy_id INTEGER NOT NULL UNIQUE, -- This UNIQUE keyword is the fix
+        type TEXT NOT NULL DEFAULT 'scan'
         enabled BOOLEAN NOT NULL DEFAULT 1,
         frequency TEXT NOT NULL,
         cron_expression TEXT,
@@ -580,8 +581,25 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v1 → v2 complete.");
     }
 
-    // v2 → v3 (future)
-    // if version < 3 { ... }
+    // v2 → v3
+    if version < 3 {
+        info!("Running schema migration v2 → v3...");
+
+        sqlx::query("ALTER TABLE policy_schedules ADD COLUMN type TEXT NOT NULL DEFAULT 'scan'")
+            .execute(pool)
+            .await?;
+
+        // Populate existing records as 'scan'
+        sqlx::query("UPDATE policy_schedules SET type = 'scan'")
+            .execute(pool)
+            .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 3")
+            .execute(pool)
+            .await?;
+
+        info!("Schema migration v2 → v3 complete.");
+    }
 
     Ok(())
 }
