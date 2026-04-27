@@ -910,7 +910,7 @@ pub fn evaluate(
                 return EvalResult::Na;
             }
             match selement_l.as_str() {
-                "stdout" => {
+                "output" => {
                     #[cfg(unix)]
                     let output = Command::new("sh").args(["-c", input]).output();
                     #[cfg(windows)]
@@ -933,7 +933,7 @@ pub fn evaluate(
                     }
                 }
                 _ => {
-                    error!("Unsupported cmd selement: '{}'. Use 'stdout'.", selement);
+                    error!("Unsupported cmd selement: '{}'. Use 'output'.", selement);
                     EvalResult::Na
                 }
             }
