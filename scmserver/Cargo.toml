@@ -6,6 +6,16 @@ authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "FSL-1.1-ALv2"
 description = "Server for Open Security Compliance Manager"
 
+
+[lib]
+name = "scmserver"
+path = "src/lib.rs"
+
+[[bin]]
+name = "scmserver-bin" # This is what 'cargo run' will execute
+path = "src/main.rs"
+
+
 [dependencies]
 cfg-if = "1.0"
 axum = { version = "0.8.4", features = ["macros", "json", "tokio"] }
