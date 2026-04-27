@@ -155,6 +155,22 @@ pub async fn users_add_save(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
+    // Check if username already exists within this tenant
+    let exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM users WHERE username = ? AND tenant_id = ?)",
+    )
+    .bind(&username)
+    .bind(&auth.tenant_id)
+    .fetch_one(&mut *tx)
+    .await
+    .unwrap_or(false);
+
+    if exists {
+        tx.rollback().await.ok();
+        let encoded = urlencoding::encode(&format!("User '{}' already exists", username)).to_string();
+        return Redirect::to(&format!("/users/add?error_message={}", encoded)).into_response();
+    }
+
     // Hash password
     let password_hash = match hash(&password, DEFAULT_COST) {
         Ok(h) => h,
