@@ -1,5 +1,5 @@
-use std::{sync::Arc, str::FromStr, net::SocketAddr, fs, error::Error, path::PathBuf};
-use tracing::{info, error, debug, warn};
+use std::{sync::Arc, str::FromStr, net::SocketAddr, fs, error::Error};
+use tracing::{info, error, debug};
 use tracing_subscriber::{fmt, EnvFilter, registry, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use base64::{Engine as _, engine::general_purpose};
 use hkdf::Hkdf;

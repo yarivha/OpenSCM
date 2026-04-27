@@ -19,7 +19,7 @@ use std::{sync::Arc, path::PathBuf, error::Error};
 use axum::{Router, Extension, response::IntoResponse, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
 use tera::Tera;
 use include_dir::{include_dir, Dir};
-use tracing::{info, error, debug};
+use tracing::info;
 
 // 3. Re-exporting static assets so the SaaS version can find them
 pub static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");
