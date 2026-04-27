@@ -151,6 +151,7 @@ async fn process_compliance_tests(
     signing_key: &SigningKey,
     http_client: &reqwest::Client,
     result_url: &str,
+    cmd_enabled: bool,
 ) {
     info!("Processing {} compliance test(s).", tests.len());
 
@@ -183,6 +184,7 @@ async fn process_compliance_tests(
                         &c.selement,
                         c.condition.as_deref().unwrap_or(""),
                         c.sinput.as_deref().unwrap_or(""),
+                        cmd_enabled,
                     ))
                     .collect();
                 
@@ -244,6 +246,7 @@ async fn process_compliance_tests(
                     sel,
                     c.as_deref().unwrap_or(""),
                     si.as_deref().unwrap_or(""),
+                    cmd_enabled,
                 ));
             }
         }
@@ -453,6 +456,7 @@ pub async fn send_system_info(
             if let Some(tests_val) = inner_json.get("data") {
                 match serde_json::from_value::<Vec<Test>>(tests_val.clone()) {
                     Ok(tests) => {
+                        let cmd_enabled = config.client.cmd_enabled.unwrap_or(false);
                         process_compliance_tests(
                             tests,
                             &current_id,
@@ -460,6 +464,7 @@ pub async fn send_system_info(
                             &signing_key,
                             &http_client,
                             &result_url,
+                            cmd_enabled,
                         )
                         .await;
                     }

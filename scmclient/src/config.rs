@@ -62,6 +62,7 @@ pub struct ServerConfig {
 pub struct ClientConfig {
     pub heartbeat: Option<String>,
     pub loglevel: Option<String>,
+    pub cmd_enabled: Option<bool>,
 }
 
 
@@ -80,6 +81,7 @@ impl Default for Config {
             client: ClientConfig {
                 heartbeat: Some("300".to_string()),
                 loglevel: Some("info".to_string()),
+                cmd_enabled: Some(false),
             },
         }
     }
@@ -103,11 +105,14 @@ impl Config {
                 key.set_value("ServerURL", &self.server.url)?;
                 key.set_value("TenantId", &self.server.tenant_id)?;
                 
-                if let Some(hb) = &self.client.heartbeat { 
-                    key.set_value("Heartbeat", hb)?; 
+                if let Some(hb) = &self.client.heartbeat {
+                    key.set_value("Heartbeat", hb)?;
                 }
-                if let Some(ll) = &self.client.loglevel { 
-                    key.set_value("LogLevel", ll)?; 
+                if let Some(ll) = &self.client.loglevel {
+                    key.set_value("LogLevel", ll)?;
+                }
+                if let Some(cmd) = self.client.cmd_enabled {
+                    key.set_value("CmdEnabled", &cmd.to_string())?;
                 }
 
                 info!("Configuration saved to Windows Registry.");
@@ -179,6 +184,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         key.get_value::<String, _>("TenantId").is_err(),
         key.get_value::<String, _>("Heartbeat").is_err(),
         key.get_value::<String, _>("LogLevel").is_err(),
+        key.get_value::<String, _>("CmdEnabled").is_err(),
     ]
     .iter()
     .any(|&missing| missing);
@@ -196,8 +202,9 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
             tenant_id: read_val("TenantId", "default"),
         },
         client: ClientConfig {
-            heartbeat: Some(read_val("Heartbeat", "300")),
-            loglevel:  Some(read_val("LogLevel", "info")),
+            heartbeat:   Some(read_val("Heartbeat", "300")),
+            loglevel:    Some(read_val("LogLevel", "info")),
+            cmd_enabled: Some(read_val("CmdEnabled", "false") == "true"),
         },
     };
 

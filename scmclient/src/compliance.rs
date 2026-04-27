@@ -375,6 +375,7 @@ pub fn evaluate(
     selement: &str,
     condition: &str,
     sinput: &str,
+    cmd_enabled: bool,
 ) -> EvalResult {
     let element_l   = element.trim().to_lowercase();
     let selement_l  = selement.trim().to_lowercase();
@@ -897,6 +898,46 @@ pub fn evaluate(
                 EvalResult::Na
             }
         },
+
+        // =========================================================
+        // CMD
+        // =========================================================
+        "cmd" => {
+            if !cmd_enabled {
+                warn!(
+                    "CMD element is disabled. Set 'cmd_enabled = true' in [client] config to enable it."
+                );
+                return EvalResult::Na;
+            }
+            match selement_l.as_str() {
+                "stdout" => {
+                    #[cfg(unix)]
+                    let output = Command::new("sh").args(["-c", input]).output();
+                    #[cfg(windows)]
+                    let output = Command::new("cmd").args(["/C", input]).output();
+
+                    match output {
+                        Ok(o) => {
+                            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                            debug!("CMD '{}' stdout: '{}'", input, stdout);
+                            if apply_string_condition(&stdout, condition, sinput_trim) {
+                                EvalResult::Pass
+                            } else {
+                                EvalResult::Fail
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to execute command '{}': {}", input, e);
+                            EvalResult::Fail
+                        }
+                    }
+                }
+                _ => {
+                    error!("Unsupported cmd selement: '{}'. Use 'stdout'.", selement);
+                    EvalResult::Na
+                }
+            }
+        }
 
         // =========================================================
         // UNKNOWN
