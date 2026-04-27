@@ -1,245 +1,66 @@
-mod models;
-mod handlers;
-mod config;
-mod schema;
-mod auth;
-mod client;
-mod dashboard;
-mod systems;
-mod tests;
-mod policies;
-mod reports;
-mod users;
-mod settings;
-mod scheduler;
-
-use tera::Tera;
-use axum::{Extension, Router, response::{Response, IntoResponse}, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
-use tokio::sync::mpsc;
+use std::{sync::Arc, str::FromStr, net::SocketAddr, fs, error::Error, path::PathBuf};
+use tracing::{info, error, debug, warn};
+use tracing_subscriber::{fmt, EnvFilter, registry, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use base64::{Engine as _, engine::general_purpose};
-use std::time::Duration;
-use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
-use tracing::{info, debug, warn, error};
-use std::{sync::Arc, str::FromStr, net::SocketAddr, path::PathBuf, error::Error};
-use std::fs;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
-use include_dir::{include_dir, Dir};
 use hkdf::Hkdf;
 use sha2::Sha256;
+use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use tokio::sync::mpsc;
 
-
-// Handlers (shared utilities)
-use crate::handlers::{not_found, clear_notifications};
-
-// Config
-use crate::config::{Config, config_path,private_key_path, db_path};
-
-// Schema
-use crate::schema::{initialize_database, run_migrations};
-
-// Auth
-use crate::auth::{login, login_submit, logout};
-
-// Dashboard
-use crate::dashboard::{dashboard};
-
-// Systems
-use crate::systems::{
-    systems, systems_approve, systems_delete, systems_edit, systems_edit_save,
-    systems_pending, system_groups, system_groups_add, system_groups_add_save,
-    system_groups_delete, system_groups_edit, system_groups_edit_save,
+// Importing the public items from our own library (scmserver)
+use scmserver::{
+    AppState, 
+    create_core_router, 
+    init_tera, 
+    check_required_directories,
+    config::{Config, private_key_path, db_path},
+    schema::{initialize_database, run_migrations},
+    scheduler::{start_background_scheduler, recalculate_current_compliance},
 };
-
-// Tests
-use crate::tests::{
-    tests, tests_add, tests_add_save, tests_delete, tests_edit, tests_edit_save,
-};
-
-// Policies
-use crate::policies::{
-    policies, policies_add, policies_add_save, policies_edit, policies_edit_save,
-    policies_delete, policies_run, policies_report, policies_report_download,
-};
-
-// Reports
-use crate::reports::{
-    reports, reports_save, reports_view, reports_delete, reports_download,
-};
-
-// Users
-use crate::users::{
-    users, users_add, users_add_save,
-    users_delete, users_edit, users_edit_save, change_password,
-};
-
-// Settings
-use crate::settings::{
-    settings, settings_save
-};
-
-// Client (API endpoints)
-use crate::client::{send, receive_result};
-
-// Scheduler
-use crate::scheduler::{recalculate_current_compliance, start_background_scheduler};
-
-
-// Embedded templates/static files
-static TEMPLATES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/templates");
-static STATIC_FILES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/static");
-
-// Initialize Tera from embedded templates
-pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
-    let mut tera = Tera::default();
-    for file in TEMPLATES_DIR.files() {
-        let path = file.path().to_str()
-            .ok_or_else(|| format!("Template path is not valid UTF-8: {:?}", file.path()))?;
-        
-        let content = std::str::from_utf8(file.contents())
-            .map_err(|e| format!("Template '{}' contains invalid UTF-8: {}", path, e))?
-            .to_owned();
-
-        tera.add_raw_template(path, &content)?;
-    }
-    tera.build_inheritance_chains()?;
-    tera.check_macro_files()?;
-    Ok(tera)
-}
-
-
-fn check_required_directories() -> Result<(), Box<dyn std::error::Error>> {
-    // 1. Gather targets from your single-source-of-truth helpers
-    let targets = [
-        config_path(),
-        db_path(),
-        private_key_path(),
-    ];
-
-    for target in targets {
-        if let Some(parent) = std::path::Path::new(target).parent() {
-            // Check if directory exists
-            if !parent.exists() {
-                info!("Required directory {:?} is missing. Attempting to create...", parent);
-                
-                // 2. Attempt to create. If it fails (e.g., Permission Denied), trigger the error logic.
-                if let Err(e) = std::fs::create_dir_all(parent) {
-                    error!(
-                        "CRITICAL FAILURE: Could not create directory {:?}. Error: {}. \
-                        This usually means the service lacks sufficient privileges or the \
-                        installation is corrupt. Please reinstall the package or check permissions.", 
-                        parent, e
-                    );
-                    return Err(format!("Missing required directory and failed to create: {:?}", parent).into());
-                }
-                info!("Successfully created directory: {:?}", parent);
-            }
-
-            // 3. Set secure permissions (Unix-specific)
-            #[cfg(unix)]
-            {
-                use std::os::unix::fs::PermissionsExt;
-                let is_key_dir = target == private_key_path();
-                let mode = if is_key_dir { 0o700 } else { 0o755 };
-
-                if let Err(e) = std::fs::set_permissions(parent, std::fs::Permissions::from_mode(mode)) {
-                    error!(
-                        "CRITICAL FAILURE: Could not set permissions ({:o}) on {:?}. Error: {}. \
-                        Ensure the OpenSCM service has ownership of its data directories.", 
-                        mode, parent, e
-                    );
-                    return Err(format!("Permission hardening failed for: {:?}", parent).into());
-                }
-            }
-        }
-    }
-
-    Ok(())
-}
-
-
-// Serve embedded static files
-async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
-    let path_str = path.to_str().unwrap_or("");
-    match STATIC_FILES_DIR.get_file(path_str) {
-        Some(file) => {
-            let mime_type = mime_guess::from_path(path).first_or_octet_stream();
-            Response::builder()
-                .header(header::CONTENT_TYPE, mime_type.to_string())
-                .body(Body::from(Bytes::from(file.contents())))
-                .unwrap()
-        }
-        None => Response::builder()
-            .status(StatusCode::NOT_FOUND)
-            .body(Body::from("Static file not found"))
-            .unwrap(),
-    }
-}
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-
-    // 0. Create required directories BEFORE logger init
+    // 1. Initial Infrastructure setup
     check_required_directories()?;
 
-    // 1. Logging setup
+    // 2. Logging & Tracing setup
     let env_filter = EnvFilter::new("info");
     let (reload_layer, reload_handle) = reload::Layer::new(env_filter);
-    tracing_subscriber::registry()
+    registry()
         .with(reload_layer)
         .with(fmt::layer())
         .init();
 
-    info!("Starting OpenSCM Server...");
+    info!("Starting OpenSCM Community Edition...");
 
-    // Load Config
+    // 3. Load Configuration
     let config = Config::load().map_err(|e| {
         error!("Failed to load configuration: {}", e);
         e
     })?;
 
-    // Apply log level from config
+    // Apply log level from config dynamically
     let loglevel = config.server.loglevel.as_deref().unwrap_or("info");
     let _ = reload_handle.reload(EnvFilter::new(loglevel));
     debug!("Log level set to '{}'", loglevel);
 
+    // 4. Cryptography: Load key and derive Cookie Key
+    let priv_base64 = fs::read_to_string(private_key_path())?;
+    let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim())?;
 
-    // Load server private key
-    info!("Load server private key ...");
-
-    let priv_base64 = fs::read_to_string(private_key_path()).map_err(|e| {
-        error!("Failed to read private key from '{}': {}", private_key_path(), e);
-        e
-    })?;
-    let priv_bytes = general_purpose::STANDARD.decode(priv_base64.trim()).map_err(|e| {
-        error!("Failed to decode private key (invalid base64): {}", e);
-        e
-    })?;
-
-    // Validate key length
     if priv_bytes.len() != 32 {
-        error!("Private key must be 32 bytes, got {}", priv_bytes.len());
-        return Err("Invalid private key length".into());
+        return Err("Private key must be 32 bytes".into());
     }
 
-    // Derive a separate cookie signing key from the server private key using HKDF.
-    // This is cryptographically isolated from the Ed25519 signing key — safe to derive,
-    // deterministic, and requires no extra key file.
-    info!("Generate cookie key ...");
     let hk = Hkdf::<Sha256>::new(None, &priv_bytes);
     let mut cookie_key_bytes = [0u8; 64];
     hk.expand(b"oscm-cookie-signing-v1", &mut cookie_key_bytes)
-        .map_err(|e| {
-            error!("HKDF key derivation failed: {}", e);
-            format!("HKDF expand failed: {}", e)
-        })?;
+        .map_err(|e| format!("HKDF expand failed: {}", e))?;
 
     let cookie_key = axum_extra::extract::cookie::Key::from(&cookie_key_bytes);
 
-
-    // 3. Database Initialization
-    info!("Connecting database at '{}'...", db_path());
-    
-    let database_url = format!("sqlite://{}", &db_path());
+    // 5. Database Initialization
+    let database_url = format!("sqlite://{}", db_path());
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true);
 
@@ -248,122 +69,48 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect_with(options)
         .await?;
 
-    // Enable foreign keys and init schema
     sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
     initialize_database(&pool).await?;
+    run_migrations(&pool).await?;
 
-
-    // Run schema migrations
-    run_migrations(&pool).await.expect("Schema migration failed");
-
-
-    // ---------------------------------------------------------
-    // 4. Batch Compliance Worker (The Debouncer)
-    // ---------------------------------------------------------
-    // This channel allows handlers to "ping" the worker to recalculate
+    // 6. Background Workers
     let (sync_tx, mut sync_rx) = mpsc::channel::<()>(100);
     let worker_pool = pool.clone();
 
     tokio::spawn(async move {
-        info!("Compliance Sync Worker: Online and listening.");
-        
         while let Some(_) = sync_rx.recv().await {
-            // DEBOUNCE: Wait 10 seconds after the first signal arrives
-            // This captures the other 99 systems if they report at once
-            tokio::time::sleep(Duration::from_secs(10)).await;
-
-            // DRAIN: Clear out all other pings that happened during the wait
+            tokio::time::sleep(std::time::Duration::from_secs(10)).await;
             while sync_rx.try_recv().is_ok() {}
-
-            info!("Compliance Sync Worker: Starting batch recalculation...");
-            // Replace 'reports' with the actual module where your function lives
             if let Err(e) = recalculate_current_compliance(&worker_pool).await {
-                error!("Compliance Sync Worker: Batch recalculation failed: {}", e);
-            } else {
-                info!("Compliance Sync Worker: Batch recalculation successful.");
+                error!("Compliance Sync Worker error: {}", e);
             }
         }
     });
 
-
-    // 5. Background Scheduler (Keep existing)
     start_background_scheduler(pool.clone()).await;
 
-    // 6. Template Engine
-    info!("Loading Server Templates");
-    let tera = Arc::new(init_tera().map_err(|e| {
-        error!("Failed to initialize template engine: {}", e);
-        e
-    })?); 
-    
-    let config = Arc::new(config);
-
-    // 7. Routes
-    let app = Router::new()
-        .route("/", get(dashboard))
-        .route("/login", get(login).post(login_submit))
-        .route("/logout", get(logout))
-        .route("/notifications/clear", get(clear_notifications))
-        .route("/users", get(users))
-        .route("/users/add", get(users_add).post(users_add_save))
-        .route("/users/delete/{id}", get(users_delete))
-        .route("/users/edit/{id}", get(users_edit).post(users_edit_save))
-        .route("/users/changepassword/{id}", post(change_password))
-        .route("/systems", get(systems))
-        .route("/systems/delete/{id}", get(systems_delete))
-        .route("/systems/edit/{id}", get(systems_edit).post(systems_edit_save))
-        .route("/systems/pending", get(systems_pending))
-        .route("/systems/approve/{id}", get(systems_approve))
-        .route("/system_groups", get(system_groups))
-        .route("/system_groups/add", get(system_groups_add).post(system_groups_add_save))
-        .route("/system_groups/delete/{id}", get(system_groups_delete))
-        .route("/system_groups/edit/{id}", get(system_groups_edit).post(system_groups_edit_save))
-        .route("/tests", get(tests))
-        .route("/tests/add", get(tests_add).post(tests_add_save))
-        .route("/tests/delete/{id}", get(tests_delete))
-        .route("/tests/edit/{id}", get(tests_edit).post(tests_edit_save))
-        .route("/policies", get(policies))
-        .route("/policies/add", get(policies_add).post(policies_add_save))
-        .route("/policies/edit/{id}", get(policies_edit).post(policies_edit_save))
-        .route("/policies/delete/{id}", get(policies_delete))
-        .route("/policies/run/{id}", get(policies_run))
-        .route("/policies/report/{id}",get(policies_report))
-        .route("/policies/download/{id}",get(policies_report_download))
-        .route("/reports", get(reports))
-        .route("/reports/save/{id}",get(reports_save))
-        .route("/reports/view/{id}",get(reports_view))
-        .route("/reports/delete/{id}",get(reports_delete))
-        .route("/reports/download/{id}",get(reports_download))
-        .route("/settings", get(settings))
-        .route("/settings/save", post(settings_save))
-        .route("/send", post(send))
-        .route("/result", post(receive_result))
-        .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {
-            serve_embedded_static_file(PathBuf::from(path)).await
-        }))
-        .fallback(not_found)
-        .layer(Extension(pool))
-        .layer(Extension(tera))
-        .layer(Extension(config.clone()))
-        .layer(Extension(sync_tx))
-        .with_state(cookie_key);
-    
-    // Pull port from config (default 8000)
-    let port: u16 = match config.server.port.as_deref().unwrap_or("8000").parse() {
-        Ok(p) => p,
-        Err(_) => {
-            warn!(
-                "Invalid port '{}' in config, falling back to 8000",
-                config.server.port.as_deref().unwrap_or("8000")
-            );
-            8000
-        }
+    // 7. Assemble Application State
+    // We wrap things in Arc here to share them between the Core and potential SaaS wrappers
+    let state = AppState {
+        pool,
+        tera: Arc::new(init_tera()?),
+        config: Arc::new(config),
+        sync_tx,
     };
 
-
-    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    let port: u16 = state.config.server.port.as_deref()
+        .unwrap_or("8000")
+        .parse()
+        .unwrap_or(8000);
     
-    info!("OpenSCM Server listening on http://{}", addr);
+    let addr = SocketAddr::from(([0, 0, 0, 0], port));
+    // ----------------------------------------------------
+
+    // 8. Build the Router (This consumes/moves 'state')
+    let app = create_core_router(state, cookie_key);
+
+    // 9. Start the Server
+    info!("OpenSCM Community Server listening on http://{}", addr);
     axum_server::bind(addr)
         .serve(app.into_make_service())
         .await?;
