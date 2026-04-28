@@ -48,6 +48,9 @@ If you find this project helpful, please consider sponsoring us to support ongoi
 | Linux | ARMv7 | ❌ | ✅ | deb, rpm, pkg |
 | Linux | RISC-V | ❌ | ✅ | deb, rpm, pkg |
 | Linux | PowerPC64LE | ❌ | ✅ | deb, rpm, pkg |
+| Arch Linux | x86_64 | ❌ | ✅ | pkg.tar.zst |
+| Arch Linux | ARM64 | ❌ | ✅ | pkg.tar.zst |
+| Arch Linux | ARMv7 | ❌ | ✅ | pkg.tar.zst |
 | Windows | x86_64 | ✅ | ✅ | exe (NSIS) |
 | macOS | Universal (ARM64 + x86_64) | ❌ | ✅ | pkg |
 | FreeBSD | x86_64 | ❌ | ✅ | pkg |
@@ -91,6 +94,15 @@ sudo yum install scmserver
 # Install agent (on systems to be monitored)
 sudo yum install scmclient
 ```
+
+### 🐧 Arch Linux
+
+```bash
+# Install agent (on systems to be monitored)
+sudo pacman -U scmclient-<version>-x86_64.pkg.tar.zst
+```
+
+Packages for `x86_64`, `aarch64`, and `armv7h` are available on **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
 
 ### 🪟 Windows
 
