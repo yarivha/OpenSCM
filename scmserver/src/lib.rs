@@ -106,12 +106,12 @@ pub async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
 }
 
 // 6. The pluggable Core Router
-// The SaaS version will call this to get all standard OpenSCM functionality.
-pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
+
+/// Builds all non-auth routes. Returns `Router<Key>` so callers can optionally
+/// add their own login routes before applying layers and state.
+fn build_core_routes() -> Router<axum_extra::extract::cookie::Key> {
     Router::new()
         .route("/", get(dashboard::dashboard))
-        .route("/login", get(auth::login).post(auth::login_submit))
-        .route("/logout", get(auth::logout))
         .route("/notifications/clear", get(handlers::clear_notifications))
         .route("/users", get(users::users))
         .route("/users/add", get(users::users_add).post(users::users_add_save))
@@ -157,10 +157,30 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
             serve_embedded_static_file(PathBuf::from(path)).await
         }))
         .fallback(handlers::not_found)
-        // Apply Shared Layers
+}
+
+fn apply_core_layers(
+    router: Router<axum_extra::extract::cookie::Key>,
+    state: AppState,
+    cookie_key: axum_extra::extract::cookie::Key,
+) -> Router {
+    router
         .layer(Extension(state.pool))
         .layer(Extension(state.tera))
         .layer(Extension(state.config))
         .layer(Extension(state.sync_tx))
         .with_state(cookie_key)
+}
+
+pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
+    let routes = build_core_routes()
+        .route("/login", get(auth::login).post(auth::login_submit))
+        .route("/logout", get(auth::logout));
+    apply_core_layers(routes, state, cookie_key)
+}
+
+/// Like `create_core_router` but omits `/login` and `/logout` so callers can
+/// provide their own auth routes (e.g. SaaS multi-tenant login).
+pub fn create_core_router_without_login(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
+    apply_core_layers(build_core_routes(), state, cookie_key)
 }
