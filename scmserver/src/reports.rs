@@ -1,6 +1,7 @@
 use axum::response::{Response, IntoResponse, Redirect};
 use axum::http::{StatusCode, header};
-use axum::extract::{Extension, Query, Path};
+use axum::extract::{RawForm, Extension, Query, Path};
+use bytes::Bytes;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
@@ -12,7 +13,7 @@ use urlencoding;
 use genpdf::{fonts, elements, style, Element};
 
 use crate::auth::{self};
-use crate::handlers::{render_template, normalize_status};
+use crate::handlers::{render_template, normalize_status, parse_form_data};
 use crate::models::{
     UserRole, TestMeta, SystemReport, IndividualResult,
     Report, ErrorQuery, AuthSession,
@@ -73,6 +74,9 @@ pub async fn reports(
     let mut context = Context::new();
     if let Some(msg) = query.error_message {
         context.insert("error_message", &msg);
+    }
+    if let Some(msg) = query.success_message {
+        context.insert("success_message", &msg);
     }
     context.insert("reports", &reports);
     render_template(&tera, Some(&pool), "reports.html", context, Some(auth))
@@ -574,4 +578,57 @@ pub async fn reports_download(
             error!("Failed to build PDF response for report {}: {}", id, e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         })
+}
+
+
+// ============================================================
+// BULK ACTIONS
+// ============================================================
+
+pub async fn reports_bulk_delete(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(_) => return Redirect::to("/reports?error_message=Invalid+form+data").into_response(),
+    };
+
+    let form_data = parse_form_data(&raw_string);
+    let ids: Vec<i64> = form_data
+        .get("ids")
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    if ids.is_empty() {
+        return Redirect::to("/reports?error_message=No+reports+selected").into_response();
+    }
+
+    let mut deleted = 0usize;
+    for id in &ids {
+        if let Err(e) = sqlx::query("DELETE FROM reports WHERE id = ? AND tenant_id = ?")
+            .bind(id)
+            .bind(&auth.tenant_id)
+            .execute(&pool)
+            .await
+        {
+            error!("Bulk delete: failed for report {}: {}", id, e);
+        } else {
+            deleted += 1;
+        }
+    }
+
+    info!("Bulk deleted {} reports by '{}'.", deleted, auth.username);
+    let msg = urlencoding::encode(&format!("{} report(s) deleted.", deleted)).to_string();
+    Redirect::to(&format!("/reports?success_message={}", msg)).into_response()
 }

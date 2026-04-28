@@ -44,10 +44,20 @@
             <div class="card-header">
               <h3 class="card-title">Historical Scan Results</h3>
               <div class="card-tools">
-                <button type="button" class="btn btn-tool" onclick="window.location.reload();">
+                <button type="button" class="btn btn-tool" onclick="window.location.reload();" title="Refresh">
                   <i class="fas fa-sync-alt"></i>
                 </button>
               </div>
+            </div>
+
+            {# Bulk action toolbar — hidden until checkboxes are selected #}
+            <div id="bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
+              <span id="bulk-count" class="mr-3 font-weight-bold text-primary"></span>
+              {% if is_editor %}
+              <button type="button" class="btn btn-danger btn-sm" id="bulk-delete-btn" title="Delete Selected">
+                <i class="fas fa-trash mr-1"></i> Delete
+              </button>
+              {% endif %}
             </div>
 
             <div class="card-body">
@@ -55,6 +65,9 @@
                 <thead>
                   <tr>
                     <th style="width: 10px">ID</th>
+                    <th style="width: 20px; text-align:center;">
+                      <input type="checkbox" id="select-all" title="Select All">
+                    </th>
                     <th>Policy Name</th>
                     <th>Version</th>
                     <th>Publisher</th>
@@ -66,6 +79,9 @@
                   {% for report in reports %}
                   <tr>
                     <td>{{ report.id }}</td>
+                    <td class="text-center">
+                      <input type="checkbox" class="row-checkbox" value="{{ report.id }}" title="Select">
+                    </td>
                     <td><strong>{{ report.policy_name }}</strong></td>
                     <td><span class="badge badge-light">v{{ report.policy_version }}</span></td>
                     <td>{{ report.submitter_name }}</td>
@@ -107,6 +123,11 @@
   </section>
 </div>
 
+{# Hidden bulk form #}
+<form id="bulk-delete-form" method="POST" action="/reports/bulk/delete" style="display:none;">
+  <div id="bulk-delete-ids"></div>
+</form>
+
 {% endblock %}
 
 {% block scripts %}
@@ -132,14 +153,54 @@
       "responsive": true,
       "lengthChange": true,
       "autoWidth": false,
-      "order": [[1, "desc"]], // Newest reports first by ID
+      "order": [[0, "desc"]],
       "columnDefs": [
-        { "targets": 0, "visible": false } 
+        { "targets": 0, "visible": false },
+        { "targets": 1, "orderable": false, "searchable": false, "className": "text-center" }
       ],
       "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
     });
-    
+
     table.buttons().container().appendTo('#reports_table_wrapper .col-md-6:eq(0)');
+
+    // 3. Checkbox / bulk toolbar logic
+    function getSelectedIds() {
+      return $('.row-checkbox:checked').map(function() { return $(this).val(); }).get();
+    }
+
+    function updateBulkToolbar() {
+      const ids = getSelectedIds();
+      if (ids.length > 0) {
+        $('#bulk-count').text(ids.length + ' selected');
+        $('#bulk-toolbar').show();
+      } else {
+        $('#bulk-toolbar').hide();
+      }
+    }
+
+    $('#select-all').on('change', function() {
+      const checked = $(this).prop('checked');
+      table.rows({ search: 'applied' }).nodes().each(function(node) {
+        $('input.row-checkbox', node).prop('checked', checked);
+      });
+      updateBulkToolbar();
+    });
+
+    $(document).on('change', '.row-checkbox', function() {
+      if (!$(this).prop('checked')) $('#select-all').prop('checked', false);
+      updateBulkToolbar();
+    });
+
+    $('#bulk-delete-btn').on('click', function() {
+      const ids = getSelectedIds();
+      if (!ids.length) return;
+      if (!confirm('Delete ' + ids.length + ' report(s)? This action is permanent.')) return;
+      const container = $('#bulk-delete-ids').empty();
+      ids.forEach(function(id) {
+        container.append('<input type="hidden" name="ids" value="' + id + '">');
+      });
+      $('#bulk-delete-form').submit();
+    });
   });
 </script>
 {% endblock %}

@@ -139,11 +139,25 @@ pub async fn systems(
     .unwrap_or(600);
 
 
+    let groups_result = sqlx::query("SELECT id, name FROM system_groups WHERE tenant_id = ? ORDER BY name ASC")
+        .bind(&auth.tenant_id)
+        .fetch_all(&pool)
+        .await;
+
+    let groups: Vec<(i64, String)> = match groups_result {
+        Ok(rows) => rows.into_iter().map(|r| (r.get("id"), r.get("name"))).collect(),
+        Err(_) => vec![],
+    };
+
     let mut context = Context::new();
     context.insert("offline_threshold", &offline_threshold);
-    
+    context.insert("groups", &groups);
+
     if let Some(error_message) = params.get("error_message") {
         context.insert("error_message", error_message);
+    }
+    if let Some(success_message) = params.get("success_message") {
+        context.insert("success_message", success_message);
     }
     context.insert("systems", &systems);
     render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
@@ -1048,4 +1062,186 @@ pub async fn system_groups_edit_save(
     let _ = sync_tx.send(()).await;
     info!("System group ID {} updated by '{}'.", id, auth.username);
     Redirect::to("/system_groups").into_response()
+}
+
+
+// ============================================================
+// BULK ACTIONS
+// ============================================================
+
+pub async fn systems_bulk_approve(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(_) => return Redirect::to("/systems?error_message=Invalid+form+data").into_response(),
+    };
+
+    let form_data = parse_form_data(&raw_string);
+    let ids: Vec<i32> = form_data
+        .get("ids")
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    if ids.is_empty() {
+        return Redirect::to("/systems?error_message=No+systems+selected").into_response();
+    }
+
+    let mut approved = 0usize;
+    for id in &ids {
+        if let Err(e) = sqlx::query(
+            "UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?",
+        )
+        .bind(id)
+        .bind(&auth.tenant_id)
+        .execute(&pool)
+        .await
+        {
+            error!("Bulk approve: failed for system {}: {}", id, e);
+        } else {
+            approved += 1;
+        }
+    }
+
+    info!("Bulk approved {} systems by '{}'.", approved, auth.username);
+    let msg = urlencoding::encode(&format!("{} system(s) approved.", approved)).to_string();
+    Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
+}
+
+
+pub async fn systems_bulk_delete(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(_) => return Redirect::to("/systems?error_message=Invalid+form+data").into_response(),
+    };
+
+    let form_data = parse_form_data(&raw_string);
+    let ids: Vec<i32> = form_data
+        .get("ids")
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    if ids.is_empty() {
+        return Redirect::to("/systems?error_message=No+systems+selected").into_response();
+    }
+
+    let mut deleted = 0usize;
+    for id in &ids {
+        if let Err(e) = sqlx::query("DELETE FROM systems WHERE id = ? AND tenant_id = ?")
+            .bind(id)
+            .bind(&auth.tenant_id)
+            .execute(&pool)
+            .await
+        {
+            error!("Bulk delete: failed for system {}: {}", id, e);
+        } else {
+            deleted += 1;
+        }
+    }
+
+    let _ = sync_tx.send(()).await;
+    info!("Bulk deleted {} systems by '{}'.", deleted, auth.username);
+    let msg = urlencoding::encode(&format!("{} system(s) deleted.", deleted)).to_string();
+    Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
+}
+
+
+pub async fn systems_bulk_add_group(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(_) => return Redirect::to("/systems?error_message=Invalid+form+data").into_response(),
+    };
+
+    let form_data = parse_form_data(&raw_string);
+
+    let group_id: i32 = match form_data
+        .get("group_id")
+        .and_then(|v| v.first())
+        .and_then(|s| s.parse().ok())
+    {
+        Some(id) => id,
+        None => return Redirect::to("/systems?error_message=No+group+selected").into_response(),
+    };
+
+    let ids: Vec<i32> = form_data
+        .get("ids")
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    if ids.is_empty() {
+        return Redirect::to("/systems?error_message=No+systems+selected").into_response();
+    }
+
+    // Verify group belongs to this tenant
+    let group_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM system_groups WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(group_id)
+    .bind(&auth.tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0i64) > 0;
+
+    if !group_exists {
+        return Redirect::to("/systems?error_message=Invalid+group").into_response();
+    }
+
+    let mut added = 0usize;
+    for id in &ids {
+        if let Err(e) = sqlx::query(
+            "INSERT OR IGNORE INTO systems_in_groups (system_id, group_id, tenant_id) VALUES (?, ?, ?)",
+        )
+        .bind(id)
+        .bind(group_id)
+        .bind(&auth.tenant_id)
+        .execute(&pool)
+        .await
+        {
+            error!("Bulk add group: failed for system {}: {}", id, e);
+        } else {
+            added += 1;
+        }
+    }
+
+    info!("Bulk added {} systems to group {} by '{}'.", added, group_id, auth.username);
+    let msg = urlencoding::encode(&format!("{} system(s) added to group.", added)).to_string();
+    Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
 }

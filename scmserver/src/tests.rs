@@ -227,6 +227,9 @@ pub async fn tests(
     if let Some(msg) = query.error_message {
         context.insert("error_message", &msg);
     }
+    if let Some(msg) = query.success_message {
+        context.insert("success_message", &msg);
+    }
     context.insert("tests", &tests_with_conditions);
     render_template(&tera, Some(&pool), "tests.html", context, Some(auth))
         .await
@@ -699,3 +702,58 @@ pub async fn tests_edit_save(
 }
 
 
+
+
+// ============================================================
+// BULK ACTIONS
+// ============================================================
+
+pub async fn tests_bulk_delete(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(_) => return Redirect::to("/tests?error_message=Invalid+form+data").into_response(),
+    };
+
+    let form_data = parse_form_data(&raw_string);
+    let ids: Vec<i32> = form_data
+        .get("ids")
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    if ids.is_empty() {
+        return Redirect::to("/tests?error_message=No+tests+selected").into_response();
+    }
+
+    let mut deleted = 0usize;
+    for id in &ids {
+        if let Err(e) = sqlx::query("DELETE FROM tests WHERE id = ? AND tenant_id = ?")
+            .bind(id)
+            .bind(&auth.tenant_id)
+            .execute(&pool)
+            .await
+        {
+            error!("Bulk delete: failed for test {}: {}", id, e);
+        } else {
+            deleted += 1;
+        }
+    }
+
+    let _ = sync_tx.send(()).await;
+    info!("Bulk deleted {} tests by '{}'.", deleted, auth.username);
+    let msg = urlencoding::encode(&format!("{} test(s) deleted.", deleted)).to_string();
+    Redirect::to(&format!("/tests?success_message={}", msg)).into_response()
+}

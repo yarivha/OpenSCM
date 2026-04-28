@@ -57,6 +57,14 @@
       </div>
       {% endif %}
 
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
       <div class="card card-outline card-primary shadow-sm">
         <div class="card-header border-0">
           <h3 class="card-title">Compliance Definitions</h3>
@@ -66,11 +74,24 @@
             </a>
           </div>
         </div>
+        {# Bulk action toolbar — hidden until checkboxes are selected #}
+        <div id="bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
+          <span id="bulk-count" class="mr-3 font-weight-bold text-primary"></span>
+          {% if is_editor %}
+          <button type="button" class="btn btn-danger btn-sm" id="bulk-delete-btn" title="Delete Selected">
+            <i class="fas fa-trash mr-1"></i> Delete
+          </button>
+          {% endif %}
+        </div>
+
         <div class="card-body">
           <table id="tests_table" class="table table-bordered table-striped table-hover">
             <thead>
               <tr>
                 <th style="width: 10px">ID</th>
+                <th style="width: 20px; text-align:center;">
+                  <input type="checkbox" id="select-all" title="Select All">
+                </th>
                 <th>Test Name</th>
                 <th>Description</th>
                 <th style="width: 130px">Severity</th>
@@ -82,6 +103,9 @@
               {% set sev = test.severity | lower | trim %}
               <tr>
                 <td>{{ test.id }}</td>
+                <td class="text-center">
+                  <input type="checkbox" class="row-checkbox" value="{{ test.id }}" title="Select">
+                </td>
                 <td><strong>{{ test.name }}</strong></td>
                 <td>{{ test.description | truncate(length=65) }}</td>
                 <td class="text-center">
@@ -146,6 +170,11 @@
     </div>
   </section>
 </div>
+
+{# Hidden bulk form #}
+<form id="bulk-delete-form" method="POST" action="/tests/bulk/delete" style="display:none;">
+  <div id="bulk-delete-ids"></div>
+</form>
 
 <div class="modal fade" id="testDetailsModal" tabindex="-1" role="dialog">
   <div class="modal-dialog modal-lg">
@@ -350,8 +379,11 @@ $(function () {
         "responsive": true,
         "lengthChange": true,
         "autoWidth": false,
-        "order": [[1, "asc"]],
-        "columnDefs": [{ "targets": 0, "visible": false }],
+        "order": [[2, "asc"]],
+        "columnDefs": [
+            { "targets": 0, "visible": false },
+            { "targets": 1, "orderable": false, "searchable": false, "className": "text-center" }
+        ],
         "dom": '<"row"<"col-md-6"lB><"col-md-6"f>>rtip',
         "buttons": [
             { extend: 'copy', className: 'btn-sm' },
@@ -364,6 +396,45 @@ $(function () {
     });
 
     table.buttons().container().appendTo('#tests_table_wrapper .col-md-6:eq(0)');
+
+    // 3. Checkbox / bulk toolbar logic
+    function getSelectedIds() {
+        return $('.row-checkbox:checked').map(function() { return $(this).val(); }).get();
+    }
+
+    function updateBulkToolbar() {
+        const ids = getSelectedIds();
+        if (ids.length > 0) {
+            $('#bulk-count').text(ids.length + ' selected');
+            $('#bulk-toolbar').show();
+        } else {
+            $('#bulk-toolbar').hide();
+        }
+    }
+
+    $('#select-all').on('change', function() {
+        const checked = $(this).prop('checked');
+        table.rows({ search: 'applied' }).nodes().each(function(node) {
+            $('input.row-checkbox', node).prop('checked', checked);
+        });
+        updateBulkToolbar();
+    });
+
+    $(document).on('change', '.row-checkbox', function() {
+        if (!$(this).prop('checked')) $('#select-all').prop('checked', false);
+        updateBulkToolbar();
+    });
+
+    $('#bulk-delete-btn').on('click', function() {
+        const ids = getSelectedIds();
+        if (!ids.length) return;
+        if (!confirm('Delete ' + ids.length + ' test(s)? All historical data will be lost.')) return;
+        const container = $('#bulk-delete-ids').empty();
+        ids.forEach(function(id) {
+            container.append('<input type="hidden" name="ids" value="' + id + '">');
+        });
+        $('#bulk-delete-form').submit();
+    });
 });
 </script>
 {% endblock %}

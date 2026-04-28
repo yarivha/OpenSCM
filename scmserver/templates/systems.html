@@ -20,7 +20,7 @@
 
   <section class="content">
     <div class="container-fluid">
-      
+
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
@@ -49,11 +49,30 @@
               </div>
             </div>
 
+            {# Bulk action toolbar — hidden until checkboxes are selected #}
+            <div id="bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
+              <span id="bulk-count" class="mr-3 font-weight-bold text-primary"></span>
+              {% if is_editor %}
+              <button type="button" class="btn btn-success btn-sm mr-1" id="bulk-approve-btn" title="Approve Selected">
+                <i class="fas fa-check mr-1"></i> Approve
+              </button>
+              <button type="button" class="btn btn-info btn-sm mr-1" id="bulk-add-group-btn" title="Add to Group">
+                <i class="fas fa-layer-group mr-1"></i> Add to Group
+              </button>
+              <button type="button" class="btn btn-danger btn-sm" id="bulk-delete-btn" title="Delete Selected">
+                <i class="fas fa-trash mr-1"></i> Delete
+              </button>
+              {% endif %}
+            </div>
+
             <div class="card-body">
               <table id="systems_table" class="table table-bordered table-striped table-hover">
                 <thead>
                   <tr>
                     <th style="display:none;">Status_Internal</th>
+                    <th style="width: 20px; text-align:center;">
+                      <input type="checkbox" id="select-all" title="Select All">
+                    </th>
                     <th style="width: 10px">ID</th>
                     <th>Name</th>
                     <th>OS & Architecture</th>
@@ -67,9 +86,12 @@
                 <tbody>
                   {% for system in systems %}
                   {% set os_lower = system.os | lower %}
-                  
+
                   <tr class="{% if system.status == 'pending' %}table-warning{% endif %}">
                     <td style="display:none;">{{ system.status }}</td>
+                    <td class="text-center">
+                      <input type="checkbox" class="row-checkbox" value="{{ system.id }}" title="Select">
+                    </td>
                     <td>{{ system.id }}</td>
                     <td>
                       <strong>{{ system.name }}</strong>
@@ -78,7 +100,7 @@
                       {% endif %}
                     </td>
                     <td>
-                      <i class="fab 
+                      <i class="fab
                         {% if 'windows' in os_lower %}fa-windows
                         {% elif 'apple' in os_lower or 'mac' in os_lower or 'darwin' in os_lower %}fa-apple
                         {% elif 'freebsd' in os_lower %}fa-freebsd
@@ -89,31 +111,31 @@
                     </td>
                     <td><code>{{ system.ip }}</code></td>
                     <td>
-			{% if system.groups and system.groups != "none" %}
-    			{{ system.groups }}
-  			{% else %}
-    			<span class="text-muted">—</span>
-  			{% endif %}
+		      {% if system.groups and system.groups != "none" %}
+    		        {{ system.groups }}
+  		      {% else %}
+    		        <span class="text-muted">—</span>
+  		      {% endif %}
 		    </td>
                     <td><span class="badge badge-light">v{{ system.ver }}</span></td>
                     <td class="datetime" data-utc="{{ system.last_seen }}">{{ system.last_seen }}</td>
-                    
+
                     <td class="text-right">
                       {% if system.status == "pending" %}
-                        <a class="btn btn-success btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-			   onclick="{% if is_editor %}return confirm('Approve this system?'){% else %}return false;{% endif %}" 
-			   href="{% if is_editor %}/systems/approve/{{ system.id }}{% else %}#{% endif %}">
+                        <a class="btn btn-success btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
+		           onclick="{% if is_editor %}return confirm('Approve this system?'){% else %}return false;{% endif %}"
+		           href="{% if is_editor %}/systems/approve/{{ system.id }}{% else %}#{% endif %}">
                           <i class="fas {% if is_editor %}fa-check{% else %}fa-lock{% endif %}"></i> Approve
                         </a>
-                        <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-			   onclick="{% if is_editor %}return confirm('Reject system?'){% else %}return false;{% endif %}" 
-			   href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}">
+                        <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
+		           onclick="{% if is_editor %}return confirm('Reject system?'){% else %}return false;{% endif %}"
+		           href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}">
                           <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                         </a>
                       {% else %}
-                        <button type="button" 
-                                class="btn btn-primary btn-sm view-system-btn" 
-                                data-id="{{ system.id }}" 
+                        <button type="button"
+                                class="btn btn-primary btn-sm view-system-btn"
+                                data-id="{{ system.id }}"
                                 data-name="{{ system.name }}"
                                 data-os="{{ system.os }}"
                                 data-arch="{{ system.arch }}"
@@ -125,17 +147,17 @@
                                 title="Quick View">
                           <i class="fas fa-eye mr-1"></i> View
                         </button>
-                        
-                        <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+
+                        <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
                            href="{% if is_editor %}/systems/edit/{{ system.id }}{% else %}#{% endif %}"
-			   {% if is_editor %}title="Edit System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Edit Required"{% endif %}>
+		           {% if is_editor %}title="Edit System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Edit Required"{% endif %}>
                           <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                         </a>
 
-                        <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-                           onclick="{% if is_editor %}return confirm('Delete system?'){% else %}return false;{% endif %}" 
+                        <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
+                           onclick="{% if is_editor %}return confirm('Delete system?'){% else %}return false;{% endif %}"
                            href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}"
-			   {% if is_editor %}title="Delete System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
+		           {% if is_editor %}title="Delete System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
                           <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
                         </a>
                       {% endif %}
@@ -152,6 +174,7 @@
   </section>
 </div>
 
+{# System Details Modal #}
 <div class="modal fade" id="systemDetailsModal" tabindex="-1" role="dialog" aria-hidden="true">
   <div class="modal-dialog modal-lg" role="document">
     <div class="modal-content">
@@ -184,6 +207,51 @@
   </div>
 </div>
 
+{# Add to Group Modal #}
+<div class="modal fade" id="addToGroupModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-info">
+        <h5 class="modal-title">Add Selected Systems to Group</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true" style="color: white;">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <form id="add-group-form" method="POST" action="/systems/bulk/add_group">
+          <div id="add-group-hidden-ids"></div>
+          <div class="form-group">
+            <label for="group-select">Select Group</label>
+            <select class="form-control" id="group-select" name="group_id" required>
+              <option value="">— Choose a group —</option>
+              {% for group in groups %}
+              <option value="{{ group.0 }}">{{ group.1 }}</option>
+              {% endfor %}
+            </select>
+          </div>
+        </form>
+        {% if not groups %}
+        <div class="alert alert-warning mb-0">No groups exist yet. <a href="/system_groups/add">Create a group</a> first.</div>
+        {% endif %}
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+        <button type="button" class="btn btn-info" id="add-group-confirm-btn" {% if not groups %}disabled{% endif %}>
+          <i class="fas fa-layer-group mr-1"></i> Add to Group
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{# Hidden bulk forms #}
+<form id="bulk-approve-form" method="POST" action="/systems/bulk/approve" style="display:none;">
+  <div id="bulk-approve-ids"></div>
+</form>
+<form id="bulk-delete-form" method="POST" action="/systems/bulk/delete" style="display:none;">
+  <div id="bulk-delete-ids"></div>
+</form>
+
 {% endblock %}
 
 {% block scripts %}
@@ -204,7 +272,7 @@
     // 1. Modal Logic
     $(document).on('click', '.view-system-btn', function() {
         const btn = $(this);
-        
+
         $('#modalSystemName').html('<i class="fas fa-server mr-2"></i>' + btn.data('name'));
         $('#m-id').text(btn.data('id'));
         $('#m-os').text(btn.data('os'));
@@ -212,8 +280,7 @@
         $('#m-ip').text(btn.data('ip'));
         $('#m-ver').text(btn.data('ver'));
         $('#m-groups').text(btn.data('groups'));
-        
-        // Convert dates to local time for the modal
+
         $('#m-seen').text(formatLocalTime(btn.data('seen')));
         $('#m-created').text(formatLocalTime(btn.data('created')));
 
@@ -230,16 +297,89 @@
       "responsive": true,
       "lengthChange": true,
       "autoWidth": false,
-      "order": [[0, "asc"], [2, "asc"]],
-      "columnDefs": [{ "targets": 0, "visible": false }],
+      "order": [[0, "asc"], [3, "asc"]],
+      "columnDefs": [
+        { "targets": 0, "visible": false },
+        { "targets": 1, "orderable": false, "searchable": false, "className": "text-center" }
+      ],
       "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
     });
-    
+
     table.buttons().container().appendTo('#systems_table_wrapper .col-md-6:eq(0)');
+
+    // 4. Checkbox / bulk toolbar logic
+    function getSelectedIds() {
+      return $('.row-checkbox:checked').map(function() { return $(this).val(); }).get();
+    }
+
+    function updateBulkToolbar() {
+      const ids = getSelectedIds();
+      if (ids.length > 0) {
+        $('#bulk-count').text(ids.length + ' selected');
+        $('#bulk-toolbar').show();
+      } else {
+        $('#bulk-toolbar').hide();
+      }
+    }
+
+    $('#select-all').on('change', function() {
+      const checked = $(this).prop('checked');
+      // Only check visible rows (respects DataTables pagination/filter)
+      table.rows({ search: 'applied' }).nodes().each(function(node) {
+        $('input.row-checkbox', node).prop('checked', checked);
+      });
+      updateBulkToolbar();
+    });
+
+    $(document).on('change', '.row-checkbox', function() {
+      if (!$(this).prop('checked')) $('#select-all').prop('checked', false);
+      updateBulkToolbar();
+    });
+
+    function buildHiddenIds(containerId, ids) {
+      const container = $('#' + containerId).empty();
+      ids.forEach(function(id) {
+        container.append('<input type="hidden" name="ids" value="' + id + '">');
+      });
+    }
+
+    // Bulk Approve
+    $('#bulk-approve-btn').on('click', function() {
+      const ids = getSelectedIds();
+      if (!ids.length) return;
+      if (!confirm('Approve ' + ids.length + ' system(s)?')) return;
+      buildHiddenIds('bulk-approve-ids', ids);
+      $('#bulk-approve-form').submit();
+    });
+
+    // Bulk Delete
+    $('#bulk-delete-btn').on('click', function() {
+      const ids = getSelectedIds();
+      if (!ids.length) return;
+      if (!confirm('Delete ' + ids.length + ' system(s)? This cannot be undone.')) return;
+      buildHiddenIds('bulk-delete-ids', ids);
+      $('#bulk-delete-form').submit();
+    });
+
+    // Add to Group — open modal
+    $('#bulk-add-group-btn').on('click', function() {
+      const ids = getSelectedIds();
+      if (!ids.length) return;
+      buildHiddenIds('add-group-hidden-ids', ids);
+      $('#addToGroupModal').modal('show');
+    });
+
+    // Add to Group — confirm
+    $('#add-group-confirm-btn').on('click', function() {
+      if (!$('#group-select').val()) {
+        alert('Please select a group.');
+        return;
+      }
+      $('#add-group-form').submit();
+    });
   });
 
-
-$(document).ready(function() {
+  $(document).ready(function() {
     var offlineThreshold = {{ offline_threshold }};
 
     $('#systems_table tbody tr').each(function() {
@@ -256,11 +396,11 @@ $(document).ready(function() {
             $(this).addClass('text-muted');
             $(this).css('opacity', '0.5');
             lastSeenCell.html(
-                lastSeenCell.text() + 
+                lastSeenCell.text() +
                 ' <span class="badge badge-secondary ml-1">Offline</span>'
             );
         }
     });
-});
+  });
 </script>
 {% endblock %}
