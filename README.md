@@ -43,14 +43,11 @@ If you find this project helpful, please consider sponsoring us to support ongoi
 
 | Platform | Architecture | Server | Client | Package Format |
 |:---|:---|:---:|:---:|:---|
-| Linux | x86_64 | ✅ | ✅ | deb, rpm, pkg |
-| Linux | ARM64 | ✅ | ✅ | deb, rpm, pkg |
-| Linux | ARMv7 | ❌ | ✅ | deb, rpm, pkg |
-| Linux | RISC-V | ❌ | ✅ | deb, rpm, pkg |
-| Linux | PowerPC64LE | ❌ | ✅ | deb, rpm, pkg |
-| Arch Linux | x86_64 | ❌ | ✅ | pkg.tar.zst |
-| Arch Linux | ARM64 | ❌ | ✅ | pkg.tar.zst |
-| Arch Linux | ARMv7 | ❌ | ✅ | pkg.tar.zst |
+| Linux | x86_64 | ✅ | ✅ | deb, rpm, pkg.tar.zst |
+| Linux | ARM64 | ✅ | ✅ | deb, rpm, pkg.tar.zst |
+| Linux | ARMv7 | ❌ | ✅ | deb, rpm, pkg.tar.zst |
+| Linux | RISC-V | ❌ | ✅ | deb, rpm |
+| Linux | PowerPC64LE | ❌ | ✅ | deb, rpm |
 | Windows | x86_64 | ✅ | ✅ | exe (NSIS) |
 | macOS | Universal (ARM64 + x86_64) | ❌ | ✅ | pkg |
 | FreeBSD | x86_64 | ❌ | ✅ | pkg |
