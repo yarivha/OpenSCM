@@ -12,7 +12,7 @@ name = "scmserver"
 path = "src/lib.rs"
 
 [[bin]]
-name = "scmserver-bin" # This is what 'cargo run' will execute
+name = "scmserver" 
 path = "src/main.rs"
 
 
