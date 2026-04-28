@@ -18,8 +18,43 @@ use scmserver::{
     scheduler::{start_background_scheduler, recalculate_current_compliance},
 };
 
+fn print_usage() {
+println!(r#"
+OpenSCM Server - Security Compliance Manager 
+
+USAGE:
+scmserver [OPTIONS]
+
+OPTIONS:
+-h, --help          Print this help message
+-ver, --version     Print version information
+
+"#);
+}
+
+
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
+    
+// 0. Usage
+    let version = env!("CARGO_PKG_VERSION");
+    let args: Vec<String> = std::env::args().collect();
+
+    for arg in &args {
+        match arg.as_str() {
+            "-h" | "--help" => {
+                print_usage();
+                return Ok(());
+            }
+            "-ver" | "--version" => {
+                println!("OpenSCM Server version: {}", version);
+                return Ok(());
+            }
+            _ => {}
+        }
+    }
+
     // 1. Initial Infrastructure setup
     check_required_directories()?;
 
