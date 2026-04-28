@@ -120,6 +120,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/tests/add", get(tests::tests_add).post(tests::tests_add_save))
         .route("/tests/delete/{id}", get(tests::tests_delete))
         .route("/tests/bulk/delete", post(tests::tests_bulk_delete))
+        .route("/tests/bulk/add_policy", post(tests::tests_bulk_add_policy))
         .route("/tests/edit/{id}", get(tests::tests_edit).post(tests::tests_edit_save))
         .route("/policies", get(policies::policies))
         .route("/policies/add", get(policies::policies_add).post(policies::policies_add_save))

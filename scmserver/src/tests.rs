@@ -223,6 +223,17 @@ pub async fn tests(
         TestWithConditions { test: t, applicability: app }
     }).collect();
 
+    let policies: Vec<(i64, String)> = sqlx::query(
+        "SELECT id, name FROM policies WHERE tenant_id = ? ORDER BY name ASC",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|r| (r.get("id"), r.get("name")))
+    .collect();
+
     let mut context = Context::new();
     if let Some(msg) = query.error_message {
         context.insert("error_message", &msg);
@@ -230,6 +241,7 @@ pub async fn tests(
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
     }
+    context.insert("policies", &policies);
     context.insert("tests", &tests_with_conditions);
     render_template(&tera, Some(&pool), "tests.html", context, Some(auth))
         .await
@@ -755,5 +767,81 @@ pub async fn tests_bulk_delete(
     let _ = sync_tx.send(()).await;
     info!("Bulk deleted {} tests by '{}'.", deleted, auth.username);
     let msg = urlencoding::encode(&format!("{} test(s) deleted.", deleted)).to_string();
+    Redirect::to(&format!("/tests?success_message={}", msg)).into_response()
+}
+
+
+pub async fn tests_bulk_add_policy(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(_) => return Redirect::to("/tests?error_message=Invalid+form+data").into_response(),
+    };
+
+    let form_data = parse_form_data(&raw_string);
+
+    let policy_id: i32 = match form_data
+        .get("policy_id")
+        .and_then(|v| v.first())
+        .and_then(|s| s.parse().ok())
+    {
+        Some(id) => id,
+        None => return Redirect::to("/tests?error_message=No+policy+selected").into_response(),
+    };
+
+    let ids: Vec<i32> = form_data
+        .get("ids")
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse().ok())
+        .collect();
+
+    if ids.is_empty() {
+        return Redirect::to("/tests?error_message=No+tests+selected").into_response();
+    }
+
+    // Verify policy belongs to this tenant
+    let policy_exists: bool = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM policies WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(policy_id)
+    .bind(&auth.tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0i64) > 0;
+
+    if !policy_exists {
+        return Redirect::to("/tests?error_message=Invalid+policy").into_response();
+    }
+
+    let mut added = 0usize;
+    for id in &ids {
+        if let Err(e) = sqlx::query(
+            "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
+        )
+        .bind(&auth.tenant_id)
+        .bind(policy_id)
+        .bind(id)
+        .execute(&pool)
+        .await
+        {
+            error!("Bulk add policy: failed for test {}: {}", id, e);
+        } else {
+            added += 1;
+        }
+    }
+
+    info!("Bulk added {} tests to policy {} by '{}'.", added, policy_id, auth.username);
+    let msg = urlencoding::encode(&format!("{} test(s) added to policy.", added)).to_string();
     Redirect::to(&format!("/tests?success_message={}", msg)).into_response()
 }
