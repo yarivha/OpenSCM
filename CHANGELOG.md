@@ -10,6 +10,9 @@ All notable changes to OpenSCM are documented here.
 - **Bulk actions** — Systems: approve, add to group, delete. Tests: delete, add to policy. Reports: delete. All actions operate on user-selected rows across any page of the table.
 - **Version update notifications** — server checks the GitHub releases API hourly and sends a dismissible in-app notification to all administrators when a newer version is available. Deduplicates notifications so admins are only alerted once per version.
 
+### Changed
+- Pinned Rust toolchain to 1.95.0 via `rust-toolchain.toml` for reproducible builds.
+
 ### Fixed
 - Missing tooltips on action buttons in the Tests table.
 
