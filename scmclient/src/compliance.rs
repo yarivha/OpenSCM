@@ -97,7 +97,41 @@ fn check_port_open(port: &str) -> bool {
 }
 
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
+fn check_package_exists(package: &str) -> bool {
+    use std::process::Stdio;
+
+    // Try Homebrew formula
+    let brew_formula = Command::new("brew")
+        .args(["list", "--formula", package])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if brew_formula { return true; }
+
+    // Try Homebrew cask
+    let brew_cask = Command::new("brew")
+        .args(["list", "--cask", package])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false);
+    if brew_cask { return true; }
+
+    // Try native macOS pkgutil (e.g. com.apple.pkg.*)
+    Command::new("pkgutil")
+        .args(["--pkg-info", package])
+        .stdout(Stdio::null())
+        .stderr(Stdio::null())
+        .status()
+        .map(|s| s.success())
+        .unwrap_or(false)
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn check_package_exists(package: &str) -> bool {
     use std::process::Stdio;
 
@@ -144,7 +178,60 @@ fn check_package_exists(package: &str) -> bool {
 
 
 
-#[cfg(unix)]
+#[cfg(target_os = "macos")]
+fn get_package_version(package: &str) -> Option<String> {
+    // Try Homebrew formula
+    let output = Command::new("brew")
+        .args(["list", "--formula", "--versions", package])
+        .output()
+        .ok();
+
+    if let Some(o) = output {
+        if o.status.success() {
+            // "brew list --versions <pkg>" returns "package version" e.g. "nginx 1.25.3"
+            let out = String::from_utf8_lossy(&o.stdout);
+            if let Some(ver) = out.split_whitespace().nth(1) {
+                return Some(ver.to_string());
+            }
+        }
+    }
+
+    // Try Homebrew cask
+    let output_cask = Command::new("brew")
+        .args(["list", "--cask", "--versions", package])
+        .output()
+        .ok();
+
+    if let Some(o) = output_cask {
+        if o.status.success() {
+            let out = String::from_utf8_lossy(&o.stdout);
+            if let Some(ver) = out.split_whitespace().nth(1) {
+                return Some(ver.to_string());
+            }
+        }
+    }
+
+    // Try pkgutil — parses "version: X.Y.Z" from its output
+    let output_pkg = Command::new("pkgutil")
+        .args(["--pkg-info", package])
+        .output()
+        .ok();
+
+    if let Some(o) = output_pkg {
+        if o.status.success() {
+            let out = String::from_utf8_lossy(&o.stdout);
+            for line in out.lines() {
+                if let Some(ver) = line.strip_prefix("version: ") {
+                    return Some(ver.trim().to_string());
+                }
+            }
+        }
+    }
+
+    None
+}
+
+#[cfg(all(unix, not(target_os = "macos")))]
 fn get_package_version(package: &str) -> Option<String> {
     // Try dpkg (Debian/Ubuntu)
     let output = Command::new("dpkg-query")
