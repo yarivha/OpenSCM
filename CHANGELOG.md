@@ -4,6 +4,18 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+- `init_tera_with_overrides()` — public function that loads all CE templates then lets callers substitute individual templates by name. Used by EE and SaaS to inject custom pages without forking CE.
+- Optional `organization` field in `LoginForm` — if provided, scopes the user lookup to that tenant and returns a clear "Organization not found" error if unknown. CE and EE are unaffected (field is absent from their login form). Powers SaaS multi-tenant login.
+- `success_message` support added to the login page context (used by SaaS to confirm account creation after registration).
+
+### Changed
+- `create_core_router` refactored into `build_core_routes` + `apply_core_layers` helpers to cleanly support the login-free router variant needed during SaaS development (later simplified; helpers removed once the optional `organization` approach was adopted).
+
+---
+
 ## [0.1.9] - 2026-04-28
 
 ### Added
