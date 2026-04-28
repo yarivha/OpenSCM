@@ -37,16 +37,30 @@ pub struct AppState {
 
 // 5. Utility functions moved from main.rs
 pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
+    init_tera_with_overrides(&[])
+}
+
+/// Like `init_tera`, but lets callers replace specific CE templates by name.
+/// Pass `&[("login.html", "<html>...")]` to substitute individual templates.
+pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<dyn Error>> {
     let mut tera = Tera::default();
     for file in TEMPLATES_DIR.files() {
         let path = file.path().to_str()
             .ok_or_else(|| format!("Template path is not valid UTF-8: {:?}", file.path()))?;
-        
+
+        // Skip CE template if the caller supplies an override for this name
+        if overrides.iter().any(|(name, _)| *name == path) {
+            continue;
+        }
+
         let content = std::str::from_utf8(file.contents())
             .map_err(|e| format!("Template '{}' contains invalid UTF-8: {}", path, e))?
             .to_owned();
 
         tera.add_raw_template(path, &content)?;
+    }
+    for (name, content) in overrides {
+        tera.add_raw_template(name, content)?;
     }
     tera.build_inheritance_chains()?;
     tera.check_macro_files()?;
