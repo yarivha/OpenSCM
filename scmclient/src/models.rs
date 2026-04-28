@@ -43,17 +43,8 @@ pub struct Test {
     pub severity: Option<String>,
     pub filter: Option<String>,
     pub app_filter: Option<String>,
+    pub conditions: Vec<TestCondition>,
     pub applicability: Option<Vec<TestCondition>>,
-    pub element_1: Option<String>, pub input_1: Option<String>, pub selement_1: Option<String>,
-    pub condition_1: Option<String>, pub sinput_1: Option<String>,
-    pub element_2: Option<String>, pub input_2: Option<String>, pub selement_2: Option<String>,
-    pub condition_2: Option<String>, pub sinput_2: Option<String>,
-    pub element_3: Option<String>, pub input_3: Option<String>, pub selement_3: Option<String>,
-    pub condition_3: Option<String>, pub sinput_3: Option<String>,
-    pub element_4: Option<String>, pub input_4: Option<String>, pub selement_4: Option<String>,
-    pub condition_4: Option<String>, pub sinput_4: Option<String>,
-    pub element_5: Option<String>, pub input_5: Option<String>, pub selement_5: Option<String>,
-    pub condition_5: Option<String>, pub sinput_5: Option<String>,
 }
 
 

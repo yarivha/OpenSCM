@@ -249,93 +249,52 @@
                   </div>
 
                   <div id="conditionsContainer">
-                    <div class="condition-row mb-3 row align-items-end" data-id="cond_1">
-                      <div class="col-md-2">
-                        <div class="condition-label">Subject</div>
-                        <select name="element_1" class="form-control">
-                          <option value="" {% if test.element_1 == "None" %}selected{% endif %}></option>
-                          {% for element in elements %}
-                            <option {% if test.element_1 == element.name %}selected{% endif %}>{{ element.name }}</option>
-                          {% endfor %}
-                        </select>
-                      </div>
-                      <div class="col-md-2">
-                        <div class="condition-label">Parameter</div>
-                        <input type="text" name="input_1" value="{{ test.input_1 }}" class="form-control">
-                      </div>
-                      <div class="col-md-2">
-                        <div class="condition-label">Sub-Element</div>
-                        <select name="selement_1" class="form-control">
-                          <option value="" {% if test.selement_1 == "None" %}selected{% endif %}></option>
-                          {% for selement in selements %}
-                            <option {% if test.selement_1 == selement.name %}selected{% endif %}>{{ selement.name }}</option>
-                          {% endfor %}
-                        </select>
-                      </div>
-                      <div class="col-md-2">
-                        <div class="condition-label">Operator</div>
-                        <select name="condition_1" class="form-control">
-                          <option value="" {% if test.condition_1 == "None" %}selected{% endif %}></option>
-                          {% for condition in conditions %}
-                            <option {% if test.condition_1 == condition.name %}selected{% endif %}>{{ condition.name }}</option>
-                          {% endfor %}
-                        </select>
-                      </div>
-                      <div class="col-md-3">
-                        <div class="condition-label">Expected Value</div>
-                        <input type="text" name="sinput_1" value="{{ test.sinput_1 }}" class="form-control">
-                      </div>
-                    </div>
-
-                    {% for i in [2,3,4,5] %}
-                    {% set el = "" %}
-                    {% if i == 2 %}{% set el = test.element_2 %}{% elif i == 3 %}{% set el = test.element_3 %}{% elif i == 4 %}{% set el = test.element_4 %}{% elif i == 5 %}{% set el = test.element_5 %}{% endif %}
-                    
-                    <div class="condition-row mb-3 row align-items-end shadow-sm" data-id="cond_{{ i }}" {% if el == "None" or el == "" %}style="display: none;"{% endif %}>
+                    {% for i in [1,2,3,4,5,6,7,8,9,10] %}
+                    {% set tc = test_conds | nth(n=loop.index0) %}
+                    <div class="condition-row mb-3 row align-items-end shadow-sm" data-id="cond_{{ i }}"
+                      {% if not tc %}style="display: none;"{% endif %}>
                       <div class="col-md-2">
                         <div class="condition-label">Subject</div>
                         <select name="element_{{ i }}" class="form-control">
-                          <option value="" {% if el == "None" %}selected{% endif %}></option>
+                          <option value=""></option>
                           {% for element in elements %}
-                             <option {% if el == element.name %}selected{% endif %}>{{ element.name }}</option>
+                            <option {% if tc and tc.element == element.name %}selected{% endif %}>{{ element.name }}</option>
                           {% endfor %}
                         </select>
                       </div>
                       <div class="col-md-2">
                         <div class="condition-label">Parameter</div>
-                        {% set val = "" %}{% if i == 2 %}{% set val = test.input_2 %}{% elif i == 3 %}{% set val = test.input_3 %}{% elif i == 4 %}{% set val = test.input_4 %}{% elif i == 5 %}{% set val = test.input_5 %}{% endif %}
-                        <input type="text" name="input_{{ i }}" value="{{ val }}" class="form-control">
+                        <input type="text" name="input_{{ i }}" value="{% if tc %}{{ tc.input }}{% endif %}" class="form-control">
                       </div>
                       <div class="col-md-2">
                         <div class="condition-label">Sub-Element</div>
-                        {% set sel = "" %}{% if i == 2 %}{% set sel = test.selement_2 %}{% elif i == 3 %}{% set sel = test.selement_3 %}{% elif i == 4 %}{% set sel = test.selement_4 %}{% elif i == 5 %}{% set sel = test.selement_5 %}{% endif %}
                         <select name="selement_{{ i }}" class="form-control">
-                          <option value="" {% if sel == "None" %}selected{% endif %}></option>
+                          <option value=""></option>
                           {% for selement in selements %}
-                            <option {% if sel == selement.name %}selected{% endif %}>{{ selement.name }}</option>
+                            <option {% if tc and tc.selement == selement.name %}selected{% endif %}>{{ selement.name }}</option>
                           {% endfor %}
                         </select>
                       </div>
                       <div class="col-md-2">
                         <div class="condition-label">Operator</div>
-                        {% set con = "" %}{% if i == 2 %}{% set con = test.condition_2 %}{% elif i == 3 %}{% set con = test.condition_3 %}{% elif i == 4 %}{% set con = test.condition_4 %}{% elif i == 5 %}{% set con = test.condition_5 %}{% endif %}
                         <select name="condition_{{ i }}" class="form-control">
-                          <option value="" {% if con == "None" %}selected{% endif %}></option>
-                          {% for condition in conditions %}
-                            <option {% if con == condition.name %}selected{% endif %}>{{ condition.name }}</option>
+                          <option value=""></option>
+                          {% for cond_opt in conditions %}
+                            <option {% if tc and tc.condition == cond_opt.name %}selected{% endif %}>{{ cond_opt.name }}</option>
                           {% endfor %}
                         </select>
                       </div>
                       <div class="col-md-3">
                         <div class="condition-label">Expected Value</div>
-                        {% set sval = "" %}{% if i == 2 %}{% set sval = test.sinput_2 %}{% elif i == 3 %}{% set sval = test.sinput_3 %}{% elif i == 4 %}{% set sval = test.sinput_4 %}{% elif i == 5 %}{% set sval = test.sinput_5 %}{% endif %}
-                        <input type="text" name="sinput_{{ i }}" value="{{ sval }}" class="form-control">
+                        <input type="text" name="sinput_{{ i }}" value="{% if tc %}{{ tc.sinput | default(value='') }}{% endif %}" class="form-control">
                       </div>
+                      {% if i != 1 %}
                       <div class="col-md-1 text-right">
                         <button type="button" class="btn btn-outline-danger btn-sm" onclick="removeCondition(this)">
                           <i class="fas fa-trash"></i>
                         </button>
                       </div>
+                      {% endif %}
                     </div>
                     {% endfor %}
                   </div>
@@ -425,7 +384,7 @@
   // TEST CONDITIONS
   // ============================================================
 
-  const maxConditions = 5;
+  const maxConditions = 10;
   let usedIndexes = new Set();
 
   document.addEventListener('DOMContentLoaded', function() {
@@ -446,7 +405,7 @@
 
   function addCondition() {
     if (usedIndexes.size >= maxConditions) {
-      alert("Maximum number of conditions reached.");
+      alert("Maximum of 10 conditions reached.");
       return;
     }
     const id = getNextAvailableIndex();

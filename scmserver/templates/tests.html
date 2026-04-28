@@ -132,11 +132,12 @@
                     data-rem="{{ test.remediation }}"
                     data-filter="{{ test.filter }}"
                     data-app-filter="{{ test.app_filter }}"
-                    data-e1="{{ test.element_1 }}" data-c1="{{ test.condition_1 }}" data-s1="{{ test.sinput_1 }}"
-                    data-e2="{{ test.element_2 }}" data-c2="{{ test.condition_2 }}" data-s2="{{ test.sinput_2 }}"
-                    data-e3="{{ test.element_3 }}" data-c3="{{ test.condition_3 }}" data-s3="{{ test.sinput_3 }}"
-                    data-e4="{{ test.element_4 }}" data-c4="{{ test.condition_4 }}" data-s4="{{ test.sinput_4 }}"
-                    data-e5="{{ test.element_5 }}" data-c5="{{ test.condition_5 }}" data-s5="{{ test.sinput_5 }}"
+                    data-cond-count="{{ test.conditions | length }}"
+                    {% for tc in test.conditions %}
+                      data-e{{ loop.index }}="{{ tc.element }}"
+                      data-c{{ loop.index }}="{{ tc.condition | default(value='') }}"
+                      data-s{{ loop.index }}="{{ tc.sinput | default(value='') }}"
+                    {% endfor %}
                     {% if test.applicability %}
                       data-app-count="{{ test.applicability | length }}"
                       {% for ac in test.applicability %}
@@ -378,8 +379,9 @@ $(function () {
         const container = $('#logic-steps-container');
         container.empty();
         let stepCount = 0;
+        const condCount = parseInt(b.data('cond-count') || 0);
 
-        for (let i = 1; i <= 5; i++) {
+        for (let i = 1; i <= condCount; i++) {
             let el = b.data('e' + i);
             let co = b.data('c' + i);
             let ex = b.data('s' + i);

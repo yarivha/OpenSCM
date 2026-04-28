@@ -223,32 +223,22 @@ async fn process_compliance_tests(
         // =====================================================
         // TEST EVALUATION
         // =====================================================
-        let conditions = [
-            (&test.element_1, &test.input_1, &test.selement_1, &test.condition_1, &test.sinput_1),
-            (&test.element_2, &test.input_2, &test.selement_2, &test.condition_2, &test.sinput_2),
-            (&test.element_3, &test.input_3, &test.selement_3, &test.condition_3, &test.sinput_3),
-            (&test.element_4, &test.input_4, &test.selement_4, &test.condition_4, &test.sinput_4),
-            (&test.element_5, &test.input_5, &test.selement_5, &test.condition_5, &test.sinput_5),
-        ];
-
         let mut results = Vec::new();
-        for (e, i, se, c, si) in conditions {
-            if let (Some(el), Some(inp), Some(sel)) = (e, i, se) {
-                if el == "None" ||  el.is_empty() {
-                    continue;
-                }
-                if sel == "None" || sel.is_empty() {
-                    continue;
-                }
-                results.push(evaluate(
-                    el,
-                    inp,
-                    sel,
-                    c.as_deref().unwrap_or(""),
-                    si.as_deref().unwrap_or(""),
-                    cmd_enabled,
-                ));
+        for c in &test.conditions {
+            if c.element.is_empty() || c.element == "None" {
+                continue;
             }
+            if c.selement.is_empty() || c.selement == "None" {
+                continue;
+            }
+            results.push(evaluate(
+                &c.element,
+                &c.input,
+                &c.selement,
+                c.condition.as_deref().unwrap_or(""),
+                c.sinput.as_deref().unwrap_or(""),
+                cmd_enabled,
+            ));
         }
 
         let final_result = if results.is_empty() {

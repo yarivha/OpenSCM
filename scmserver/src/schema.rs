@@ -1,5 +1,6 @@
 // src/schema.rs
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, Acquire};
+use sqlx::Row;
 use bcrypt::{hash, DEFAULT_COST};
 use tracing::{info, error};
 use ed25519_dalek::SigningKey;
@@ -21,6 +22,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // Seed schema version for fresh installs — skips all migrations
+    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 4)")
+        .execute(pool)
+        .await?;
 
 
     //  Tenants Table
@@ -164,31 +170,6 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             severity TEXT,
             app_filter TEXT DEFAULT 'all',
             filter TEXT DEFAULT 'all',
-            element_1 TEXT,
-            input_1 TEXT,
-            selement_1 TEXT,
-            condition_1 TEXT,
-            sinput_1 TEXT,
-            element_2 TEXT,
-            input_2 TEXT,
-            selement_2 TEXT,
-            condition_2 TEXT,
-            sinput_2 TEXT,
-            element_3 TEXT,
-            input_3 TEXT,
-            selement_3 TEXT,
-            condition_3 TEXT,
-            sinput_3 TEXT,
-            element_4 TEXT,
-            input_4 TEXT,
-            selement_4 TEXT,
-            condition_4 TEXT,
-            sinput_4 TEXT,
-            element_5 TEXT,
-            input_5 TEXT,
-            selement_5 TEXT,
-            condition_5 TEXT,
-            sinput_5 TEXT,
             compliance_score REAL DEFAULT 0.0,
             systems_passed INTEGER DEFAULT 0,
             systems_failed INTEGER DEFAULT 0,
@@ -629,6 +610,143 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
         info!("Schema migration v2 → v3 complete.");
 
+    }
+
+    // v3 → v4: move flat condition columns into test_conditions table
+    if version < 4 {
+        info!("Running schema migration v3 → v4...");
+
+        // Acquire a dedicated connection so the PRAGMA and the transaction
+        // share the exact same underlying SQLite handle.
+        // FK enforcement MUST be disabled before the transaction — SQLite
+        // forbids changing it inside an active transaction — because the
+        // ALTER TABLE RENAME updates FK back-references in test_conditions
+        // and the subsequent DROP TABLE tests_old would otherwise fail.
+        let mut conn = pool.acquire().await?;
+
+        sqlx::query("PRAGMA foreign_keys = OFF")
+            .execute(&mut *conn)
+            .await?;
+
+        let migrate_result: Result<(), sqlx::Error> = async {
+            let mut migration_tx = conn.begin().await?;
+
+            // Check whether flat columns exist (absent on fresh installs)
+            let has_flat_columns: bool = sqlx::query_scalar::<_, i64>(
+                "SELECT COUNT(*) FROM pragma_table_info('tests') WHERE name = 'element_1'"
+            )
+            .fetch_one(&mut *migration_tx)
+            .await
+            .unwrap_or(0) > 0;
+
+            if has_flat_columns {
+                info!("Migrating flat condition columns into test_conditions...");
+
+                let test_rows = sqlx::query(
+                    "SELECT id, tenant_id,
+                     element_1, input_1, selement_1, condition_1, sinput_1,
+                     element_2, input_2, selement_2, condition_2, sinput_2,
+                     element_3, input_3, selement_3, condition_3, sinput_3,
+                     element_4, input_4, selement_4, condition_4, sinput_4,
+                     element_5, input_5, selement_5, condition_5, sinput_5
+                     FROM tests"
+                )
+                .fetch_all(&mut *migration_tx)
+                .await?;
+
+                for row in &test_rows {
+                    let test_id: i64 = row.get("id");
+                    let tenant_id: String = row.get("tenant_id");
+
+                    for (ecol, icol, scol, ccol, sicol) in [
+                        ("element_1","input_1","selement_1","condition_1","sinput_1"),
+                        ("element_2","input_2","selement_2","condition_2","sinput_2"),
+                        ("element_3","input_3","selement_3","condition_3","sinput_3"),
+                        ("element_4","input_4","selement_4","condition_4","sinput_4"),
+                        ("element_5","input_5","selement_5","condition_5","sinput_5"),
+                    ] {
+                        let element: Option<String> = row.try_get(ecol).ok().flatten();
+                        let element = match element {
+                            Some(e) if !e.is_empty() && e != "None" => e,
+                            _ => continue,
+                        };
+                        let input: String = row.try_get(icol).ok().flatten().unwrap_or_default();
+                        let selement: String = row.try_get(scol).ok().flatten()
+                            .filter(|s: &String| !s.is_empty() && s != "None")
+                            .unwrap_or_else(|| "None".to_string());
+                        let condition: Option<String> = row.try_get(ccol).ok().flatten()
+                            .filter(|s: &String| !s.is_empty() && s != "None");
+                        let sinput: Option<String> = row.try_get(sicol).ok().flatten()
+                            .filter(|s: &String| !s.is_empty());
+
+                        sqlx::query(
+                            "INSERT INTO test_conditions (tenant_id, test_id, type, element, input, selement, condition, sinput)
+                             VALUES (?, ?, 'condition', ?, ?, ?, ?, ?)"
+                        )
+                        .bind(&tenant_id)
+                        .bind(test_id)
+                        .bind(&element)
+                        .bind(&input)
+                        .bind(&selement)
+                        .bind(condition)
+                        .bind(sinput)
+                        .execute(&mut *migration_tx)
+                        .await?;
+                    }
+                }
+            }
+
+            // Recreate tests table without the flat condition columns
+            sqlx::query("DROP TABLE IF EXISTS tests_old")
+                .execute(&mut *migration_tx).await?;
+
+            sqlx::query("ALTER TABLE tests RENAME TO tests_old")
+                .execute(&mut *migration_tx).await?;
+
+        sqlx::query(r#"CREATE TABLE tests (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id TEXT NOT NULL DEFAULT 'default',
+            name TEXT NOT NULL,
+            description TEXT,
+            rational TEXT,
+            remediation TEXT,
+            severity TEXT,
+            app_filter TEXT DEFAULT 'all',
+            filter TEXT DEFAULT 'all',
+            compliance_score REAL DEFAULT 0.0,
+            systems_passed INTEGER DEFAULT 0,
+            systems_failed INTEGER DEFAULT 0,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )"#)
+        .execute(&mut *migration_tx).await?;
+
+        sqlx::query(
+            "INSERT INTO tests (id, tenant_id, name, description, rational, remediation, severity, app_filter, filter, compliance_score, systems_passed, systems_failed)
+             SELECT id, tenant_id, name, description, rational, remediation, severity,
+                    COALESCE(app_filter, 'all'), COALESCE(filter, 'all'),
+                    COALESCE(compliance_score, 0.0), COALESCE(systems_passed, 0), COALESCE(systems_failed, 0)
+             FROM tests_old"
+        )
+        .execute(&mut *migration_tx).await?;
+
+        sqlx::query("DROP TABLE tests_old")
+            .execute(&mut *migration_tx).await?;
+
+        sqlx::query("UPDATE schema_info SET version = 4")
+            .execute(&mut *migration_tx).await?;
+
+            migration_tx.commit().await?;
+            Ok(())
+        }.await;
+
+        sqlx::query("PRAGMA foreign_keys = ON")
+            .execute(&mut *conn)
+            .await
+            .ok();
+
+        migrate_result?;
+
+        info!("Schema migration v3 → v4 complete.");
     }
 
     Ok(())

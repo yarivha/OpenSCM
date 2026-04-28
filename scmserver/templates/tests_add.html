@@ -241,7 +241,7 @@
                   </div>
 
                   <div id="conditionsContainer">
-                    {% for i in [1,2,3,4,5] %}
+                    {% for i in [1,2,3,4,5,6,7,8,9,10] %}
                     <div class="condition-row mb-3 row align-items-end shadow-sm" data-id="cond_{{ i }}" {% if i != 1 %}style="display: none;"{% endif %}>
                       <div class="col-md-2">
                         <div class="condition-label">Subject</div>
@@ -370,8 +370,8 @@
   // TEST CONDITIONS
   // ============================================================
 
-  const maxConditions = 5;
-  let usedIndexes = new Set([1]); 
+  const maxConditions = 10;
+  let usedIndexes = new Set([1]);
 
   function getNextAvailableIndex() {
     for (let i = 1; i <= maxConditions; i++) {
@@ -382,7 +382,7 @@
 
   function addCondition() {
     if (usedIndexes.size >= maxConditions) {
-      alert("Maximum of 5 conditions reached.");
+      alert("Maximum of 10 conditions reached.");
       return;
     }
     const id = getNextAvailableIndex();

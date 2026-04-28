@@ -330,10 +330,23 @@ pub async fn send(
                     }
                 };
 
-                // Attach applicability conditions to each test
+                // Attach conditions and applicability to each test
                 let mut tests_with_conditions: Vec<TestWithConditions> = Vec::new();
                 for test in tests {
                     let test_id = test.id.unwrap_or(0);
+
+                    let conditions = sqlx::query_as::<_, TestCondition>(
+                        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
+                         FROM test_conditions
+                         WHERE test_id = ? AND tenant_id = ? AND type = 'condition'
+                         ORDER BY id ASC",
+                    )
+                    .bind(test_id)
+                    .bind(tenant_id)
+                    .fetch_all(&pool)
+                    .await
+                    .unwrap_or_default();
+
                     let applicability = match sqlx::query_as::<_, TestCondition>(
                         "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
                          FROM test_conditions
@@ -345,7 +358,7 @@ pub async fn send(
                     .fetch_all(&pool)
                     .await
                     {
-                        Ok(conditions) if !conditions.is_empty() => Some(conditions),
+                        Ok(c) if !c.is_empty() => Some(c),
                         Ok(_) => None,
                         Err(e) => {
                             error!("Failed to fetch applicability conditions for test {}: {}", test_id, e);
@@ -353,7 +366,7 @@ pub async fn send(
                         }
                     };
 
-                    tests_with_conditions.push(TestWithConditions { test, applicability });
+                    tests_with_conditions.push(TestWithConditions { test, conditions, applicability });
                 }
 
                 // Clear delivered commands
