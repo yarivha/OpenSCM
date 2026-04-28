@@ -86,6 +86,9 @@ where
 pub struct LoginForm {
     username: String,
     password: String,
+    /// Optional — if provided, scopes the user lookup to that tenant (SaaS).
+    /// CE/EE leave this field absent; the query falls back to matching by username only.
+    organization: Option<String>,
 }
 
 // login
@@ -94,6 +97,9 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
     if let Some(error_message) = query.error_message {
         context.insert("error_message", &error_message);
     }
+    if let Some(success_message) = query.success_message {
+        context.insert("success_message", &success_message);
+    }
     render_template(&tera, None, "login.html", context, None).await
 }
 
@@ -101,7 +107,7 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
 
 // login_submit
 pub async fn login_submit(
-    jar: SignedCookieJar,           
+    jar: SignedCookieJar,
     Extension(pool): Extension<SqlitePool>,
     Form(form): Form<LoginForm>,
 ) -> (SignedCookieJar, Redirect) {
@@ -111,10 +117,53 @@ pub async fn login_submit(
         return (jar, Redirect::to("/login?error_message=Invalid%20Credentials"));
     }
 
-    let row = sqlx::query("SELECT password, username, id, tenant_id, role FROM users WHERE username = ?")
+    // If an organization was supplied, derive the tenant_id and verify it exists
+    let tenant_id_filter: Option<String> = if let Some(org) = form.organization.as_deref() {
+        let org = org.trim();
+        if org.is_empty() {
+            None
+        } else {
+            let tid = org.to_lowercase()
+                .chars()
+                .map(|c| if c.is_alphanumeric() { c } else { '-' })
+                .collect::<String>()
+                .trim_matches('-')
+                .to_string();
+
+            let exists: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM tenants WHERE id = ?",
+            )
+            .bind(&tid)
+            .fetch_one(&pool)
+            .await
+            .unwrap_or(0);
+
+            if exists == 0 {
+                warn!("Login attempt for unknown organization: '{}'", org);
+                return (jar, Redirect::to("/login?error_message=Organization+not+found."));
+            }
+
+            Some(tid)
+        }
+    } else {
+        None
+    };
+
+    let row = match &tenant_id_filter {
+        Some(tid) => sqlx::query(
+            "SELECT password, username, id, tenant_id, role FROM users WHERE username = ? AND tenant_id = ?",
+        )
+        .bind(&form.username)
+        .bind(tid)
+        .fetch_optional(&pool)
+        .await,
+        None => sqlx::query(
+            "SELECT password, username, id, tenant_id, role FROM users WHERE username = ?",
+        )
         .bind(&form.username)
         .fetch_optional(&pool)
-        .await;
+        .await,
+    };
 
     // Timing attack protection — always run bcrypt regardless of whether user exists
     const DUMMY_HASH: &str = "$2b$12$invalidhashfortimingprotectionXXXXXXXXXXXXXXXXXXXXXX";
