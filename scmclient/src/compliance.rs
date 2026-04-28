@@ -121,14 +121,15 @@ fn check_package_exists(package: &str) -> bool {
         .unwrap_or(false);
     if brew_cask { return true; }
 
-    // Try native macOS pkgutil (e.g. com.apple.pkg.*)
-    Command::new("pkgutil")
-        .args(["--pkg-info", package])
-        .stdout(Stdio::null())
-        .stderr(Stdio::null())
-        .status()
-        .map(|s| s.success())
-        .unwrap_or(false)
+    // Try native macOS pkgutil — scan the full package list for a match
+    if let Ok(output) = Command::new("pkgutil").args(["--pkgs"]).output() {
+        let list = String::from_utf8_lossy(&output.stdout);
+        if list.lines().any(|line| line == package || line.contains(package)) {
+            return true;
+        }
+    }
+
+    false
 }
 
 #[cfg(all(unix, not(target_os = "macos")))]
@@ -211,18 +212,16 @@ fn get_package_version(package: &str) -> Option<String> {
         }
     }
 
-    // Try pkgutil — parses "version: X.Y.Z" from its output
-    let output_pkg = Command::new("pkgutil")
-        .args(["--pkg-info", package])
-        .output()
-        .ok();
-
-    if let Some(o) = output_pkg {
-        if o.status.success() {
-            let out = String::from_utf8_lossy(&o.stdout);
-            for line in out.lines() {
-                if let Some(ver) = line.strip_prefix("version: ") {
-                    return Some(ver.trim().to_string());
+    // Try pkgutil — find matching package ID then fetch its version
+    if let Ok(list_output) = Command::new("pkgutil").args(["--pkgs"]).output() {
+        let list = String::from_utf8_lossy(&list_output.stdout);
+        if let Some(pkg_id) = list.lines().find(|l| *l == package || l.contains(package)) {
+            if let Ok(info) = Command::new("pkgutil").args(["--pkg-info", pkg_id]).output() {
+                let info_str = String::from_utf8_lossy(&info.stdout);
+                for line in info_str.lines() {
+                    if let Some(ver) = line.strip_prefix("version: ") {
+                        return Some(ver.trim().to_string());
+                    }
                 }
             }
         }
