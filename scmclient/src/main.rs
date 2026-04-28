@@ -72,10 +72,7 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         .with(fmt::layer())
         .init();
 
-    // 2. create required directories BEFORE logger init
-    check_required_directories()?;
-
-    // 3. Version and CLI args
+    // 2. Version and CLI args
     let version = env!("CARGO_PKG_VERSION");
     let args: Vec<String> = std::env::args().collect();
 
@@ -93,6 +90,9 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         }
     }
 
+	
+    // 3. create required directories BEFORE logger init
+    check_required_directories()?;
 
     // 4. Load config
     info!("Loading configuration...");
