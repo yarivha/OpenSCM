@@ -95,8 +95,13 @@ sudo yum install scmclient
 ### 🐧 Arch Linux
 
 ```bash
-# Install agent (on systems to be monitored)
-sudo pacman -U scmclient-<version>-x86_64.pkg.tar.zst
+# Import the OpenSCM signing key
+curl -sS https://repo.openscm.io/openscm.gpg -o /tmp/openscm.gpg
+sudo pacman-key --add /tmp/openscm.gpg
+sudo pacman-key --lsign-key 8A39E120F8B52DBB
+
+# Install agent directly from the repository
+sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.1.8-1_x86_64.pkg.tar.zst
 ```
 
 Packages for `x86_64`, `aarch64`, and `armv7h` are available on **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
