@@ -4,7 +4,18 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
-## [0.1.8] - 2026-04-28
+## [0.1.9] - 2026-04-28
+
+### Added
+- **Bulk actions** — Systems: approve, add to group, delete. Tests: delete, add to policy. Reports: delete. All actions operate on user-selected rows across any page of the table.
+- **Version update notifications** — server checks the GitHub releases API hourly and sends a dismissible in-app notification to all administrators when a newer version is available. Deduplicates notifications so admins are only alerted once per version.
+
+### Fixed
+- Missing tooltips on action buttons in the Tests table.
+
+---
+
+## [0.1.8] - 2026-04-14
 
 ### Added
 - **CMD element** — new test element type that runs a shell command and evaluates its output against a string condition. Disabled by default; opt in with `cmd_enabled = true` in client config so admins explicitly permit command execution on agents.

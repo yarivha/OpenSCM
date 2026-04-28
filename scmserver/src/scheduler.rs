@@ -2,6 +2,7 @@ use sqlx::{SqlitePool, Row};
 use tokio::time::{self, Duration};
 use chrono::{Utc, Timelike};
 use tracing::{info, error};
+use reqwest::Client;
 
 use crate::models::PolicySchedule;
 use crate::policies::execute_policy_run_logic;
@@ -432,9 +433,103 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                     last_snapshot_hour = current_hour;
                     info!("Hourly compliance snapshot recorded successfully.");
                 }
+
+                // --- TASK C: VERSION UPDATE CHECK ---
+                check_for_updates(&loop_pool).await;
             }
         }
     });
 }
 
 
+
+// ============================================================
+// VERSION UPDATE CHECK
+// ============================================================
+
+async fn check_for_updates(pool: &SqlitePool) {
+    let current = env!("CARGO_PKG_VERSION");
+
+    let client = match Client::builder()
+        .user_agent("OpenSCM-Server")
+        .timeout(std::time::Duration::from_secs(10))
+        .build()
+    {
+        Ok(c) => c,
+        Err(e) => { error!("Version check: failed to build HTTP client: {}", e); return; }
+    };
+
+    let resp = match client
+        .get("https://api.github.com/repos/yarivha/OpenSCM/releases/latest")
+        .send()
+        .await
+    {
+        Ok(r) => r,
+        Err(e) => { error!("Version check: request failed: {}", e); return; }
+    };
+
+    let json: serde_json::Value = match resp.json().await {
+        Ok(j) => j,
+        Err(e) => { error!("Version check: failed to parse response: {}", e); return; }
+    };
+
+    let latest_tag = match json.get("tag_name").and_then(|v| v.as_str()) {
+        Some(t) => t.trim_start_matches('v').to_string(),
+        None => { error!("Version check: tag_name missing from GitHub response"); return; }
+    };
+
+    if !is_newer(&latest_tag, current) {
+        info!("Version check: up to date ({})", current);
+        return;
+    }
+
+    info!("Version check: new version {} available (current: {})", latest_tag, current);
+
+    let msg = format!(
+        "OpenSCM {} is available. You are running {}. Visit https://openscm.io to update.",
+        latest_tag, current
+    );
+
+    // Notify all admin users in all tenants (skip if already notified about this version)
+    let admin_rows = match sqlx::query(
+        "SELECT id, tenant_id FROM users WHERE role = 'admin'",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => { error!("Version check: failed to fetch admin users: {}", e); return; }
+    };
+
+    for row in admin_rows {
+        let user_id: i32 = row.get("id");
+        let tenant_id: String = row.get("tenant_id");
+
+        // Skip if already notified about this version
+        let already: i64 = sqlx::query_scalar(
+            "SELECT COUNT(*) FROM notify WHERE owner_id = ? AND message LIKE ?",
+        )
+        .bind(user_id)
+        .bind(format!("%{}%", latest_tag))
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+
+        if already == 0 {
+            add_notification(pool, &tenant_id, "warning", user_id, &msg).await;
+        }
+    }
+}
+
+/// Returns true if `latest` is a higher semver than `current`.
+fn is_newer(latest: &str, current: &str) -> bool {
+    fn parse(v: &str) -> (u32, u32, u32) {
+        let parts: Vec<u32> = v.split('.').filter_map(|p| p.parse().ok()).collect();
+        (
+            parts.first().copied().unwrap_or(0),
+            parts.get(1).copied().unwrap_or(0),
+            parts.get(2).copied().unwrap_or(0),
+        )
+    }
+    parse(latest) > parse(current)
+}

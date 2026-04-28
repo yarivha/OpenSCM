@@ -1,6 +1,6 @@
 [package]
 name = "scmserver"
-version = "0.1.8"
+version = "0.1.9"
 edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "FSL-1.1-ALv2"
@@ -42,6 +42,7 @@ time = "0.3"
 genpdf = { version = "0.2.0", features = ["images"] }
 hkdf = "0.12"
 sha2 = "0.10"
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"
