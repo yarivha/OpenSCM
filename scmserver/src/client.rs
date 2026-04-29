@@ -498,15 +498,17 @@ pub async fn receive_result(
         payload.client_id, tenant_id, payload.test_id
     );
 
-    let db_pubkey = match sqlx::query_scalar::<_, String>(
-        "SELECT key FROM systems WHERE id = ? AND tenant_id = ?",
+    // H-new-1: Fetch key AND status together — denied/pending agents must not be able
+    // to submit results even if they still hold valid signing keys from a prior active period.
+    let auth_check = match sqlx::query_as::<_, AuthCheck>(
+        "SELECT key, status FROM systems WHERE id = ? AND tenant_id = ?",
     )
     .bind(payload.client_id)
     .bind(tenant_id)
     .fetch_optional(&pool)
     .await
     {
-        Ok(Some(k)) => k,
+        Ok(Some(a)) => a,
         Ok(None) => {
             warn!(
                 "Result Rejected: Unknown Agent ID {} for tenant '{}'.",
@@ -531,7 +533,53 @@ pub async fn receive_result(
         }
     };
 
-    if let Err(err) = verify_signature(payload, &signed_req.signature, &db_pubkey) {
+    // Reject results from agents that are not active/approved
+    match auth_check.status.as_deref().unwrap_or("pending") {
+        "active" | "approved" => {}
+        "denied" => {
+            warn!(
+                "Result Rejected: Agent ID {} (Tenant: '{}') is denied.",
+                payload.client_id, tenant_id
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Agent is denied"})),
+            )
+                .into_response();
+        }
+        _ => {
+            warn!(
+                "Result Rejected: Agent ID {} (Tenant: '{}') is pending approval.",
+                payload.client_id, tenant_id
+            );
+            return (
+                StatusCode::FORBIDDEN,
+                Json(serde_json::json!({"error": "Agent not yet approved"})),
+            )
+                .into_response();
+        }
+    }
+
+    // H-new-2: Validate result value — only PASS/FAIL/NA are meaningful;
+    // an agent cannot write arbitrary strings into the compliance results table.
+    let normalized_result = match payload.result.to_uppercase().as_str() {
+        "PASS" => "PASS",
+        "FAIL" => "FAIL",
+        "NA"   => "NA",
+        other  => {
+            warn!(
+                "Result Rejected: Agent ID {} sent invalid result value '{}'.",
+                payload.client_id, other
+            );
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid result value"})),
+            )
+                .into_response();
+        }
+    };
+
+    if let Err(err) = verify_signature(payload, &signed_req.signature, &auth_check.key) {
         error!(
             "SECURITY ALERT: Invalid signature on results from Agent ID {} (Tenant: '{}'): {}",
             payload.client_id, tenant_id, err
@@ -558,7 +606,7 @@ pub async fn receive_result(
     .bind(tenant_id)
     .bind(payload.client_id)
     .bind(payload.test_id)
-    .bind(&payload.result)
+    .bind(normalized_result)
     .bind(&now)
     .execute(&pool)
     .await
@@ -576,7 +624,7 @@ pub async fn receive_result(
 
     info!(
         "Result stored: Agent ID {} | Test ID {} | Result: {} (Tenant: '{}')",
-        payload.client_id, payload.test_id, payload.result, tenant_id
+        payload.client_id, payload.test_id, normalized_result, tenant_id
     );
 
     let _ = sync_tx.send(()).await;
