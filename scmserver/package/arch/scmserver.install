@@ -1,4 +1,7 @@
-#!/bin/sh
+#!/bin/bash
+# Arch Linux install script for scmserver.
+# Pacman calls post_install() on fresh install, post_upgrade() on update,
+# and pre_remove() / post_remove() on uninstall.
 
 APP_NAME="scmserver"
 CONFIG_DIR="/etc/openscm"
@@ -6,58 +9,43 @@ KEYS_DIR="/etc/openscm/keys"
 DATA_DIR="/var/lib/openscm"
 LOG_DIR="/var/log/openscm"
 OLD_DB="/etc/openscm/scm.db"
-OLD_BIN="/opt/openscm/scmserver"
 
-# $1 values by package manager:
-#   Debian/Ubuntu : "configure" (both fresh install and upgrade)
-#   RPM (dnf/yum) : "1" (install) or "2" (upgrade)
-#   Arch (pacman) : version string, e.g. "0.1.8" — match with the grep below
-if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ] || \
-   echo "$1" | grep -qE '^[0-9]+\.[0-9]+'; then
-
-    # 1. Create system user if not exists
+_setup_dirs() {
+    # Create system user if not present
     if ! id -u openscm > /dev/null 2>&1; then
         useradd --system --no-create-home --shell /bin/false openscm
     fi
 
-    # 2. Create directories
-    mkdir -p "$CONFIG_DIR"
-    mkdir -p "$KEYS_DIR"
-    mkdir -p "$DATA_DIR"
-    mkdir -p "$LOG_DIR"
+    mkdir -p "$CONFIG_DIR" "$KEYS_DIR" "$DATA_DIR" "$LOG_DIR"
 
-    # 3. Set permissions
     chmod 755 "$CONFIG_DIR"
     chmod 700 "$KEYS_DIR"
     chmod 750 "$DATA_DIR"
     chmod 755 "$LOG_DIR"
 
-    # 4. Set ownership
     chown -R openscm:openscm "$CONFIG_DIR"
     chown -R openscm:openscm "$DATA_DIR"
     chown -R openscm:openscm "$LOG_DIR"
+}
 
-    # 5. Migrate database from old location (pre 0.1.2)
+_migrate_db() {
     if [ -f "$OLD_DB" ] && [ ! -f "$DATA_DIR/scm.db" ]; then
         echo "Migrating database from $OLD_DB to $DATA_DIR/scm.db ..."
         cp "$OLD_DB" "$DATA_DIR/scm.db"
         chown openscm:openscm "$DATA_DIR/scm.db"
         chmod 640 "$DATA_DIR/scm.db"
-        echo "Database migrated successfully."
-        echo "Old database preserved at $OLD_DB — remove manually when satisfied."
+        echo "Database migrated. Old file preserved at $OLD_DB — remove manually."
     fi
+}
 
-    # 6. Stop old service if binary exists in old location (pre 0.1.2)
-    if [ -f "$OLD_BIN" ]; then
-        echo "Detected old installation at $OLD_BIN"
-        systemctl stop "$APP_NAME.service" >/dev/null 2>&1 || true
-    fi
+post_install() {
+    _setup_dirs
+    _migrate_db
 
-    # 7. Enable and start service
     if [ -d /run/systemd/system ]; then
-        systemctl --system daemon-reload >/dev/null 2>&1 || true
-        systemctl enable "$APP_NAME.service" >/dev/null 2>&1 || true
-        systemctl restart "$APP_NAME.service" >/dev/null 2>&1 || true
+        systemctl daemon-reload
+        systemctl enable  "$APP_NAME.service"
+        systemctl start   "$APP_NAME.service"
     fi
 
     echo "============================================================"
@@ -73,6 +61,30 @@ if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ] || \
     echo "  CHANGE THE DEFAULT PASSWORD IMMEDIATELY"
     echo ""
     echo "============================================================"
-fi
+}
 
-exit 0
+post_upgrade() {
+    _setup_dirs
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload
+        systemctl restart "$APP_NAME.service"
+    fi
+}
+
+pre_remove() {
+    if [ -d /run/systemd/system ]; then
+        systemctl stop    "$APP_NAME.service" >/dev/null 2>&1 || true
+        systemctl disable "$APP_NAME.service" >/dev/null 2>&1 || true
+    fi
+}
+
+post_remove() {
+    # Database and keys are preserved so reinstall does not lose data.
+    rm -f "$CONFIG_DIR/scmserver.config"
+    rm -rf "$LOG_DIR"
+
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+}
