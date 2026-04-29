@@ -112,8 +112,11 @@ pub async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
 // 6. Initialisation guard middleware
 // Redirects every request to /install when the DB has not been set up yet,
 // and redirects /install to /login once setup is complete.
+// NOTE: called via closure in create_core_router so the Arc is captured
+// directly rather than extracted from an Extension (which would not be
+// available at the outermost middleware layer).
 async fn init_guard(
-    Extension(is_initialized): Extension<Arc<AtomicBool>>,
+    is_initialized: Arc<AtomicBool>,
     request: axum::extract::Request,
     next: middleware::Next,
 ) -> axum::response::Response {
@@ -197,7 +200,12 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .layer(Extension(state.tera))
         .layer(Extension(state.config))
         .layer(Extension(state.sync_tx))
-        .layer(Extension(state.is_initialized))
-        .layer(middleware::from_fn(init_guard))
+        .layer({
+            let flag = state.is_initialized.clone();
+            middleware::from_fn(move |req, next| {
+                let flag = flag.clone();
+                async move { init_guard(flag, req, next).await }
+            })
+        })
         .with_state(cookie_key)
 }
