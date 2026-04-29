@@ -1,4 +1,4 @@
-use std::{sync::Arc, str::FromStr, net::SocketAddr, fs, error::Error};
+use std::{sync::{Arc, atomic::{AtomicBool}}, str::FromStr, net::SocketAddr, fs, error::Error};
 use tracing::{info, error, debug};
 use tracing_subscriber::{fmt, EnvFilter, registry, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use base64::{Engine as _, engine::general_purpose};
@@ -94,8 +94,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cookie_key = axum_extra::extract::cookie::Key::from(&cookie_key_bytes);
 
-    // 5. Database Initialization
-    let database_url = format!("sqlite://{}", db_path());
+    // 5. Database — connect (creates file if absent) then initialise only if the
+    //    file already existed.  A brand-new file means first-run: the /install
+    //    page will call initialize_database() after the admin sets a password.
+    let db_file = db_path();
+    let db_existed = std::path::Path::new(db_file).exists();
+
+    let database_url = format!("sqlite://{}", db_file);
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true);
 
@@ -104,11 +109,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect_with(options)
         .await?;
 
-    sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
-    initialize_database(&pool).await?;
-    run_migrations(&pool).await?;
+    if db_existed {
+        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
+        initialize_database(&pool).await?;
+        run_migrations(&pool).await?;
+    } else {
+        info!("Fresh install detected — waiting for setup via /install");
+    }
 
     // 6. Background Workers
+    // The compliance-sync worker is always started; it only runs queries when
+    // triggered via sync_tx, which only happens from authenticated routes —
+    // so it stays safely idle until after the install is complete.
     let (sync_tx, mut sync_rx) = mpsc::channel::<()>(100);
     let worker_pool = pool.clone();
 
@@ -122,7 +134,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    start_background_scheduler(pool.clone()).await;
+    // The background scheduler (heartbeat + startup compliance sync) is only
+    // started now when the DB already existed; on a fresh install the /install
+    // handler starts it after setup completes.
+    if db_existed {
+        start_background_scheduler(pool.clone()).await;
+    }
 
     // 7. Assemble Application State
     // We wrap things in Arc here to share them between the Core and potential SaaS wrappers
@@ -131,6 +148,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tera: Arc::new(init_tera()?),
         config: Arc::new(config),
         sync_tx,
+        is_initialized: Arc::new(AtomicBool::new(db_existed)),
     };
 
     let port: u16 = state.config.server.port.as_deref()

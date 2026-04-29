@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>OpenSCM — Setup</title>
+  <link rel="stylesheet" href="/plugins/fontawesome-free/css/all.min.css">
+  <link rel="stylesheet" href="/plugins/bootstrap/css/bootstrap.min.css">
+  <style>
+    body {
+      background: #1a1a2e;
+      min-height: 100vh;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-family: 'Segoe UI', sans-serif;
+    }
+    .setup-card {
+      background: #fff;
+      border-radius: 12px;
+      box-shadow: 0 8px 40px rgba(0,0,0,0.35);
+      padding: 2.5rem 2.5rem 2rem;
+      width: 100%;
+      max-width: 440px;
+    }
+    .setup-logo {
+      text-align: center;
+      margin-bottom: 1.5rem;
+    }
+    .setup-logo i { font-size: 2.8rem; color: #007bff; }
+    .setup-logo h2 { font-weight: 700; margin-top: .4rem; color: #1a1a2e; }
+    .setup-logo p  { color: #6c757d; font-size: .9rem; margin: 0; }
+    .step-badge {
+      display: inline-block;
+      background: #e9f0ff;
+      color: #007bff;
+      border-radius: 20px;
+      padding: 2px 12px;
+      font-size: .78rem;
+      font-weight: 600;
+      margin-bottom: 1.2rem;
+    }
+    .form-label { font-weight: 600; font-size: .88rem; color: #343a40; }
+    .form-control:focus { border-color: #007bff; box-shadow: 0 0 0 .2rem rgba(0,123,255,.2); }
+    .btn-setup {
+      background: linear-gradient(135deg, #007bff, #0056b3);
+      border: none;
+      font-weight: 600;
+      letter-spacing: .03em;
+      padding: .65rem;
+      font-size: 1rem;
+    }
+    .btn-setup:hover { background: linear-gradient(135deg, #0069d9, #004494); }
+    .hint { font-size: .78rem; color: #6c757d; margin-top: .25rem; }
+  </style>
+</head>
+<body>
+  <div class="setup-card">
+
+    <div class="setup-logo">
+      <i class="fas fa-shield-alt"></i>
+      <h2>OpenSCM</h2>
+      <p>Security Compliance Manager</p>
+    </div>
+
+    <div class="text-center"><span class="step-badge">First-Run Setup</span></div>
+
+    {% if error_message %}
+    <div class="alert alert-danger py-2 mb-3" role="alert">
+      <i class="fas fa-exclamation-circle mr-1"></i> {{ error_message }}
+    </div>
+    {% endif %}
+
+    <p class="text-muted mb-4" style="font-size:.88rem;">
+      No database was found. Set an admin password to complete the installation.
+      You can change it later from the <strong>Admin Settings</strong> page.
+    </p>
+
+    <form method="post" action="/install">
+
+      <div class="form-group">
+        <label class="form-label" for="password">
+          <i class="fas fa-lock mr-1 text-primary"></i>Admin Password
+        </label>
+        <input type="password" id="password" name="password"
+               class="form-control" placeholder="Choose a strong password"
+               autocomplete="new-password" required>
+        <div class="hint">Minimum 8 characters.</div>
+      </div>
+
+      <div class="form-group">
+        <label class="form-label" for="confirm_password">
+          <i class="fas fa-lock mr-1 text-primary"></i>Confirm Password
+        </label>
+        <input type="password" id="confirm_password" name="confirm_password"
+               class="form-control" placeholder="Repeat the password"
+               autocomplete="new-password" required>
+      </div>
+
+      <button type="submit" class="btn btn-setup btn-primary btn-block mt-4">
+        <i class="fas fa-rocket mr-2"></i>Complete Setup
+      </button>
+
+    </form>
+
+  </div>
+
+  <script src="/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>

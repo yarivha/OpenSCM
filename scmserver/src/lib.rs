@@ -13,10 +13,12 @@ pub mod reports;
 pub mod users;
 pub mod settings;
 pub mod scheduler;
+pub mod install;
 
 // 2. Imports needed for the public API
-use std::{sync::Arc, path::PathBuf, error::Error};
+use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, path::PathBuf, error::Error};
 use axum::{Router, Extension, response::IntoResponse, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
+use axum::middleware;
 use tera::Tera;
 use include_dir::{include_dir, Dir};
 use tracing::info;
@@ -33,6 +35,8 @@ pub struct AppState {
     pub tera: Arc<Tera>,
     pub config: Arc<config::Config>,
     pub sync_tx: tokio::sync::mpsc::Sender<()>,
+    /// False on a brand-new install until /install setup completes.
+    pub is_initialized: Arc<AtomicBool>,
 }
 
 // 5. Utility functions moved from main.rs
@@ -105,9 +109,42 @@ pub async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
     }
 }
 
-// 6. The pluggable Core Router
+// 6. Initialisation guard middleware
+// Redirects every request to /install when the DB has not been set up yet,
+// and redirects /install to /login once setup is complete.
+async fn init_guard(
+    Extension(is_initialized): Extension<Arc<AtomicBool>>,
+    request: axum::extract::Request,
+    next: middleware::Next,
+) -> axum::response::Response {
+    let path = request.uri().path().to_owned();
+    let initialized = is_initialized.load(Ordering::SeqCst);
+
+    // Let static assets through unconditionally (needed for the install page CSS/JS)
+    let is_asset = path.starts_with("/static/") || {
+        let p = path.as_str();
+        p.ends_with(".css") || p.ends_with(".js") || p.ends_with(".png")
+            || p.ends_with(".ico") || p.ends_with(".svg") || p.ends_with(".woff2")
+    };
+
+    if is_asset {
+        return next.run(request).await;
+    }
+
+    if !initialized && path != "/install" {
+        return axum::response::Redirect::to("/install").into_response();
+    }
+    if initialized && path == "/install" {
+        return axum::response::Redirect::to("/login").into_response();
+    }
+
+    next.run(request).await
+}
+
+// 7. The pluggable Core Router
 pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
     Router::new()
+        .route("/install", get(install::install_get).post(install::install_post))
         .route("/", get(dashboard::dashboard))
         .route("/login", get(auth::login).post(auth::login_submit))
         .route("/logout", get(auth::logout))
@@ -160,5 +197,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .layer(Extension(state.tera))
         .layer(Extension(state.config))
         .layer(Extension(state.sync_tx))
+        .layer(Extension(state.is_initialized))
+        .layer(middleware::from_fn(init_guard))
         .with_state(cookie_key)
 }
