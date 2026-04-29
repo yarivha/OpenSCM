@@ -414,7 +414,7 @@ pub async fn policies_edit(
 
     // Fetch scan schedule
     let schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        "SELECT id, tenant_id, policy_id, enabled, frequency, cron_expression, next_run, last_run
+        "SELECT id, tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run, last_run
          FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'scan'",
     )
     .bind(id)
@@ -425,7 +425,7 @@ pub async fn policies_edit(
 
     // Fetch report schedule
     let report_schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        "SELECT id, tenant_id, policy_id, enabled, frequency, cron_expression, next_run, last_run
+        "SELECT id, tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run, last_run
          FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'report'",
     )
     .bind(id)
@@ -557,8 +557,11 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Upsert auto-scan schedule (M6: UTC for scheduler consistency)
-    let scan_start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
+    // Upsert auto-scan schedule (M6: UTC for scheduler consistency).
+    // Only override next_run when the user explicitly provides a new value; otherwise
+    // preserve what the scheduler last wrote so we don't reset a future firing time.
+    let scan_explicit_next_run = next_run.filter(|s| !s.is_empty());
+    let scan_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
     if let Err(e) = sqlx::query(r#"
         INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
         VALUES (?, ?, 'scan', ?, ?, ?, ?)
@@ -566,9 +569,14 @@ pub async fn policies_edit_save(
             enabled = excluded.enabled,
             frequency = excluded.frequency,
             cron_expression = excluded.cron_expression,
-            next_run = excluded.next_run
+            next_run = CASE WHEN excluded.next_run != '' THEN excluded.next_run ELSE next_run END
     "#)
-    .bind(&auth.tenant_id).bind(id).bind(schedule_enabled).bind(&frequency).bind(&cron_val).bind(&scan_start_time)
+    .bind(&auth.tenant_id)
+    .bind(id)
+    .bind(schedule_enabled)
+    .bind(&frequency)
+    .bind(&cron_val)
+    .bind(scan_explicit_next_run.as_deref().unwrap_or(&scan_default_next_run))
     .execute(&mut *tx).await
     {
         let encoded = urlencoding::encode(&format!("Schedule update error: {}", e)).to_string();
@@ -576,8 +584,10 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Upsert auto-report schedule (M6: UTC for scheduler consistency)
-    let report_start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
+    // Upsert auto-report schedule (M6: UTC for scheduler consistency).
+    // Same next_run preservation logic as scan schedule above.
+    let report_explicit_next_run = report_next_run.filter(|s| !s.is_empty());
+    let report_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
     if let Err(e) = sqlx::query(r#"
         INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
         VALUES (?, ?, 'report', ?, ?, ?, ?)
@@ -585,9 +595,14 @@ pub async fn policies_edit_save(
             enabled = excluded.enabled,
             frequency = excluded.frequency,
             cron_expression = excluded.cron_expression,
-            next_run = excluded.next_run
+            next_run = CASE WHEN excluded.next_run != '' THEN excluded.next_run ELSE next_run END
     "#)
-    .bind(&auth.tenant_id).bind(id).bind(report_schedule_enabled).bind(&report_frequency).bind(&report_cron_val).bind(&report_start_time)
+    .bind(&auth.tenant_id)
+    .bind(id)
+    .bind(report_schedule_enabled)
+    .bind(&report_frequency)
+    .bind(&report_cron_val)
+    .bind(report_explicit_next_run.as_deref().unwrap_or(&report_default_next_run))
     .execute(&mut *tx).await
     {
         let encoded = urlencoding::encode(&format!("Report schedule update error: {}", e)).to_string();
