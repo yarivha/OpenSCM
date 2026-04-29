@@ -200,7 +200,8 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .layer(Extension(state.tera))
         .layer(Extension(state.config))
         .layer(Extension(state.sync_tx))
-        .layer({
+        .layer(Extension(state.is_initialized.clone()))   // available to handlers
+        .layer({                                           // middleware uses closure, not Extension
             let flag = state.is_initialized.clone();
             middleware::from_fn(move |req, next| {
                 let flag = flag.clone();
