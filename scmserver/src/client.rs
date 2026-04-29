@@ -548,7 +548,7 @@ pub async fn receive_result(
         payload.client_id, tenant_id
     );
 
-    let now = chrono::Utc::now().to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
     if let Err(e) = sqlx::query(
         r#"INSERT INTO results (tenant_id, system_id, test_id, result, last_updated)
            VALUES (?, ?, ?, ?, ?)

@@ -5,14 +5,14 @@ use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
+use std::collections::HashMap;
 use urlencoding;
 use tracing::{info, error};
 use bytes::Bytes;
 
 use crate::models::{ErrorQuery, Test, TestWithConditions, TestCondition, Element, SElement, Condition, UserRole, AuthSession};
 use crate::auth::{self};
-use crate::handlers::render_template;
-use crate::handlers::parse_form_data;
+use crate::handlers::{render_template, parse_form_data};
 
 
 // ============================================================
@@ -47,7 +47,7 @@ async fn fetch_lookup_tables(
 
 /// Extract basic test metadata fields from parsed form data.
 fn extract_test_metadata(
-    form_data: &std::collections::HashMap<String, Vec<String>>,
+    form_data: &HashMap<String, Vec<String>>,
 ) -> Result<(String, String, String, String, String, String, String), String> {
     let name = form_data
         .get("name")
@@ -75,7 +75,7 @@ fn extract_test_metadata(
 /// Extract up to `max` test conditions from parsed form data.
 /// Skips rows where element is empty or placeholder.
 fn extract_conditions_from_form(
-    form_data: &std::collections::HashMap<String, Vec<String>>,
+    form_data: &HashMap<String, Vec<String>>,
     max: usize,
 ) -> Vec<(String, String, String, Option<String>, Option<String>)> {
     let mut result = Vec::new();

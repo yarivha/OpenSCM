@@ -276,11 +276,12 @@ pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Er
         .await?;
 
         let systems_score  = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-        let systems_score = (systems_score * 100.0).round() / 100.0; 
+        let systems_score = (systems_score * 100.0).round() / 100.0;
         let policies_score = pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-        let policies_score = (policies_score * 100.0).round() / 100.0; 
-        let total_systems  = sys_stats.try_get::<i32, _>("total").unwrap_or(0);
-        let total_policies = pol_stats.try_get::<i32, _>("total").unwrap_or(0);
+        let policies_score = (policies_score * 100.0).round() / 100.0;
+        // COUNT(*) returns i64 in SQLite — use i64 to avoid overflow
+        let total_systems  = sys_stats.try_get::<i64, _>("total").unwrap_or(0);
+        let total_policies = pol_stats.try_get::<i64, _>("total").unwrap_or(0);
 
         sqlx::query(r#"
             INSERT INTO compliance_history (

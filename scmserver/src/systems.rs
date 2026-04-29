@@ -13,8 +13,7 @@ use chrono::{DateTime, Utc};
 
 use crate::models::{ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession};
 use crate::auth::{self};
-use crate::handlers::render_template;
-use crate::handlers::parse_form_data;
+use crate::handlers::{render_template, parse_form_data};
 
 
 // ============================================================
@@ -118,14 +117,9 @@ pub async fn systems(
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: Some(
-                row.try_get::<DateTime<Utc>, _>("created_date")
-                    .unwrap_or_else(|_| Utc::now()),
-            ),
-            last_seen: Some(
-                row.try_get::<DateTime<Utc>, _>("last_seen")
-                    .unwrap_or_else(|_| Utc::now()),
-            ),
+            // Use .ok() so a NULL/unparseable timestamp becomes None instead of Utc::now()
+            created_date: row.try_get::<DateTime<Utc>, _>("created_date").ok(),
+            last_seen: row.try_get::<DateTime<Utc>, _>("last_seen").ok(),
         })
         .collect();
 
@@ -491,14 +485,8 @@ pub async fn systems_pending(
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: Some(
-                row.try_get::<DateTime<Utc>, _>("created_date")
-                    .unwrap_or_else(|_| Utc::now()),
-            ),
-            last_seen: Some(
-                row.try_get::<DateTime<Utc>, _>("last_seen")
-                    .unwrap_or_else(|_| Utc::now()),
-            ),
+            created_date: row.try_get::<DateTime<Utc>, _>("created_date").ok(),
+            last_seen: row.try_get::<DateTime<Utc>, _>("last_seen").ok(),
         })
         .collect();
 

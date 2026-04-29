@@ -159,8 +159,6 @@ fn validate_and_setup_keys(config: &mut Config) -> Result<(), Box<dyn Error>> {
 
 // --- Config Implementation ---
 
-// --- Config Implementation ---
-
 impl Config {
     pub fn load() -> Result<Self, Box<dyn Error>> {
         cfg_if! {

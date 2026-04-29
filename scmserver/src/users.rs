@@ -108,26 +108,17 @@ pub async fn users_add_save(
         return redir;
     }
 
-    let mut tx = match pool.begin().await {
-        Ok(tx) => tx,
-        Err(e) => {
-            let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
-            return Redirect::to(&format!("/users?error_message={}", encoded)).into_response();
-        }
-    };
-
     let raw_string = match String::from_utf8(raw_form.0.to_vec()) {
         Ok(s) => s,
         Err(e) => {
             let encoded = urlencoding::encode(&format!("Invalid form encoding: {}", e)).to_string();
-            tx.rollback().await.ok();
             return Redirect::to(&format!("/users?error_message={}", encoded)).into_response();
         }
     };
 
     let form_data = parse_form_data(&raw_string);
 
-    // Validate required fields
+    // Validate required fields BEFORE opening a transaction
     let username = match form_data.get("username").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
         Some(v) => v.to_string(),
         None => return Redirect::to("/users/add?error_message=Username+is+required").into_response(),
@@ -138,9 +129,22 @@ pub async fn users_add_save(
         None => return Redirect::to("/users/add?error_message=Password+must+be+at+least+8+characters").into_response(),
     };
 
-    let role = match form_data.get("role").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
+    let role_raw = match form_data.get("role").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
         Some(v) => v.to_string(),
         None => return Redirect::to("/users/add?error_message=Role+is+required").into_response(),
+    };
+    // Validate against known roles to prevent arbitrary strings being stored
+    let role = match role_raw.to_lowercase().as_str() {
+        "admin" | "editor" | "runner" | "viewer" => role_raw,
+        _ => return Redirect::to("/users/add?error_message=Invalid+role+selected").into_response(),
+    };
+
+    let mut tx = match pool.begin().await {
+        Ok(tx) => tx,
+        Err(e) => {
+            let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+            return Redirect::to(&format!("/users?error_message={}", encoded)).into_response();
+        }
     };
 
     let name = form_data

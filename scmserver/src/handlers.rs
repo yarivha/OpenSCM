@@ -136,7 +136,7 @@ pub fn parse_form_data(raw_string: &str) -> HashMap<String, Vec<String>> {
 
             form_data
                 .entry(key_decoded)
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push(value_decoded);
         }
     }
@@ -158,7 +158,7 @@ pub async fn add_notification(
     owner_id: i32,
     message: &str,
 ) {
-    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M").to_string();
+    let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 
     if let Err(e) = sqlx::query(
         "INSERT INTO notify (tenant_id, type, timestamp, owner_id, message) VALUES (?, ?, ?, ?, ?)",
