@@ -67,17 +67,18 @@ pub async fn install_post(
         };
     }
 
-    // --- Override the default "admin" password with the one chosen by the user ---
+    // --- Create the admin user with the chosen password ---
     match hash(password, DEFAULT_COST) {
         Ok(hashed) => {
             if let Err(e) = sqlx::query(
-                "UPDATE users SET password = ? WHERE username = 'admin' AND tenant_id = 'default'"
+                "INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
+                 VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'admin')"
             )
             .bind(hashed)
             .execute(&pool)
             .await
             {
-                error!("install: failed to set admin password: {}", e);
+                error!("install: failed to create admin user: {}", e);
             }
         }
         Err(e) => {

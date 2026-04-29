@@ -1,8 +1,7 @@
 // src/schema.rs
 use sqlx::SqlitePool;
 use sqlx::Row;
-use bcrypt::{hash, DEFAULT_COST};
-use tracing::{info, error};
+use tracing::info;
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use base64::{engine::general_purpose, Engine as _};
@@ -403,21 +402,9 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
-    // Insert default admin user if it doesn't exist
-    let hashed_password = hash("admin", DEFAULT_COST)
-    .map_err(|e| {
-        error!("Failed to hash default admin password: {}", e);
-        sqlx::Error::Protocol(e.to_string())
-    })?;
-
-
-    sqlx::query(
-    "INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
-     VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'admin')",
-    )
-    .bind(hashed_password)
-    .execute(pool)
-    .await?;
+    // NOTE: the admin user is NOT seeded here.
+    // It is created by the /install handler with the password chosen by the
+    // administrator. This ensures no default credentials ever exist on disk.
    
 
     // Inset Default Settings
