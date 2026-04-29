@@ -669,17 +669,11 @@ pub async fn system_groups_add_save(
         }
     };
 
-    let description = match form_data
+    let description: Option<String> = form_data
         .get("description")
         .and_then(|v| v.first())
         .filter(|s| !s.is_empty())
-    {
-        Some(d) => d.clone(),
-        None => {
-            return Redirect::to("/system_groups?error_message=Description+is+required")
-                .into_response();
-        }
-    };
+        .cloned();
 
     let systems: Option<Vec<String>> = form_data.get("systems").cloned();
 
@@ -956,17 +950,11 @@ pub async fn system_groups_edit_save(
         }
     };
 
-    let description = match form_data
+    let description: Option<String> = form_data
         .get("description")
         .and_then(|v| v.first())
         .filter(|s| !s.is_empty())
-    {
-        Some(d) => d.clone(),
-        None => {
-            return Redirect::to("/system_groups?error_message=Description+is+required")
-                .into_response();
-        }
-    };
+        .cloned();
 
     let systems: Option<Vec<String>> = form_data.get("systems").cloned();
 
