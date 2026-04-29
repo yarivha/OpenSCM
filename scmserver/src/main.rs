@@ -14,7 +14,7 @@ use scmserver::{
     init_tera, 
     check_required_directories,
     config::{Config, private_key_path, db_path},
-    schema::{initialize_database, run_migrations},
+    schema::run_migrations,
     scheduler::{start_background_scheduler, recalculate_current_compliance},
 };
 
@@ -94,13 +94,18 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let cookie_key = axum_extra::extract::cookie::Key::from(&cookie_key_bytes);
 
-    // 5. Database — connect (creates file if absent) then initialise only if the
-    //    file already existed.  A brand-new file means first-run: the /install
-    //    page will call initialize_database() after the admin sets a password.
-    let db_file = db_path();
-    let db_existed = std::path::Path::new(db_file).exists();
-
-    let database_url = format!("sqlite://{}", db_file);
+    // 5. Database
+    // Connect (creates an empty file if none exists).
+    // Whether the DB is truly initialised is determined by the presence of the
+    // schema_info table — NOT by the file's existence.  This avoids the trap
+    // where the SQLite file is created on first connect but the schema hasn't
+    // been set up yet, which would cause initialize_database to be skipped on
+    // the next restart and leave the DB in an inconsistent state.
+    //
+    // Rule: initialize_database() is ONLY ever called from the /install handler
+    // (triggered by the admin clicking "Complete Setup").  On subsequent starts
+    // run_migrations() is sufficient.
+    let database_url = format!("sqlite://{}", db_path());
     let options = SqliteConnectOptions::from_str(&database_url)?
         .create_if_missing(true);
 
@@ -109,9 +114,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .connect_with(options)
         .await?;
 
-    if db_existed {
+    // Detect real initialisation: schema_info table exists and has a row.
+    let db_initialized: bool = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_info'"
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0) > 0;
+
+    if db_initialized {
         sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
-        initialize_database(&pool).await?;
         run_migrations(&pool).await?;
     } else {
         info!("Fresh install detected — waiting for setup via /install");
@@ -119,8 +131,8 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // 6. Background Workers
     // The compliance-sync worker is always started; it only runs queries when
-    // triggered via sync_tx, which only happens from authenticated routes —
-    // so it stays safely idle until after the install is complete.
+    // triggered via sync_tx (from authenticated routes), so it stays idle until
+    // after the install is complete.
     let (sync_tx, mut sync_rx) = mpsc::channel::<()>(100);
     let worker_pool = pool.clone();
 
@@ -134,10 +146,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
         }
     });
 
-    // The background scheduler (heartbeat + startup compliance sync) is only
-    // started now when the DB already existed; on a fresh install the /install
-    // handler starts it after setup completes.
-    if db_existed {
+    // Background scheduler only starts when the DB is already initialised; the
+    // /install handler starts it after a fresh setup.
+    if db_initialized {
         start_background_scheduler(pool.clone()).await;
     }
 
@@ -148,7 +159,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         tera: Arc::new(init_tera()?),
         config: Arc::new(config),
         sync_tx,
-        is_initialized: Arc::new(AtomicBool::new(db_existed)),
+        is_initialized: Arc::new(AtomicBool::new(db_initialized)),
     };
 
     let port: u16 = state.config.server.port.as_deref()
