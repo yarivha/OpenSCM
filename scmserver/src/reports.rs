@@ -129,7 +129,7 @@ pub async fn save_policy_report_logic(
         remediation: row.get("remediation"),
     }).collect();
 
-    // Fetch system results
+    // Fetch system results — tenant_id is enforced on every join (M2 tenant isolation fix).
     let raw_results = sqlx::query(r#"
         SELECT
             s.name AS system_name,
@@ -137,8 +137,8 @@ pub async fn save_policy_report_logic(
             res.result AS status_text
         FROM tests_in_policy tip
         JOIN tests t ON tip.test_id = t.id
-        JOIN results res ON t.id = res.test_id
-        JOIN systems s ON res.system_id = s.id
+        JOIN results res ON t.id = res.test_id AND res.tenant_id = tip.tenant_id
+        JOIN systems s ON res.system_id = s.id AND s.tenant_id = tip.tenant_id
         WHERE tip.policy_id = ? AND tip.tenant_id = ?
     "#)
     .bind(id)
@@ -462,8 +462,9 @@ pub async fn reports_download(
         );
         doc.push(elements::Break::new(0.5));
 
+        // M5: Count only FAIL results as violations — NA results are not failures.
         let compliant_count = system.results.iter().filter(|r| r.status == "PASS").count();
-        let violation_count = system.results.len() - compliant_count;
+        let violation_count = system.results.iter().filter(|r| r.status == "FAIL").count();
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));

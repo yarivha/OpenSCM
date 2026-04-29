@@ -9,7 +9,7 @@ use std::sync::Arc;
 use urlencoding;
 use std::collections::BTreeMap;
 use tracing::{info, error};
-use chrono::Local;
+use chrono::{Local, Utc};
 use genpdf::{fonts, elements, style, Element};
 
 use crate::models::{
@@ -286,7 +286,8 @@ pub async fn policies_add_save(
 
     // Insert auto-scan schedule if enabled
     if schedule_enabled {
-        let start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
+        // M6: Use UTC so the scheduler (which also uses UTC) compares apples to apples.
+        let start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
         if let Err(e) = sqlx::query(
             "INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
              VALUES (?, ?, 'scan', ?, ?, ?, ?)",
@@ -308,7 +309,7 @@ pub async fn policies_add_save(
 
     // Insert auto-report schedule if enabled
     if report_schedule_enabled {
-        let start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
+        let start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
         if let Err(e) = sqlx::query(
             "INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
              VALUES (?, ?, 'report', ?, ?, ?, ?)",
@@ -556,8 +557,8 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Upsert auto-scan schedule
-    let scan_start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
+    // Upsert auto-scan schedule (M6: UTC for scheduler consistency)
+    let scan_start_time = next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
     if let Err(e) = sqlx::query(r#"
         INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
         VALUES (?, ?, 'scan', ?, ?, ?, ?)
@@ -575,8 +576,8 @@ pub async fn policies_edit_save(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
-    // Upsert auto-report schedule
-    let report_start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Local::now().format("%Y-%m-%dT%H:%M").to_string());
+    // Upsert auto-report schedule (M6: UTC for scheduler consistency)
+    let report_start_time = report_next_run.filter(|s| !s.is_empty()).unwrap_or_else(|| Utc::now().format("%Y-%m-%dT%H:%M").to_string());
     if let Err(e) = sqlx::query(r#"
         INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
         VALUES (?, ?, 'report', ?, ?, ?, ?)

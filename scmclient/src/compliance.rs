@@ -412,9 +412,12 @@ fn apply_string_condition(actual: &str, condition: &str, expected: &str) -> bool
         "equals" | "equal"           => actual.to_lowercase() == expected.to_lowercase(),
         "not equals" | "not equal"   => actual.to_lowercase() != expected.to_lowercase(),
         "regular expression" | "regex" => {
+            // M3: The `regex` crate guarantees linear-time matching (no ReDoS).
+            // size_limit caps automaton memory; dfa_size_limit caps DFA cache growth.
             match regex::RegexBuilder::new(expected)
                 .multi_line(true)
                 .size_limit(1_000_000)
+                .dfa_size_limit(500_000)
                 .build()
             {
                 Ok(re) => re.is_match(actual),

@@ -8,6 +8,7 @@ use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
 use tracing::info;
+use urlencoding;
 
 use crate::models::{ErrorQuery, UserRole, AuthSession};
 use crate::auth;
@@ -80,10 +81,34 @@ pub async fn settings_save(
     let raw_string = String::from_utf8_lossy(&raw_form).to_string();
     let form_data = parse_form_data(&raw_string);
 
-    let updates = vec![
-        ("offline_threshold",   form_data.get("offline_threshold").and_then(|v| v.first()).cloned().unwrap_or_default()),
-        ("compliance_sat",      form_data.get("compliance_sat").and_then(|v| v.first()).cloned().unwrap_or_default()),
-        ("compliance_marginal", form_data.get("compliance_marginal").and_then(|v| v.first()).cloned().unwrap_or_default()),
+    // M7: Validate numeric settings before persisting.
+    let raw_threshold = form_data.get("offline_threshold").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_sat       = form_data.get("compliance_sat").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_marginal  = form_data.get("compliance_marginal").and_then(|v| v.first()).cloned().unwrap_or_default();
+
+    let threshold: i64 = match raw_threshold.parse() {
+        Ok(v) if v >= 60 => v,
+        _ => return Redirect::to("/settings?error_message=Offline+threshold+must+be+a+number+%E2%89%A560+seconds").into_response(),
+    };
+
+    let sat: i64 = match raw_sat.parse() {
+        Ok(v) if (0..=100).contains(&v) => v,
+        _ => return Redirect::to("/settings?error_message=Compliance+satisfied+threshold+must+be+0-100").into_response(),
+    };
+
+    let marginal: i64 = match raw_marginal.parse() {
+        Ok(v) if (0..=100).contains(&v) => v,
+        _ => return Redirect::to("/settings?error_message=Compliance+marginal+threshold+must+be+0-100").into_response(),
+    };
+
+    if marginal >= sat {
+        return Redirect::to("/settings?error_message=Marginal+threshold+must+be+less+than+Satisfied+threshold").into_response();
+    }
+
+    let updates: Vec<(&str, String)> = vec![
+        ("offline_threshold",   threshold.to_string()),
+        ("compliance_sat",      sat.to_string()),
+        ("compliance_marginal", marginal.to_string()),
     ];
 
     for (key, value) in updates {

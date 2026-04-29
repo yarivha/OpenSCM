@@ -1,6 +1,7 @@
 use axum::{extract::Extension, http::StatusCode, response::IntoResponse, Json};
 use tokio::sync::mpsc;
-use sqlx::SqlitePool;
+use sqlx::{SqlitePool, QueryBuilder};
+use std::collections::HashMap;
 use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
@@ -254,6 +255,16 @@ pub async fn send(
             }
         };
 
+        // M8: Check denied BEFORE signature verification — no benefit verifying a denied agent,
+        // and doing so leaks status information (denied → 200 vs pending → 200 vs bad sig → 401).
+        if auth.status.as_deref() == Some("denied") {
+            info!("Agent ID {} is denied — request rejected without signature check.", id);
+            response_data = serde_json::json!({
+                "status": "denied",
+                "command": "NONE"
+            });
+        } else {
+
         debug!("Verifying signature for Agent ID {} (Tenant: {}).", id, tenant_id);
         if let Err(err) = verify_signature(payload, &signed_req.signature, &auth.key) {
             warn!(
@@ -330,42 +341,43 @@ pub async fn send(
                     }
                 };
 
-                // Attach conditions and applicability to each test
+                // M1: Batch-fetch ALL conditions for ALL tests in one query instead of N+1.
+                let test_ids: Vec<i64> = tests.iter().map(|t| t.id.unwrap_or(0) as i64).collect();
+
+                let all_conditions: Vec<TestCondition> = if test_ids.is_empty() {
+                    vec![]
+                } else {
+                    let mut qb = QueryBuilder::new(
+                        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
+                         FROM test_conditions WHERE tenant_id = ",
+                    );
+                    qb.push_bind(tenant_id);
+                    qb.push(" AND test_id IN (");
+                    let mut sep = qb.separated(", ");
+                    for tid in &test_ids { sep.push_bind(*tid); }
+                    qb.push(") ORDER BY test_id ASC, id ASC");
+
+                    qb.build_query_as::<TestCondition>()
+                        .fetch_all(&pool)
+                        .await
+                        .unwrap_or_else(|e| {
+                            error!("Failed to batch-fetch conditions for agent {}: {}", id, e);
+                            vec![]
+                        })
+                };
+
+                // Group by (test_id, type)
+                let mut cond_map: HashMap<(i64, &str), Vec<TestCondition>> = HashMap::new();
+                for c in all_conditions {
+                    let key = (c.test_id, if c.r#type == "applicability" { "applicability" } else { "condition" });
+                    cond_map.entry(key).or_default().push(c);
+                }
+
                 let mut tests_with_conditions: Vec<TestWithConditions> = Vec::new();
                 for test in tests {
-                    let test_id = test.id.unwrap_or(0);
-
-                    let conditions = sqlx::query_as::<_, TestCondition>(
-                        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
-                         FROM test_conditions
-                         WHERE test_id = ? AND tenant_id = ? AND type = 'condition'
-                         ORDER BY id ASC",
-                    )
-                    .bind(test_id)
-                    .bind(tenant_id)
-                    .fetch_all(&pool)
-                    .await
-                    .unwrap_or_default();
-
-                    let applicability = match sqlx::query_as::<_, TestCondition>(
-                        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
-                         FROM test_conditions
-                         WHERE test_id = ? AND tenant_id = ? AND type = 'applicability'
-                         ORDER BY id ASC",
-                    )
-                    .bind(test_id)
-                    .bind(tenant_id)
-                    .fetch_all(&pool)
-                    .await
-                    {
-                        Ok(c) if !c.is_empty() => Some(c),
-                        Ok(_) => None,
-                        Err(e) => {
-                            error!("Failed to fetch applicability conditions for test {}: {}", test_id, e);
-                            None
-                        }
-                    };
-
+                    let test_id = test.id.unwrap_or(0) as i64;
+                    let conditions = cond_map.remove(&(test_id, "condition")).unwrap_or_default();
+                    let applicability = cond_map.remove(&(test_id, "applicability")).filter(|v| !v.is_empty());
                     tests_with_conditions.push(TestWithConditions { test, conditions, applicability });
                 }
 
@@ -430,15 +442,8 @@ pub async fn send(
                 }
             }
 
-            "denied" => {
-                info!("Agent ID {} is denied.", id);
-                response_data = serde_json::json!({
-                    "status": "denied",
-                    "command": "NONE"
-                });
-            }
-
             _ => {
+                // Pending (or any other unrecognised status): update last_seen only.
                 if let Err(e) = sqlx::query(
                     "UPDATE systems SET last_seen=CURRENT_TIMESTAMP WHERE id=? AND tenant_id=?",
                 )
@@ -456,7 +461,8 @@ pub async fn send(
                 });
             }
         }
-    }
+        } // end else (not denied)
+    } // end else (id > 0 heartbeat path)
 
     // Sign and return response
     match sign_response(&pool, tenant_id, response_data).await {

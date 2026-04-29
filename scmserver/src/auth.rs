@@ -206,6 +206,10 @@ pub async fn login_submit(
             cookie.set_http_only(true);
             cookie.set_same_site(SameSite::Lax);
             cookie.set_max_age(time::Duration::hours(8));
+            // M4: set_secure(true) is the correct production setting; kept false here so that
+            // plain-HTTP deployments behind a reverse proxy continue to work.
+            // Set this to true when the server is directly exposed over HTTPS.
+            cookie.set_secure(false);
 
             info!("User '{}' logged in successfully for tenant '{}'", username, tenant_id);
             return (jar.add(cookie), Redirect::to("/"));
