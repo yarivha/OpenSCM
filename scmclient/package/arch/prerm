@@ -1,0 +1,9 @@
+#!/bin/sh
+# Arch Linux pre-remove script (used by nfpm).
+
+APP_NAME="scmclient"
+
+if [ -d /run/systemd/system ]; then
+    systemctl stop    "$APP_NAME.service" >/dev/null 2>&1 || true
+    systemctl disable "$APP_NAME.service" >/dev/null 2>&1 || true
+fi

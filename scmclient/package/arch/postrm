@@ -1,0 +1,13 @@
+#!/bin/sh
+# Arch Linux post-remove script (used by nfpm).
+# Keys are preserved so reinstall does not require re-registration.
+
+CONFIG_DIR="/etc/openscm"
+LOG_DIR="/var/log/openscm"
+
+rm -f "$CONFIG_DIR/scmclient.config"
+rm -rf "$LOG_DIR"
+
+if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload >/dev/null 2>&1 || true
+fi
