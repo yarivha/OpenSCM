@@ -109,7 +109,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(
         "SELECT name as system_name, os, compliance_score as compliance, 
         tests_passed, tests_failed,
-        total_tests - tests_passed - tests_failed as tests_na
+        MAX(0, total_tests - tests_passed - tests_failed) as tests_na
         FROM systems WHERE status='active' AND tenant_id = ? 
         AND compliance_score >= 0 ORDER BY compliance_score ASC LIMIT 5"
     )

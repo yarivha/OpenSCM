@@ -331,9 +331,15 @@ fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
             }
         };
         for entry in dir.filter_map(|e| e.ok()) {
-            if entry.path().is_file() {
-                if check_file_content(entry.path().to_str().unwrap_or(""), condition, expected) {
-                    return true;
+            let path = entry.path();
+            if path.is_file() {
+                // Skip entries whose paths are not valid UTF-8; passing an
+                // empty string to check_file_content would silently open ""
+                // (which fails) rather than skipping the entry cleanly.
+                if let Some(path_str) = path.to_str() {
+                    if check_file_content(path_str, condition, expected) {
+                        return true;
+                    }
                 }
             }
         }

@@ -188,20 +188,11 @@ pub async fn login_submit(
     if password_valid {
         if let Some(row) = maybe_row {
             let username: String = row.get("username");
-            let userid_raw: i32 = row.get("id");
+            let userid: i32 = row.get("id");
             let role: String = row.get("role");
 
             let tenant_id: String = row.try_get::<String, _>("tenant_id")
                 .unwrap_or_else(|_| "default".to_string());
-
-            // Treat invalid userid as auth failure instead of defaulting to 0
-            let userid = match userid_raw.to_string().parse::<i32>() {
-                Ok(id) => id,
-                Err(_) => {
-                    error!("Invalid userid in database for user: '{}'", username);
-                    return (jar, Redirect::to("/login?error_message=Invalid%20Credentials"));
-                }
-            };
 
             let session_data = json!({
                 "username": username,

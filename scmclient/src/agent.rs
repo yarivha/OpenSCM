@@ -202,15 +202,6 @@ async fn process_compliance_tests(
 
                 debug!("Test ID {} is_applicable: {}", test_id, is_applicable);
 
-
-                let is_applicable = match test.app_filter.as_deref().unwrap_or("all") {
-                    "any" => app_results.iter().any(|r| *r == EvalResult::Pass),
-                    _ => {
-                        app_results.iter().all(|r| *r == EvalResult::Pass || *r == EvalResult::Na)
-                        && app_results.iter().any(|r| *r == EvalResult::Pass)
-                    }
-                };
-
                 if !is_applicable {
                     debug!("Test ID {} is not applicable — sending NA.", test_id);
                     send_result(client_id_int, tenant_id, test_id, "NA", signing_key, http_client, result_url).await;

@@ -670,18 +670,40 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             }
 
             // Drop the 25 flat columns using ALTER TABLE DROP COLUMN (SQLite 3.35+).
-            // This avoids the rename-recreate pattern which corrupts FK statement
-            // caches in other pool connections.
-            for col in [
-                "element_1","input_1","selement_1","condition_1","sinput_1",
-                "element_2","input_2","selement_2","condition_2","sinput_2",
-                "element_3","input_3","selement_3","condition_3","sinput_3",
-                "element_4","input_4","selement_4","condition_4","sinput_4",
-                "element_5","input_5","selement_5","condition_5","sinput_5",
+            // Each statement is a literal string — no string interpolation — to
+            // avoid any future regression where a column name could become
+            // user-controlled.
+            for sql in [
+                "ALTER TABLE tests DROP COLUMN element_1",
+                "ALTER TABLE tests DROP COLUMN input_1",
+                "ALTER TABLE tests DROP COLUMN selement_1",
+                "ALTER TABLE tests DROP COLUMN condition_1",
+                "ALTER TABLE tests DROP COLUMN sinput_1",
+                "ALTER TABLE tests DROP COLUMN element_2",
+                "ALTER TABLE tests DROP COLUMN input_2",
+                "ALTER TABLE tests DROP COLUMN selement_2",
+                "ALTER TABLE tests DROP COLUMN condition_2",
+                "ALTER TABLE tests DROP COLUMN sinput_2",
+                "ALTER TABLE tests DROP COLUMN element_3",
+                "ALTER TABLE tests DROP COLUMN input_3",
+                "ALTER TABLE tests DROP COLUMN selement_3",
+                "ALTER TABLE tests DROP COLUMN condition_3",
+                "ALTER TABLE tests DROP COLUMN sinput_3",
+                "ALTER TABLE tests DROP COLUMN element_4",
+                "ALTER TABLE tests DROP COLUMN input_4",
+                "ALTER TABLE tests DROP COLUMN selement_4",
+                "ALTER TABLE tests DROP COLUMN condition_4",
+                "ALTER TABLE tests DROP COLUMN sinput_4",
+                "ALTER TABLE tests DROP COLUMN element_5",
+                "ALTER TABLE tests DROP COLUMN input_5",
+                "ALTER TABLE tests DROP COLUMN selement_5",
+                "ALTER TABLE tests DROP COLUMN condition_5",
+                "ALTER TABLE tests DROP COLUMN sinput_5",
             ] {
-                sqlx::query(&format!("ALTER TABLE tests DROP COLUMN {}", col))
-                    .execute(&mut *migration_tx)
-                    .await?;
+                // Column may already be absent if a previous partial migration
+                // dropped some columns before crashing — ignore that error and
+                // continue so the migration is re-entrant.
+                let _ = sqlx::query(sql).execute(&mut *migration_tx).await;
             }
         }
 

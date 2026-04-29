@@ -68,22 +68,37 @@ pub async fn install_post(
     }
 
     // --- Create the admin user with the chosen password ---
-    match hash(password, DEFAULT_COST) {
-        Ok(hashed) => {
-            if let Err(e) = sqlx::query(
-                "INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
-                 VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'admin')"
-            )
-            .bind(hashed)
-            .execute(&pool)
-            .await
-            {
-                error!("install: failed to create admin user: {}", e);
-            }
-        }
+    // Both bcrypt failure and INSERT failure are fatal: if the admin user cannot
+    // be created the installation is incomplete.  Render the error page rather
+    // than proceeding to set is_initialized = true with no usable admin account.
+    let hashed = match hash(password, DEFAULT_COST) {
+        Ok(h) => h,
         Err(e) => {
             error!("install: bcrypt error: {}", e);
+            let mut ctx = Context::new();
+            ctx.insert("error_message", "Failed to hash password. Check server logs.");
+            return match tera.render("install.html", &ctx) {
+                Ok(html) => Html(html).into_response(),
+                Err(_)   => Html("<h1>Template error</h1>".to_string()).into_response(),
+            };
         }
+    };
+
+    if let Err(e) = sqlx::query(
+        "INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
+         VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'admin')"
+    )
+    .bind(hashed)
+    .execute(&pool)
+    .await
+    {
+        error!("install: failed to create admin user: {}", e);
+        let mut ctx = Context::new();
+        ctx.insert("error_message", "Failed to create admin user. Check server logs.");
+        return match tera.render("install.html", &ctx) {
+            Ok(html) => Html(html).into_response(),
+            Err(_)   => Html("<h1>Template error</h1>".to_string()).into_response(),
+        };
     }
 
     // --- Run migrations (fresh DB starts at v4, so this is effectively a no-op) ---
@@ -94,7 +109,7 @@ pub async fn install_post(
     // --- Start background scheduler ---
     start_background_scheduler(pool).await;
 
-    // --- Mark as initialised ---
+    // --- Mark as initialised — only reached if admin user was created successfully ---
     is_initialized.store(true, Ordering::SeqCst);
 
     Redirect::to("/login").into_response()
