@@ -1,7 +1,8 @@
 #!/bin/bash
 # Post-install script — runs AFTER the Payload (binary + plist) is extracted.
-# The service was already stopped by preinstall, so we only need to fix
-# permissions and start the new binary.
+# We do a defensive bootout here before bootstrap: with KeepAlive:true, launchd
+# may have re-bootstrapped the service between preinstall and now, which would
+# cause bootstrap to fail and leave the old binary running.
 
 LABEL="io.openscm.scmclient"
 PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
@@ -19,7 +20,16 @@ LOG_DIR="/var/log/openscm"
 /usr/sbin/chown root:wheel "$PLIST_PATH"
 /bin/chmod 644 "$PLIST_PATH"
 
-# --- 3. Enable + start the service ---
+# --- 3. Stop any running instance before loading the new binary ---
+# KeepAlive:true means launchd may have re-bootstrapped the service between
+# preinstall and now. If we call bootstrap while it is already in the domain
+# the call fails and the old binary keeps running.  Bootout here is
+# unconditional and harmless if the service is not currently loaded.
+echo "Stopping $LABEL (if running)..."
+/bin/launchctl bootout system/"$LABEL" 2>/dev/null || true
+/bin/sleep 2
+
+# --- 4. Enable + start the service ---
 echo "Starting $LABEL service..."
 
 # Enable ensures the service starts even if it was previously disabled
