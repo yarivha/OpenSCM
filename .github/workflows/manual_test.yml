@@ -36,7 +36,6 @@ jobs:
         uses: dtolnay/rust-toolchain@stable
 
       - name: Force Install Targets
-        # This bypasses the rust-toolchain.toml override issue
         run: |
           rustup target add ${{ matrix.target }}
           rustup component add rust-src --toolchain stable-x86_64-unknown-linux-gnu
@@ -47,33 +46,50 @@ jobs:
       - name: Install Build Tools
         run: |
           cargo install cargo-zigbuild
+          # Install nFPM and explicitly add its path to the GitHub Environment
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
 
       - name: Version Audit
         id: version_check
         run: |
-          # Look inside the app-specific directory for the version
-          APP_DIR="${{ github.event.inputs.app_name == 'server' && 'scmserver' || 'scmclient' }}"
-          VERSION=$(grep -m 1 '^version =' $APP_DIR/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          # Robust search for Cargo.toml version
+          APP_NAME_INPUT="${{ github.event.inputs.app_name }}"
           
-          echo "Detected Version in $APP_DIR: $VERSION"
+          # Try root first, then the scmserver/scmclient subfolders
+          if [ -f "Cargo.toml" ]; then
+             V_FILE="Cargo.toml"
+          elif [ -f "scmserver/Cargo.toml" ] && [ "$APP_NAME_INPUT" == "server" ]; then
+             V_FILE="scmserver/Cargo.toml"
+          elif [ -f "scmclient/Cargo.toml" ] && [ "$APP_NAME_INPUT" == "client" ]; then
+             V_FILE="scmclient/Cargo.toml"
+          else
+             # Search for any Cargo.toml as a last resort
+             V_FILE=$(find . -name Cargo.toml -not -path "*/target/*" | head -n 1)
+          fi
+          
+          VERSION=$(grep -m 1 '^version =' "$V_FILE" | sed 's/.*"\(.*\)".*/\1/')
+          echo "Detected Version in $V_FILE: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
           echo "RUN_ID=${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Compile Binary
         run: |
-          # Building from the subfolder workspace member
+          # Use scmserver (for -bin naming) or scmclient based on input
           APP_MEMBER="${{ github.event.inputs.app_name == 'server' && 'scmserver' || 'scmclient' }}"
           cargo zigbuild --release --target ${{ matrix.target }} -p $APP_MEMBER
 
       - name: Generate Package (nFPM)
         run: |
           APP_MEMBER="${{ github.event.inputs.app_name == 'server' && 'scmserver' || 'scmclient' }}"
+          
+          # These variables are passed into your nfpm.yaml
           export VERSION=${{ env.VERSION }}
           export RELEASE=${{ env.RUN_ID }}
           export ARCH=${{ matrix.arch }}
           
           mkdir -p dist
+          # nFPM is now in the PATH thanks to the Install step
           nfpm pkg --packager archlinux \
             --config config/${APP_MEMBER}-${{ matrix.target }}.yaml \
             --target ./dist/
