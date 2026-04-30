@@ -101,7 +101,7 @@ sudo pacman-key --add /tmp/openscm.gpg
 sudo pacman-key --lsign-key 8A39E120F8B52DBB
 
 # Install agent directly from the repository
-sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.1.8-1_x86_64.pkg.tar.zst
+sudo pacman -U https://repo.openscm.io/stable/arch/scmclient_0.2.0-1_x86_64.pkg.tar.zst
 ```
 
 Packages for `x86_64`, `aarch64`, and `armv7h` are available on **[openscm.io/start/downloads](https://openscm.io/start/downloads/)**.
@@ -146,7 +146,7 @@ docker run -d \
 
 After installation, access the dashboard at **http://your-server:8000**
 
-Default credentials: `admin` / `admin` — **change immediately after first login.**
+On first visit, a setup screen will guide you through creating your admin account.
 
 > For production deployments, run the server behind a reverse proxy (Nginx, Caddy)
 > with HTTPS enabled. See [openscm.io](https://openscm.io) for details.
