@@ -1,10 +1,14 @@
 name: OpenSCM Manual Build Test
 
+# Silences the Node.js 20 deprecation warnings by forcing the runner to Node 24
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+
 on:
   workflow_dispatch:
     inputs:
       app_name:
-        description: 'Target to Build'
+        description: 'Target to Build (client or server)'
         required: true
         default: 'client'
         type: choice
@@ -12,7 +16,7 @@ on:
           - client
           - server
       stage:
-        description: 'Stage'
+        description: 'Build Stage'
         required: true
         default: 'testing'
         type: choice
@@ -28,6 +32,7 @@ jobs:
       fail-fast: false
       matrix:
         include:
+          # Targets for your systems development
           - target: "aarch64-unknown-linux-musl"
             arch: "aarch64"
           - target: "x86_64-unknown-linux-musl"
@@ -53,17 +58,19 @@ jobs:
       - name: Version Audit
         id: version_check
         run: |
-          # Detect version directly from Cargo.toml
+          # Kill the "Version Ghost" by detecting version directly from Cargo.toml
           VERSION=$(grep -m 1 '^version =' Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           echo "Detected Version: $VERSION"
           echo "VERSION=$VERSION" >> $GITHUB_ENV
+          # Uses the GitHub run number as the release ID
           echo "RUN_ID=${{ github.run_number }}" >> $GITHUB_ENV
 
       - name: Compile Binary
         run: |
-          # Uses scmserver-bin logic if 'server' is selected
-          # -p flag ensures we build the correct member of your workspace
-          cargo zigbuild --release --target ${{ matrix.target }} -p ${{ github.event.inputs.app_name == 'server' && 'scmserver' || 'scmclient' }}
+          # Handles your scmserver-bin naming convention
+          # Logic: if app_name is 'server', build the 'scmserver' package member
+          APP_MEMBER=${{ github.event.inputs.app_name == 'server' && 'scmserver' || 'scmclient' }}
+          cargo zigbuild --release --target ${{ matrix.target }} -p $APP_MEMBER
 
       - name: Generate Package (nFPM)
         run: |
@@ -73,6 +80,7 @@ jobs:
           export ARCH=${{ matrix.arch }}
           
           mkdir -p dist
+          # Points to your existing nFPM configurations
           nfpm pkg --packager archlinux \
             --config config/${APP_NAME}-${{ matrix.target }}.yaml \
             --target ./dist/
