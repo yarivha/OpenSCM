@@ -2,6 +2,7 @@
 <pkg-info format-version="2" identifier="${IDENTIFIER}" version="${VERSION}" install-location="/" auth="root">
     <payload installKBytes="${INSTALL_KBYTES}" numberOfFiles="${FILE_COUNT}"/>
     <scripts>
+        <preinstall file="preinstall"/>
         <postinstall file="postinstall"/>
     </scripts>
 </pkg-info>

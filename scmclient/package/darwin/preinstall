@@ -1,0 +1,24 @@
+#!/bin/bash
+# Pre-install script — runs BEFORE the Payload (binary) is extracted.
+# Stopping the service here ensures the old binary is not held open when
+# the installer places the new one, and eliminates any race with launchd's
+# KeepAlive restart logic.
+
+LABEL="io.openscm.scmclient"
+PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
+
+# Only attempt to stop if the plist exists (i.e. this is an upgrade, not a fresh install)
+if [ -f "$PLIST_PATH" ]; then
+    echo "Stopping $LABEL before upgrade..."
+
+    # Modern bootout (macOS 10.11+)
+    /bin/launchctl bootout system/"$LABEL" 2>/dev/null || true
+
+    # Legacy fallback for services originally loaded with 'launchctl load'
+    /bin/launchctl unload "$PLIST_PATH" 2>/dev/null || true
+
+    # Give launchd time to fully reap the process before the Payload lands
+    /bin/sleep 2
+fi
+
+exit 0

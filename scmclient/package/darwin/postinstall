@@ -1,42 +1,35 @@
 #!/bin/bash
+# Post-install script — runs AFTER the Payload (binary + plist) is extracted.
+# The service was already stopped by preinstall, so we only need to fix
+# permissions and start the new binary.
 
-# --- 1. Variables ---
 LABEL="io.openscm.scmclient"
 PLIST_PATH="/Library/LaunchDaemons/${LABEL}.plist"
 BINARY_PATH="/usr/local/bin/scmclient"
 LOG_DIR="/var/log/openscm"
 
-# --- 2. Environment Setup ---
-# Ensure log directories exist (Installer creates files, but not extra paths)
+# --- 1. Ensure directories exist ---
 /bin/mkdir -p "$LOG_DIR"
 /bin/chmod 755 "$LOG_DIR"
 
-# --- 3. Fix Permissions (Critical for macOS Security) ---
-# LaunchDaemons WILL fail to load if permissions are too loose
+# --- 2. Fix permissions (LaunchDaemons WILL refuse to load with loose perms) ---
 /usr/sbin/chown root:wheel "$BINARY_PATH"
 /bin/chmod 755 "$BINARY_PATH"
 
 /usr/sbin/chown root:wheel "$PLIST_PATH"
 /bin/chmod 644 "$PLIST_PATH"
 
-# --- 4. The "Recycle" Logic ---
-echo "Recycling $LABEL service..."
+# --- 3. Enable + start the service ---
+echo "Starting $LABEL service..."
 
-# A. Try the modern 'bootout' by service label (most reliable for upgrades)
-/bin/launchctl bootout system/$LABEL 2>/dev/null || true
+# Enable ensures the service starts even if it was previously disabled
+# (e.g. via 'launchctl disable' or 'launchctl unload -w' in an older install).
+/bin/launchctl enable system/"$LABEL" 2>/dev/null || true
 
-# B. Try the legacy 'unload' by path as a fallback
-/bin/launchctl unload "$PLIST_PATH" 2>/dev/null || true
-
-# C. Give the kernel a moment to fully release the PID and file handles
-/bin/sleep 2
-
-# D. Start the new version using modern 'bootstrap'
-/bin/launchctl bootstrap system "$PLIST_PATH"
-
-# E. Fallback to 'load' if bootstrap isn't available (older macOS)
-if [ $? -ne 0 ]; then
-    /bin/launchctl load -w "$PLIST_PATH"
+# Bootstrap loads the plist into the system domain and starts the process.
+if ! /bin/launchctl bootstrap system "$PLIST_PATH"; then
+    echo "Warning: launchctl bootstrap failed, attempting legacy load..."
+    /bin/launchctl load -w "$PLIST_PATH" 2>/dev/null || true
 fi
 
 exit 0
