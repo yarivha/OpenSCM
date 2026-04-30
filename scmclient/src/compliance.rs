@@ -148,7 +148,7 @@ fn check_package_exists(package: &str) -> bool {
         }
     }
 
-    // Try rpm (RHEL/Fedora/openSUSE)
+    // Try rpm (RHEL/Fedora/openSUSE — zypper uses rpm under the hood)
     let rpm = Command::new("rpm")
         .args(["-q", package])
         .stdout(Stdio::null())
@@ -157,21 +157,6 @@ fn check_package_exists(package: &str) -> bool {
         .map(|s| s.success())
         .unwrap_or(false);
     if rpm { return true; }
-
-    // Try zypper (openSUSE) — handles cases where the zypper package name
-    // differs from the underlying RPM name (e.g. "libssl1_1" vs "libopenssl1_1").
-    // `zypper info` exits 0 and prints "Installed : Yes" when installed.
-    if let Ok(output) = Command::new("zypper")
-        .args(["--non-interactive", "info", package])
-        .output()
-    {
-        let stdout = String::from_utf8_lossy(&output.stdout);
-        let installed = stdout.lines().any(|line| {
-            let l = line.trim().to_lowercase();
-            l.starts_with("installed") && l.contains("yes")
-        });
-        if installed { return true; }
-    }
 
     // Try pacman (Arch Linux)
     Command::new("pacman")
@@ -260,7 +245,7 @@ fn get_package_version(package: &str) -> Option<String> {
         }
     }
 
-    // Try rpm (RHEL/Fedora/openSUSE)
+    // Try rpm (RHEL/Fedora/openSUSE — zypper uses rpm under the hood)
     let output_rpm = Command::new("rpm")
         .args(["-q", "--queryformat", "%{VERSION}", package])
         .output()
@@ -269,35 +254,6 @@ fn get_package_version(package: &str) -> Option<String> {
     if let Some(o) = output_rpm {
         if o.status.success() {
             return Some(String::from_utf8_lossy(&o.stdout).trim().to_string());
-        }
-    }
-
-    // Try zypper (openSUSE) — fallback for packages whose zypper name differs
-    // from their RPM name.  `zypper info` returns a line like:
-    //   "Version        : 1.24.0-bp155.2.1"
-    // The part after the '-' is the openSUSE release tag, not the upstream
-    // version, so we strip it before returning.
-    if let Ok(output) = Command::new("zypper")
-        .args(["--non-interactive", "info", package])
-        .output()
-    {
-        if output.status.success() {
-            let stdout = String::from_utf8_lossy(&output.stdout);
-            for line in stdout.lines() {
-                let trimmed = line.trim();
-                if trimmed.to_lowercase().starts_with("version") {
-                    if let Some(raw_ver) = trimmed.splitn(2, ':').nth(1) {
-                        let raw_ver = raw_ver.trim();
-                        // Strip the openSUSE release tag (everything from the
-                        // first '-' onward), keeping only the upstream version.
-                        // e.g. "1.24.0-bp155.2.1" → "1.24.0"
-                        let ver = raw_ver.split('-').next().unwrap_or(raw_ver);
-                        if !ver.is_empty() {
-                            return Some(ver.to_string());
-                        }
-                    }
-                }
-            }
         }
     }
 
