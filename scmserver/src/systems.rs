@@ -617,6 +617,7 @@ pub async fn system_groups_add(
 }
 
 
+
 pub async fn system_groups_add_save(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
@@ -639,38 +640,40 @@ pub async fn system_groups_add_save(
     let raw_string = match String::from_utf8(bytes.to_vec()) {
         Ok(s) => s,
         Err(e) => {
-            let encoded =
-                urlencoding::encode(&format!("Invalid form encoding: {}", e)).to_string();
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded))
-                .into_response();
+            let encoded = urlencoding::encode(&format!("Invalid form encoding: {}", e)).to_string();
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
         }
     };
 
     let form_data = parse_form_data(&raw_string);
 
-    // Validate required fields
+    // Validate name
     let name = match form_data.get("name").and_then(|v| v.first()).filter(|s| !s.is_empty()) {
         Some(n) => n.clone(),
         None => {
-            return Redirect::to("/system_groups?error_message=Group+name+is+required")
-                .into_response();
+            return Redirect::to("/system_groups?error_message=Group+name+is+required").into_response();
         }
     };
 
-    let description: Option<String> = form_data
+    // --- FIX STARTS HERE ---
+    // Instead of .filter(!s.is_empty()) which creates a None (NULL),
+    // we use unwrap_or_default() to ensure we ALWAYS have a String.
+    let description: String = form_data
         .get("description")
         .and_then(|v| v.first())
-        .filter(|s| !s.is_empty())
-        .cloned();
+        .cloned()
+        .unwrap_or_default(); 
+    // --- FIX ENDS HERE ---
 
     let systems: Option<Vec<String>> = form_data.get("systems").cloned();
 
+    // The bind now sends a String (possibly "") instead of Option<String>
     let result = sqlx::query(
         "INSERT INTO system_groups (tenant_id, name, description) VALUES (?, ?, ?)",
     )
     .bind(&auth.tenant_id)
     .bind(&name)
-    .bind(&description)
+    .bind(&description) 
     .execute(&mut *tx)
     .await;
 
@@ -679,11 +682,11 @@ pub async fn system_groups_add_save(
         Err(e) => {
             let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
             tx.rollback().await.ok();
-            return Redirect::to(&format!("/system_groups?error_message={}", encoded))
-                .into_response();
+            return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
         }
     };
 
+    // Process systems association
     if let Some(system_ids) = systems {
         for system_id_str in system_ids {
             match system_id_str.parse::<i32>() {
@@ -697,24 +700,15 @@ pub async fn system_groups_add_save(
                     .execute(&mut *tx)
                     .await
                     {
-                        let encoded =
-                            urlencoding::encode(&format!("Failed to add system to group: {}", e))
-                                .to_string();
+                        let encoded = urlencoding::encode(&format!("Failed to add system: {}", e)).to_string();
                         tx.rollback().await.ok();
-                        return Redirect::to(&format!(
-                            "/system_groups?error_message={}",
-                            encoded
-                        ))
-                        .into_response();
+                        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
                     }
                 }
                 Err(_) => {
-                    let encoded =
-                        urlencoding::encode(&format!("Invalid system ID: {}", system_id_str))
-                            .to_string();
+                    let encoded = urlencoding::encode(&format!("Invalid system ID: {}", system_id_str)).to_string();
                     tx.rollback().await.ok();
-                    return Redirect::to(&format!("/system_groups?error_message={}", encoded))
-                        .into_response();
+                    return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
                 }
             }
         }
@@ -728,6 +722,7 @@ pub async fn system_groups_add_save(
     info!("System group '{}' created by '{}'.", name, auth.username);
     Redirect::to("/system_groups").into_response()
 }
+
 
 
 pub async fn system_groups_delete(
@@ -895,6 +890,7 @@ pub async fn system_groups_edit(
 }
 
 
+
 pub async fn system_groups_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -929,7 +925,7 @@ pub async fn system_groups_edit_save(
 
     let form_data = parse_form_data(&raw_string);
 
-    // Validate required fields
+    // Validate name
     let name = match form_data.get("name").and_then(|v| v.first()).filter(|s| !s.is_empty()) {
         Some(n) => n.clone(),
         None => {
@@ -938,19 +934,22 @@ pub async fn system_groups_edit_save(
         }
     };
 
-    let description: Option<String> = form_data
+    // --- FIX: Ensure description is NEVER NULL ---
+    // Removed .filter(|s| !s.is_empty()) so empty strings stay empty strings
+    let description: String = form_data
         .get("description")
         .and_then(|v| v.first())
-        .filter(|s| !s.is_empty())
-        .cloned();
+        .cloned()
+        .unwrap_or_default();
 
     let systems: Option<Vec<String>> = form_data.get("systems").cloned();
 
+    // Update the group details
     if let Err(e) = sqlx::query(
         "UPDATE system_groups SET name = ?, description = ? WHERE id = ? AND tenant_id = ?",
     )
     .bind(&name)
-    .bind(&description)
+    .bind(&description) // Binding the String directly
     .bind(id)
     .bind(&auth.tenant_id)
     .execute(&mut *tx)
@@ -961,6 +960,7 @@ pub async fn system_groups_edit_save(
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
+    // Clear existing associations
     if let Err(e) = sqlx::query("DELETE FROM systems_in_groups WHERE group_id = ? AND tenant_id = ?")
         .bind(id)
         .bind(&auth.tenant_id)
@@ -973,6 +973,7 @@ pub async fn system_groups_edit_save(
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
+    // Re-add selected systems
     if let Some(system_ids) = systems {
         for system_id_str in system_ids {
             match system_id_str.parse::<i32>() {
@@ -1004,8 +1005,7 @@ pub async fn system_groups_edit_save(
         }
     }
 
-
-    // Clean up results for tests no longer reachable through any policy
+    // Clean up results for tests no longer reachable
     if let Err(e) = sqlx::query(r#"
         DELETE FROM results
         WHERE system_id IN (
@@ -1029,7 +1029,6 @@ pub async fn system_groups_edit_save(
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
-
     if let Err(e) = tx.commit().await {
         let encoded = urlencoding::encode(&format!("Commit error: {}", e)).to_string();
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
@@ -1039,6 +1038,7 @@ pub async fn system_groups_edit_save(
     info!("System group ID {} updated by '{}'.", id, auth.username);
     Redirect::to("/system_groups").into_response()
 }
+
 
 
 // ============================================================
