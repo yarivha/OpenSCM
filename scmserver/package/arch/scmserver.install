@@ -57,8 +57,7 @@ post_install() {
     echo "  Database  : $DATA_DIR/scm.db"
     echo "  Logs      : $LOG_DIR/"
     echo ""
-    echo "  Default credentials: admin / admin"
-    echo "  CHANGE THE DEFAULT PASSWORD IMMEDIATELY"
+    echo "  Visit the dashboard to complete setup and create your admin account."
     echo ""
     echo "============================================================"
 }
