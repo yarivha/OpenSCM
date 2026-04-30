@@ -210,6 +210,22 @@ pub async fn send(
                     "tenant_id": tenant_id,
                     "command": "REGISTER"
                 });
+
+                // Send server public key on registration so the client can
+                // verify signatures immediately without waiting for the next heartbeat.
+                match sqlx::query_scalar::<_, String>(
+                    "SELECT public_key FROM tenant_keys WHERE tenant_id = ? AND is_active = 1",
+                )
+                .bind(tenant_id)
+                .fetch_optional(&pool)
+                .await
+                {
+                    Ok(Some(pub_key)) => {
+                        response_data["server_public_key"] = serde_json::json!(pub_key);
+                    }
+                    Ok(None) => warn!("No active public key found for tenant '{}' during registration.", tenant_id),
+                    Err(e)  => error!("Failed to fetch server public key for tenant '{}': {}", tenant_id, e),
+                }
             }
             Err(e) => {
                 error!("Failed to register agent '{}': {}", payload.hostname, e);
@@ -422,22 +438,27 @@ pub async fn send(
                     "data": tests_with_conditions
                 });
 
-                // Attach server public key for client verification
-                match sqlx::query_scalar::<_, String>(
-                    "SELECT public_key FROM tenant_keys WHERE tenant_id = ? AND is_active = 1",
-                )
-                .bind(tenant_id)
-                .fetch_optional(&pool)
-                .await
-                {
-                    Ok(Some(pub_key)) => {
-                        response_data["server_public_key"] = serde_json::json!(pub_key);
-                    }
-                    Ok(None) => {
-                        warn!("No active public key found for tenant '{}'.", tenant_id);
-                    }
-                    Err(e) => {
-                        error!("Failed to fetch server public key for tenant '{}': {}", tenant_id, e);
+                // Only send the server public key when the client explicitly
+                // requests it — indicated by the client including its own
+                // public_key in the payload (needs_handshake path in the agent).
+                // This covers two cases: first heartbeat after registration
+                // (server key not yet saved) and key file loss/corruption.
+                // On normal heartbeats public_key is None so we skip the DB
+                // lookup entirely.
+                if payload.public_key.is_some() {
+                    match sqlx::query_scalar::<_, String>(
+                        "SELECT public_key FROM tenant_keys WHERE tenant_id = ? AND is_active = 1",
+                    )
+                    .bind(tenant_id)
+                    .fetch_optional(&pool)
+                    .await
+                    {
+                        Ok(Some(pub_key)) => {
+                            response_data["server_public_key"] = serde_json::json!(pub_key);
+                            debug!("Server public key included in response for Agent ID {} (re-handshake).", id);
+                        }
+                        Ok(None) => warn!("No active public key found for tenant '{}'.", tenant_id),
+                        Err(e)  => error!("Failed to fetch server public key for tenant '{}': {}", tenant_id, e),
                     }
                 }
             }
