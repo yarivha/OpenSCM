@@ -411,7 +411,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         "INSERT OR IGNORE INTO settings (tenant_id, key, value, description) VALUES
-        ('default', 'offline_threshold', '600', 'Seconds without activity before system is marked offline'),
+        ('default', 'offline_threshold', '3600', 'Seconds without activity before system is marked offline'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
         ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status')"
         )
