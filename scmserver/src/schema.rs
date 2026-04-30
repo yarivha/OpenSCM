@@ -23,7 +23,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Seed schema version for fresh installs — skips all migrations
-    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 4)")
+    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 5)")
         .execute(pool)
         .await?;
 
@@ -117,7 +117,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             auth_signature TEXT,
             created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
             last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
-            compliance_score REAL DEFAULT 0.0,
+            compliance_score REAL DEFAULT -1.0,
             tests_passed INTEGER DEFAULT 0,
             tests_failed INTEGER DEFAULT 0,
             total_tests INTEGER DEFAULT 0,
@@ -169,7 +169,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             severity TEXT,
             app_filter TEXT DEFAULT 'all',
             filter TEXT DEFAULT 'all',
-            compliance_score REAL DEFAULT 0.0,
+            compliance_score REAL DEFAULT -1.0,
             systems_passed INTEGER DEFAULT 0,
             systems_failed INTEGER DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
@@ -209,7 +209,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
            name TEXT NOT NULL,
            description TEXT,
            version TEXT,
-           compliance_score REAL DEFAULT 0.0,
+           compliance_score REAL DEFAULT -1.0,
            systems_passed INTEGER DEFAULT 0,
            systems_failed INTEGER DEFAULT 0,
            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
@@ -713,6 +713,75 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         migration_tx.commit().await?;
 
         info!("Schema migration v3 → v4 complete.");
+    }
+
+    // =========================================================
+    // Migration v4 → v5
+    // Fix compliance_score DEFAULT: was 0.0, should be -1.0.
+    // Systems/tests/policies that were inserted before any scan
+    // ran got DEFAULT 0.0 and appeared in the "Top Failed" table
+    // as 0% compliant even though they had never been scanned.
+    // We correct any existing rows where score = 0.0 but there
+    // are no associated results (i.e. genuinely unscanned).
+    // =========================================================
+    if version < 5 {
+        info!("Running schema migration v4 → v5 (fix unscanned compliance_score 0.0 → -1.0)...");
+
+        let mut migration_tx = pool.begin().await?;
+
+        // Systems with score 0.0 and no results at all
+        sqlx::query(
+            "UPDATE systems SET compliance_score = -1.0
+             WHERE compliance_score = 0.0
+               AND total_tests = 0
+               AND NOT EXISTS (
+                   SELECT 1 FROM results
+                   WHERE results.system_id = systems.id
+                     AND results.tenant_id = systems.tenant_id
+               )"
+        )
+        .execute(&mut *migration_tx)
+        .await?;
+
+        // Tests with score 0.0 and no associated results
+        sqlx::query(
+            "UPDATE tests SET compliance_score = -1.0
+             WHERE compliance_score = 0.0
+               AND systems_passed = 0
+               AND systems_failed = 0
+               AND NOT EXISTS (
+                   SELECT 1 FROM results
+                   WHERE results.test_id  = tests.id
+                     AND results.tenant_id = tests.tenant_id
+               )"
+        )
+        .execute(&mut *migration_tx)
+        .await?;
+
+        // Policies with score 0.0 and no associated results
+        sqlx::query(
+            "UPDATE policies SET compliance_score = -1.0
+             WHERE compliance_score = 0.0
+               AND systems_passed = 0
+               AND systems_failed = 0
+               AND NOT EXISTS (
+                   SELECT 1 FROM results r
+                   JOIN tests_in_policy tip ON tip.test_id = r.test_id
+                     AND tip.tenant_id = r.tenant_id
+                   WHERE tip.policy_id = policies.id
+                     AND r.tenant_id   = policies.tenant_id
+               )"
+        )
+        .execute(&mut *migration_tx)
+        .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 5")
+            .execute(&mut *migration_tx)
+            .await?;
+
+        migration_tx.commit().await?;
+
+        info!("Schema migration v4 → v5 complete.");
     }
 
     Ok(())
