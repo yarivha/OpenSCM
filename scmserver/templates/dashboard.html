@@ -127,7 +127,7 @@
                     <tr><td colspan="3" class="text-center py-5 text-muted">Environment is currently compliant.</td></tr>
                   {% else %}
                     {% for pol in top_failed_policies %}
-                    <tr>
+                    <tr style="cursor: pointer;" onclick="window.location='/policies/report/{{ pol.policy_id }}'">
                       <td>
                         <span class="font-weight-bold">{{ pol.policy_name }}</span><br>
                         <small class="text-muted">Version: {{ pol.policy_version }}</small>

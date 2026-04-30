@@ -212,6 +212,7 @@ pub struct SystemFailRow {
 
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct PolicyFailRow {
+    pub policy_id: i32,
     pub policy_name: String, // Alias for test_name
     pub policy_version: String,
     pub compliance: f64,     // Alias for compliance_score

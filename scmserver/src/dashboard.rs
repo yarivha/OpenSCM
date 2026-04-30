@@ -85,7 +85,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
         r#"
         SELECT 
-            name as policy_name, 
+            id as policy_id,
+	    name as policy_name, 
             version as policy_version,
             compliance_score as compliance,
             systems_passed as systems_passed,
