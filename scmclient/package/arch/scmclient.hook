@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = scmclient
+
+[Action]
+Description = Reloading systemd daemon and restarting OpenSCM agent...
+When = PostTransaction
+Exec = /bin/sh -c 'systemctl daemon-reload; systemctl enable scmclient.service; systemctl restart scmclient.service'
