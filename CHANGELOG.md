@@ -6,13 +6,34 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.2.0] - 2026-04-30
+
 ### Added
+- **First-run setup screen** — a guided account-creation page is shown on the first visit to a fresh installation, replacing the previous default `admin/admin` credentials and the associated warning message in package scripts.
 - `init_tera_with_overrides()` — public function that loads all CE templates then lets callers substitute individual templates by name. Used by EE and SaaS to inject custom pages without forking CE.
 - Optional `organization` field in `LoginForm` — if provided, scopes the user lookup to that tenant and returns a clear "Organization not found" error if unknown. CE and EE are unaffected (field is absent from their login form). Powers SaaS multi-tenant login.
 - `success_message` support added to the login page context (used by SaaS to confirm account creation after registration).
 
 ### Changed
-- `create_core_router` refactored into `build_core_routes` + `apply_core_layers` helpers to cleanly support the login-free router variant needed during SaaS development (later simplified; helpers removed once the optional `organization` approach was adopted).
+- Schema migrated to **v4** — test applicability conditions moved from inline JSON columns to a dedicated `test_conditions` table, enabling indexed lookups and cleaner per-condition management.
+- `create_core_router` refactored into `build_core_routes` + `apply_core_layers` helpers; later simplified once the optional `organization` login approach was adopted.
+- Server public key is now included in the heartbeat response **only** when the agent explicitly requests it (i.e. when `public_key` is present in the payload). Previously the key was sent on every heartbeat regardless. The REGISTER response also now correctly includes the server public key for initial key exchange.
+
+### Fixed
+
+**Server**
+- Policy schedule edit page always showing scan and report schedules as disabled after saving — `schedule_type` column was missing from the SELECT query, causing a silent sqlx decode failure.
+
+**Agent**
+- macOS client service not restarted after package upgrade — `preinstall` script added to stop the running service before Payload extraction; `postinstall` now uses `launchctl enable` + `bootstrap` (with fallback to `load -w`) so the service is reliably re-enabled on Sonoma and later.
+- Arch Linux client service not restarted after upgrade — installer scripts now correctly detect the pacman version-string argument (e.g. `0.2.0`) passed by nfpm/pacman hooks, where Debian/RPM pass `configure`/`1`/`2`. Dedicated Arch `.install` files added for PKGBUILD/AUR packaging.
+- macOS package detection — Homebrew (`brew list`) and `pkgutil` are now checked for package existence and version, covering packages installed outside the App Store.
+- False `ERROR` log when a file-content check is run against a path that does not exist — the check now returns `false` silently (logged at `DEBUG`) instead of attempting to open the file and logging an OS error.
+
+### Security
+- Resolved all high, medium, and low-severity findings from a full code review of the server and agent codebases (`receive_result`, input validation, error handling, and two additional high-severity gaps in result ingestion).
 
 ---
 
