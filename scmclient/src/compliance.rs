@@ -320,6 +320,12 @@ fn get_system_domain() -> Option<String> {
 
 
 fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
+    // Guard: file does not exist — not an error, just no match
+    if !Path::new(path).exists() {
+        debug!("File '{}' does not exist — content check returns false.", path);
+        return false;
+    }
+
     // Guard: reject directories
     if Path::new(path).is_dir() {
         // Search all files in directory for the content
