@@ -2574,7 +2574,7 @@ dependencies = [
 
 [[package]]
 name = "scmclient"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "base64 0.22.1",
  "cfg-if",
@@ -2604,7 +2604,7 @@ dependencies = [
 
 [[package]]
 name = "scmserver"
-version = "0.1.9"
+version = "0.2.0"
 dependencies = [
  "axum",
  "axum-extra",
