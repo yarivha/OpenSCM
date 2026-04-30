@@ -47,9 +47,15 @@ pub async fn settings(
         map.insert(key, value);
     }
 
+    // Schema version lives in schema_info, not in the settings key-value store.
+    let schema_version: i64 = sqlx::query_scalar("SELECT version FROM schema_info WHERE id = 1")
+        .fetch_one(&*pool)
+        .await
+        .unwrap_or(0);
+
     let settings = Settings {
-        schema_version:    map.get("schema_version").cloned().unwrap_or_else(|| "1".to_string()),
-        offline_threshold: map.get("offline_threshold").cloned().unwrap_or_else(|| "600".to_string()),
+        schema_version:    schema_version.to_string(),
+        offline_threshold: map.get("offline_threshold").cloned().unwrap_or_else(|| "3600".to_string()),
         compliance_sat:    map.get("compliance_sat").cloned().unwrap_or_else(|| "80".to_string()),
         compliance_marginal: map.get("compliance_marginal").cloned().unwrap_or_else(|| "60".to_string()),
     };
