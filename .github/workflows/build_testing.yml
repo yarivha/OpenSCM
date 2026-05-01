@@ -37,16 +37,28 @@ jobs:
           cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
+
       - name: Package
         run: |
           mkdir -p dist
+          # Determine version and release
+          export VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          export RELEASE=${{ github.run_number }}
+          
           if [[ "${{ matrix.target }}" == *"linux"* ]]; then
-            # Ensure nFPM finds your staged binary
-            export VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-            nfpm pkg --config config/scm${{ matrix.app }}-${{ matrix.target }}.yaml --target dist/
+            # Added --packager deb to fix the directory error
+            nfpm pkg --packager deb \
+              --config config/scm${{ matrix.app }}-${{ matrix.target }}.yaml \
+              --target dist/
           else
-            makensis scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
+            # Replicating your script's NSIS logic
+            makensis -DVERSION="${VERSION}" \
+                     -DRELEASE="${RELEASE}" \
+                     -DINSTALLER_NAME="dist/scm${{ matrix.app }}_${VERSION}-${RELEASE}_x86.exe" \
+                     scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
           fi
+
+
 
       - name: Upload Testing Artifacts
         uses: actions/upload-artifact@v4

@@ -72,20 +72,34 @@ jobs:
             cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           fi
 
+
       - name: Create Packages
         if: matrix.skip != true
         run: |
           mkdir -p dist
-          APP="scm${{ matrix.app }}"
-          # Call nFPM for Linux/Arch, NSIS for Windows, and custom for BSD/Mac
+          export VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          export RELEASE=${{ github.run_number }}
+          APP_MEMBER="scm${{ matrix.app }}"
+          CONFIG="config/${APP_MEMBER}-${{ matrix.target }}.yaml"
+          
           if [[ "${{ matrix.target }}" == *"linux"* ]]; then
-            nfpm pkg --config config/${APP}-${{ matrix.target }}.yaml --target dist/
-            if [[ "$APP" == "scmclient" ]]; then 
-              nfpm pkg --packager archlinux --config config/${APP}-${{ matrix.target }}.yaml --target dist/
+            # Build all three formats required for stable
+            nfpm pkg --packager deb --config $CONFIG --target dist/
+            nfpm pkg --packager rpm --config $CONFIG --target dist/
+            
+            # Arch Linux package (Client Only as per your script)
+            if [[ "${{ matrix.app }}" == "client" ]]; then 
+              nfpm pkg --packager archlinux --config $CONFIG --target dist/
             fi
+            
           elif [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            makensis -DVERSION="${{ env.VERSION }}" ${APP}/package/windows/${APP}.nsi
+            makensis -DVERSION="${VERSION}" -DRELEASE="${RELEASE}" ${APP_MEMBER}/package/windows/${APP_MEMBER}.nsi
+            
+          elif [[ "${{ matrix.target }}" == *"freebsd"* ]]; then
+             # Insert your manual FreeBSD tar logic here
+             echo "Running FreeBSD packaging..."
           fi
+
 
       - name: Upload Artifacts
         if: matrix.skip != true
