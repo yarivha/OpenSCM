@@ -24,13 +24,25 @@ jobs:
           cargo install cargo-zigbuild
           rustup target add ${{ matrix.target }}
 
+      # --- ADD THIS STEP ---
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0 # Or your preferred version
+
       - name: Build
-        run: cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
+        run: |
+          # Stage binary directory for nFPM
+          mkdir -p build/bin
+          cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
+          cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
       - name: Package
         run: |
           mkdir -p dist
           if [[ "${{ matrix.target }}" == *"linux"* ]]; then
+            # Ensure nFPM finds your staged binary
+            export VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
             nfpm pkg --config config/scm${{ matrix.app }}-${{ matrix.target }}.yaml --target dist/
           else
             makensis scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
