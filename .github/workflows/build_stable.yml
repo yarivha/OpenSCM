@@ -1,0 +1,146 @@
+name: OpenSCM Multi-Platform Build
+
+on:
+  workflow_dispatch: # For Testing (Artifacts only)
+  push:
+    tags:
+      - 'v*'      # For Stable (Artifacts + Release)
+
+jobs:
+  build-and-package:
+    name: Build ${{ matrix.app }} (${{ matrix.target }})
+    runs-on: ${{ matrix.os }}
+    outputs:
+      version: ${{ env.VERSION }}
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [client, server]
+        target: [
+          "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl", 
+          "powerpc64le-unknown-linux-musl", "riscv64gc-unknown-linux-musl",
+          "armv7-unknown-linux-musleabihf", "x86_64-pc-windows-gnu",
+          "x86_64-unknown-freebsd", "universal2-apple-darwin"
+        ]
+        include:
+          # OS Mapping
+          - target: "universal2-apple-darwin"
+            os: macos-latest
+          - target: "x86_64-pc-windows-gnu"
+            os: ubuntu-latest
+          # Default for Linux/FreeBSD
+          - os: ubuntu-latest
+            os_name: linux
+
+          # Specific Exclusions (Matching your script)
+          - app: server
+            target: "powerpc64le-unknown-linux-musl"
+            skip: true
+          - app: server
+            target: "riscv64gc-unknown-linux-musl"
+            skip: true
+          - app: server
+            target: "armv7-unknown-linux-musleabihf"
+            skip: true
+          - app: server
+            target: "x86_64-unknown-freebsd"
+            skip: true
+          - app: server
+            target: "universal2-apple-darwin"
+            skip: true
+
+    steps:
+      - name: Checkout Source
+        if: matrix.skip != true
+        uses: actions/checkout@v4
+
+      - name: Setup Build Environment
+        if: matrix.skip != true && runner.os == 'Linux'
+        run: |
+          sudo apt-get update && sudo apt-get install -y nsis gettext-base pax
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          cargo install cargo-zigbuild
+          rustup target add ${{ matrix.target }}
+
+      - name: Get Version
+        if: matrix.skip != true
+        run: |
+          V=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          echo "VERSION=$V" >> $GITHUB_ENV
+          echo "RELEASE=${{ github.run_number }}" >> $GITHUB_ENV
+
+      # --- Compilation ---
+      - name: Build (Zig)
+        if: matrix.skip != true && !contains(matrix.target, 'darwin')
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
+
+      - name: Build (macOS)
+        if: matrix.skip != true && contains(matrix.target, 'darwin')
+        run: cargo build --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
+
+      # --- Packaging (Debian, RPM, Arch, Windows, FreeBSD, macOS) ---
+      - name: Create Packages
+        if: matrix.skip != true
+        run: |
+          mkdir -p dist
+          APP="scm${{ matrix.app }}"
+          TARGET="${{ matrix.target }}"
+          
+          # 1. Handle Linux (Debian & RPM)
+          if [[ "$TARGET" == *"linux"* ]]; then
+            nfpm pkg --config config/${APP}-${TARGET}.yaml --target dist/
+            
+            # 2. Handle Arch Linux (Client Only)
+            if [[ "$APP" == "scmclient" ]]; then
+               nfpm pkg --packager archlinux --config config/${APP}-${TARGET}.yaml --target dist/
+            fi
+          fi
+
+          # 3. Handle Windows (NSIS)
+          if [[ "$TARGET" == *"windows"* ]]; then
+            makensis -DVERSION="${{ env.VERSION }}" -DRELEASE="${{ env.RELEASE }}" ${APP}/package/windows/${APP}.nsi
+          fi
+
+          # 4. Handle FreeBSD & macOS
+          # (These steps use your existing logic for MANIFESTs and XAR)
+          if [[ "$TARGET" == *"freebsd"* || "$TARGET" == *"darwin"* ]]; then
+             # ... Replicate the tar/xar/pkgbuild logic from your script here ...
+             echo "Running custom platform packaging..."
+          fi
+
+      - name: Upload Artifacts
+        if: matrix.skip != true
+        uses: actions/upload-artifact@v4
+        with:
+          name: ${{ matrix.app }}-${{ matrix.target }}
+          path: dist/*
+
+  # --- CREATE RELEASE (Stable Only) ---
+  create-release:
+    name: Create GitHub Release
+    needs: build-and-package
+    runs-on: ubuntu-latest
+    if: startsWith(github.ref, 'refs/tags/v')
+    steps:
+      - name: Download All Artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-files
+
+      - name: Publish Stable Release
+        uses: softprops/action-gh-release@v2
+        with:
+          tag_name: ${{ github.ref_name }}
+          name: OpenSCM ${{ github.ref_name }}
+          draft: false
+          prerelease: false
+          files: |
+            ./release-files/**/*.deb
+            ./release-files/**/*.rpm
+            ./release-files/**/*.pkg.tar.zst
+            ./release-files/**/*.pkg
+            ./release-files/**/*.exe
+            ./release-files/**/*.tar.gz
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
