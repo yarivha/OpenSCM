@@ -51,7 +51,7 @@ jobs:
             APP_NAME=$APP_NAME ARCH="aarch64" VERSION=$VERSION RELEASE=$RELEASE \
             nfpm pkg --packager deb --config "config/${APP_NAME}.yaml" --target "dist/${RPM_FILE}"
             echo "Packaging .pkg.tar.zst for ${{ matrix.target }}"
-            APP_NAME=${APP_NAME} ARCH="aarch64" VERSION=${VERSION} RELEASE=${RELEASE} \ 
+            APP_NAME=$APP_NAME ARCH="aarch64" VERSION=$VERSION RELEASE=$RELEASE \ 
             nfpm pkg --packager archlinux --config "config/${APP_NAME}.yaml" --target "dist/${PKG_FILE}"           
           fi
 
