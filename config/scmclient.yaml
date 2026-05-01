@@ -1,0 +1,66 @@
+name: "openscm-client"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${RELEASE}"
+section: "default"
+priority: "optional"
+maintainer: "Yariv Hakim <yariv@openscm.io>"
+description: "OpenSCM Agent - Lightweight security compliance monitoring"
+vendor: "OpenSCM"
+homepage: "https://openscm.io"
+license: "Apache-2.0"
+
+contents:
+  # Binary - Using the staged path from GitHub Action
+  - src: "build/bin/scmclient"
+    dst: "/usr/bin/scmclient"
+    file_info:
+      mode: 0755
+
+  # Systemd service
+  - src: "scmclient/package/linux/scmclient.service"
+    dst: "/lib/systemd/system/scmclient.service"
+    file_info:
+      mode: 0644
+
+  # Config & Logs
+  - dst: "/etc/openscm"
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: "/etc/openscm/keys"
+    type: dir
+    file_info:
+      mode: 0700
+  - dst: "/var/log/openscm"
+    type: dir
+    file_info:
+      mode: 0755
+
+overrides:
+  archlinux:
+    contents:
+      - src: "build/bin/scmclient"
+        dst: "/usr/bin/scmclient"
+        file_info:
+          mode: 0755
+      - src: "scmclient/package/linux/scmclient.service"
+        dst: "/usr/lib/systemd/system/scmclient.service"
+        file_info:
+          mode: 0644
+      # The libalpm hook for 0.2.1 stability
+      - src: "scmclient/package/arch/scmclient.hook"
+        dst: "/usr/share/libalpm/hooks/scmclient.hook"
+        file_info:
+          mode: 0644
+
+    scripts:
+      postinstall: "scmclient/package/arch/postinst"
+      preremove:   "scmclient/package/arch/prerm"
+      postremove:  "scmclient/package/arch/postrm"
+
+scripts:
+  postinstall: "scmclient/package/linux/postinst"
+  preremove: "scmclient/package/linux/prerm"
+  postremove: "scmclient/package/linux/postrm"

@@ -1,0 +1,65 @@
+name: "openscm-server"
+arch: "${ARCH}"
+platform: "linux"
+version: "${VERSION}"
+release: "${RELEASE}"
+section: "default"
+priority: "optional"
+maintainer: "Yariv Hakim <yariv@openscm.io>"
+description: "OpenSCM Server - Centralized security compliance management"
+vendor: "OpenSCM"
+homepage: "https://openscm.io"
+license: "Apache-2.0"
+
+contents:
+  # Binary
+  - src: "build/bin/scmserver"
+    dst: "/usr/bin/scmserver"
+    file_info:
+      mode: 0755
+
+  # Systemd service
+  - src: "scmserver/package/linux/scmserver.service"
+    dst: "/lib/systemd/system/scmserver.service"
+    file_info:
+      mode: 0644
+
+  # Config, Database & Keys
+  - dst: "/etc/openscm"
+    type: dir
+    file_info:
+      mode: 0755
+  - dst: "/etc/openscm/keys"
+    type: dir
+    file_info:
+      mode: 0700
+  - dst: "/var/lib/openscm" # Dedicated directory for the SQLite database
+    type: dir
+    file_info:
+      mode: 0755
+
+overrides:
+  archlinux:
+    contents:
+      - src: "build/bin/scmserver"
+        dst: "/usr/bin/scmserver"
+        file_info:
+          mode: 0755
+      - src: "scmserver/package/linux/scmserver.service"
+        dst: "/usr/lib/systemd/system/scmserver.service"
+        file_info:
+          mode: 0644
+      - src: "scmserver/package/arch/scmserver.hook"
+        dst: "/usr/share/libalpm/hooks/scmserver.hook"
+        file_info:
+          mode: 0644
+
+    scripts:
+      postinstall: "scmserver/package/arch/postinst"
+      preremove:   "scmserver/package/arch/prerm"
+      postremove:  "scmserver/package/arch/postrm"
+
+scripts:
+  postinstall: "scmserver/package/linux/postinst"
+  preremove: "scmserver/package/linux/prerm"
+  postremove: "scmserver/package/linux/postrm"
