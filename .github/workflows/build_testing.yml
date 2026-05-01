@@ -32,18 +32,20 @@ jobs:
           mkdir -p build/bin
           cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
-
+      
       - name: Package
         run: |
           mkdir -p dist
-          export APP_NAME="scm${{ matrix.app }}"
-          export VERSION=$(grep -m 1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          export RELEASE=${{ github.run_number }}
-          
+          APP_NAME="scm${{ matrix.app }}"
+          VERSION=$(grep -m 1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          RELEASE=${{ github.run_number }}
+
           if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-	    export DEB_FILE="${APP_NAME}_${VERSION}-${RELEASE}_arm64.deb"
-            APP_NAME=${APP_NAME} ARCH="arm64" VERSION=${VERSION} RELEASE=${RELEASE}  nfpm pkg --config config/${APP_NAME}.yaml --target dist/${DEB_FILE}
-          fi 
+            DEB_FILE="${APP_NAME}_${VERSION}-${RELEASE}_arm64.deb"
+            # Run nfpm with exported variables
+            APP_NAME=$APP_NAME ARCH="arm64" VERSION=$VERSION RELEASE=$RELEASE \
+            nfpm pkg --packager deb --config "config/${APP_NAME}.yaml" --target "dist/${DEB_FILE}"
+          fi
 
       - name: Upload Testing Artifacts
         uses: actions/upload-artifact@v4
