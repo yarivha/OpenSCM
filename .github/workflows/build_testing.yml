@@ -36,22 +36,17 @@ jobs:
       - name: Package
         run: |
           mkdir -p dist
-          APP_DIR="scm${{ matrix.app }}"
-          export VERSION=$(grep -m 1 '^version =' ${APP_DIR}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          export APP_NAME="scm${{ matrix.app }}"
+          export VERSION=$(grep -m 1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           export RELEASE=${{ github.run_number }}
           
-          if [[ "${{ matrix.target }}" == *"linux"* ]]; then
-            nfpm pkg --packager deb --config config/${APP_DIR}-${{ matrix.target }}.yaml --target dist/
-          else
-            # Replicating your NSIS logic for testing
-            makensis -DVERSION="${VERSION}" \
-                     -DRELEASE="${RELEASE}" \
-                     ${APP_DIR}/package/windows/scm${{ matrix.app }}.nsi
-            mv ${APP_DIR}/package/windows/*.exe dist/ 2>/dev/null || true
-          fi
+          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
+	    export DEB_FILE="${APP_NAME}_${VERSION}-${RELEASE}_arm64.deb"
+            APP_NAME=${APP_NAME} ARCH="arm64" VERSION=${VERSION} RELEASE=${RELEASE}  nfpm pkg --config config/${APP_NAME}.yaml --target dist/${DEB_FILE}
+          fi 
 
       - name: Upload Testing Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: test-${{ matrix.app }}-${{ matrix.target }}
+          name: ${DEB_FILE}
           path: dist/*
