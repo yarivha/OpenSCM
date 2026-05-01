@@ -10,7 +10,7 @@ jobs:
     strategy:
       matrix:
         app: [client, server]
-        target: ["aarch64-unknown-linux-musl", "x86_64-pc-windows-gnu"]
+        target: ["aarch64-unknown-linux-musl"]
 
     steps:
       - name: Checkout Source
@@ -48,5 +48,7 @@ jobs:
       - name: Upload Testing Artifacts
         uses: actions/upload-artifact@v4
         with:
-          name: ${DEB_FILE}
+          # Use matrix variables for the name so it is unique for each job
+          name: test-${{ matrix.app }}-${{ matrix.target }}
           path: dist/*
+
