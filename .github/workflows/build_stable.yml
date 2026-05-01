@@ -24,9 +24,9 @@ jobs:
             os: macos-latest
           - target: "x86_64-pc-windows-gnu"
             os: ubuntu-latest
-          - os: ubuntu-latest # Default for Linux/FreeBSD
+          - os: ubuntu-latest
           
-          # Exclusions: Server is restricted to specific stable targets
+          # Exclusions for Server: Only build for specific stable targets
           - app: server
             target: "powerpc64le-unknown-linux-musl"
             skip: true
@@ -48,7 +48,7 @@ jobs:
         if: matrix.skip != true
         uses: actions/checkout@v4
 
-      - name: Setup Environment
+      - name: Setup Tools
         if: matrix.skip != true && runner.os == 'Linux'
         run: |
           sudo apt-get update && sudo apt-get install -y nsis gettext-base pax
@@ -56,6 +56,10 @@ jobs:
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           cargo install cargo-zigbuild
           rustup target add ${{ matrix.target }}
+
+      - name: Setup Zig
+        if: matrix.skip != true && runner.os == 'Linux'
+        uses: goto-bus-stop/setup-zig@v2
 
       - name: Get Version
         if: matrix.skip != true
@@ -71,35 +75,36 @@ jobs:
           else
             cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           fi
-
+          # Stage binary for packaging
+          mkdir -p build/bin
+          cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
       - name: Create Packages
         if: matrix.skip != true
         run: |
           mkdir -p dist
-          export VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          export RELEASE=${{ github.run_number }}
-          APP_MEMBER="scm${{ matrix.app }}"
-          CONFIG="config/${APP_MEMBER}-${{ matrix.target }}.yaml"
+          APP_DIR="scm${{ matrix.app }}"
           
           if [[ "${{ matrix.target }}" == *"linux"* ]]; then
-            # Build all three formats required for stable
-            nfpm pkg --packager deb --config $CONFIG --target dist/
-            nfpm pkg --packager rpm --config $CONFIG --target dist/
-            
-            # Arch Linux package (Client Only as per your script)
-            if [[ "${{ matrix.app }}" == "client" ]]; then 
-              nfpm pkg --packager archlinux --config $CONFIG --target dist/
+            # Specify packagers to avoid directory ambiguity
+            nfpm pkg --packager deb --config config/${APP_DIR}-${{ matrix.target }}.yaml --target dist/
+            nfpm pkg --packager rpm --config config/${APP_DIR}-${{ matrix.target }}.yaml --target dist/
+            if [[ "${{ matrix.app }}" == "client" ]]; then
+              nfpm pkg --packager archlinux --config config/${APP_DIR}-${{ matrix.target }}.yaml --target dist/
             fi
             
           elif [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            makensis -DVERSION="${VERSION}" -DRELEASE="${RELEASE}" ${APP_MEMBER}/package/windows/${APP_MEMBER}.nsi
+            # Use your specific scmclient/package/windows path
+            makensis -DVERSION="${{ env.VERSION }}" \
+                     -DRELEASE="${{ github.run_number }}" \
+                     -DAPP_NAME="scm${{ matrix.app }}" \
+                     ${APP_DIR}/package/windows/scm${{ matrix.app }}.nsi
+            mv ${APP_DIR}/package/windows/*.exe dist/ 2>/dev/null || true
             
           elif [[ "${{ matrix.target }}" == *"freebsd"* ]]; then
-             # Insert your manual FreeBSD tar logic here
-             echo "Running FreeBSD packaging..."
+            # FreeBSD manual packaging logic goes here
+            echo "Packaging for FreeBSD..."
           fi
-
 
       - name: Upload Artifacts
         if: matrix.skip != true
@@ -113,11 +118,12 @@ jobs:
     needs: build-and-package
     runs-on: ubuntu-latest
     steps:
-      - name: Download Artifacts
+      - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./release-files
-      - name: Create GitHub Release
+
+      - name: Create Release
         uses: softprops/action-gh-release@v2
         with:
           files: ./release-files/**/*

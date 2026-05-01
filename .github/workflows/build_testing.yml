@@ -24,41 +24,31 @@ jobs:
           cargo install cargo-zigbuild
           rustup target add ${{ matrix.target }}
 
-      # --- ADD THIS STEP ---
       - name: Install Zig
         uses: goto-bus-stop/setup-zig@v2
-        with:
-          version: 0.13.0 # Or your preferred version
 
       - name: Build
         run: |
-          # Stage binary directory for nFPM
           mkdir -p build/bin
           cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
-
       - name: Package
         run: |
           mkdir -p dist
-          # Determine version and release
-          export VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          APP_DIR="scm${{ matrix.app }}"
+          export VERSION=$(grep -m 1 '^version =' ${APP_DIR}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           export RELEASE=${{ github.run_number }}
           
           if [[ "${{ matrix.target }}" == *"linux"* ]]; then
-            # Added --packager deb to fix the directory error
-            nfpm pkg --packager deb \
-              --config config/scm${{ matrix.app }}-${{ matrix.target }}.yaml \
-              --target dist/
+            nfpm pkg --packager deb --config config/${APP_DIR}-${{ matrix.target }}.yaml --target dist/
           else
-            # Replicating your script's NSIS logic
+            # Replicating your NSIS logic for testing
             makensis -DVERSION="${VERSION}" \
                      -DRELEASE="${RELEASE}" \
-                     -DINSTALLER_NAME="dist/scm${{ matrix.app }}_${VERSION}-${RELEASE}_x86.exe" \
-                     scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
+                     ${APP_DIR}/package/windows/scm${{ matrix.app }}.nsi
+            mv ${APP_DIR}/package/windows/*.exe dist/ 2>/dev/null || true
           fi
-
-
 
       - name: Upload Testing Artifacts
         uses: actions/upload-artifact@v4
