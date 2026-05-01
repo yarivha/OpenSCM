@@ -1,0 +1,43 @@
+name: OpenSCM Manual Testing
+
+on:
+  workflow_dispatch:
+
+jobs:
+  test-build:
+    name: Test Build ${{ matrix.app }} (${{ matrix.target }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        app: [client, server]
+        target: ["aarch64-unknown-linux-musl", "x86_64-pc-windows-gnu"]
+
+    steps:
+      - name: Checkout Source
+        uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update && sudo apt-get install -y nsis
+          go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
+          echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          cargo install cargo-zigbuild
+          rustup target add ${{ matrix.target }}
+
+      - name: Build
+        run: cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
+
+      - name: Package
+        run: |
+          mkdir -p dist
+          if [[ "${{ matrix.target }}" == *"linux"* ]]; then
+            nfpm pkg --config config/scm${{ matrix.app }}-${{ matrix.target }}.yaml --target dist/
+          else
+            makensis scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
+          fi
+
+      - name: Upload Testing Artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-${{ matrix.app }}-${{ matrix.target }}
+          path: dist/*
