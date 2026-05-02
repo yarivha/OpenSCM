@@ -15,7 +15,7 @@ jobs:
         app: [client, server]
         target: [
           "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
-          "riscv64gc-unknown-linux-musl", "armv7-unknown-linux-musleabihf"
+          "riscv64gc-unknown-linux-musl", "armv7-unknown-linux-musleabihf",
           "powerpc64le-unknown-linux-musl", "x86_64-pc-windows-gnu",
           "x86_64-unknown-freebsd", "universal2-apple-darwin"
         ]
