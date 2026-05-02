@@ -1,67 +1,103 @@
-name: OpenSCM Manual Testing
+name: OpenSCM Optimized Testing
 
 on:
   workflow_dispatch:
 
 jobs:
-  test-build:
-    name: Test Build ${{ matrix.app }} (${{ matrix.target }})
+  # STAGE 1: Compile the binaries once per architecture
+  compile:
+    name: Compile ${{ matrix.target }}
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        target: ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl", "x86_64-pc-windows-gnu"]
+    steps:
+      - uses: actions/checkout@v4
+      
+      - name: Setup Rust & Zig
+        run: |
+          cargo install cargo-zigbuild
+          rustup target add ${{ matrix.target }}
+      
+      - name: Install Zig
+        uses: goto-bus-stop/setup-zig@v2
+
+      - name: Build Binaries
+        run: |
+          # Build both client and server in this runner to save setup time
+          cargo zigbuild --release --target ${{ matrix.target }} -p scmclient
+          cargo zigbuild --release --target ${{ matrix.target }} -p scmserver
+          
+          # Stage them for the next job
+          mkdir -p build/bin
+          cp target/${{ matrix.target }}/release/scmclient* build/bin/
+          cp target/${{ matrix.target }}/release/scmserver* build/bin/
+
+      - name: Upload Raw Binaries
+        uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ matrix.target }}
+          path: build/bin/*
+          retention-days: 1
+
+  # STAGE 2: Create all package formats in parallel
+  package:
+    needs: compile
+    name: Package ${{ matrix.app }} (${{ matrix.format }})
     runs-on: ubuntu-latest
     strategy:
       matrix:
         app: [client, server]
-        target: ["aarch64-unknown-linux-musl"]
+        # Define formats only for Linux ARM; Windows uses a separate include
+        format: [deb, rpm, archlinux]
+        include:
+          - app: client
+            format: nsis
+            target: "x86_64-pc-windows-gnu"
+          - app: server
+            format: nsis
+            target: "x86_64-pc-windows-gnu"
+        # Skip standard Linux formats for Windows target
+        exclude:
+          - format: deb
+            app: client
+          - format: rpm
+            app: client
+          - format: archlinux
+            app: client
+          # (Repeat for server as needed)
 
     steps:
-      - name: Checkout Source
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Environment
+      - name: Setup Tools
         run: |
           sudo apt-get update && sudo apt-get install -y nsis
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
-          cargo install cargo-zigbuild
-          rustup target add ${{ matrix.target }}
 
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
+      - name: Download Compiled Binaries
+        uses: actions/download-artifact@v4
+        with:
+          # Logic to pick the right architecture artifact
+          name: binaries-${{ matrix.target || 'aarch64-unknown-linux-musl' }}
+          path: build/bin
 
-      - name: Build
-        run: |
-          mkdir -p build/bin
-          cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
-          cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
-      
-      - name: Package
+      - name: Create Final Package
         run: |
           mkdir -p dist
-          APP_NAME="scm${{ matrix.app }}"
-          VERSION=$(grep -m 1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=${{ github.run_number }}
-
-          if [[ "${{ matrix.target }}" == "aarch64-unknown-linux-musl" ]]; then
-            DEB_FILE="${APP_NAME}_${VERSION}-${RELEASE}_arm64.deb"
-            RPM_FILE="${APP_NAME}-${VERSION}-${RELEASE}.aarch64.rpm"
-            PKG_FILE="${APP_NAME}_${VERSION}-${RELEASE}_aarch64.pkg.tar.zst"
-
-            echo "Packaging .deb for ${{ matrix.target }}"
-            APP_NAME=$APP_NAME ARCH="arm64" VERSION=$VERSION RELEASE=$RELEASE \
-            nfpm pkg --packager deb --config "config/${APP_NAME}.yaml" --target "dist/${DEB_FILE}"
-
-            echo "Packaging .rpm for ${{ matrix.target }}"
-            APP_NAME=$APP_NAME ARCH="aarch64" VERSION=$VERSION RELEASE=$RELEASE \
-            nfpm pkg --packager rpm --config "config/${APP_NAME}.yaml" --target "dist/${RPM_FILE}"
-
-            echo "Packaging .pkg.tar.zst for ${{ matrix.target }}"
-            APP_NAME=$APP_NAME ARCH="aarch64" VERSION=$VERSION RELEASE=$RELEASE \
-            nfpm pkg --packager archlinux --config "config/${APP_NAME}.yaml" --target "dist/${PKG_FILE}"
+          
+          if [[ "${{ matrix.format }}" == "nsis" ]]; then
+            makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
+            mv scm${{ matrix.app }}/package/windows/*.exe dist/
+          else
+            nfpm pkg --packager ${{ matrix.format }} --config config/scm${{ matrix.app }}.yaml --target dist/
           fi
 
-      - name: Upload Testing Artifacts
+      - name: Upload Final Artifact
         uses: actions/upload-artifact@v4
         with:
-          # Use matrix variables for the name so it is unique for each job
-          name: ${{ env.MY_ARTIFACT_NAME }}
+          name: ${{ matrix.app }}-${{ matrix.format }}
           path: dist/*
-
