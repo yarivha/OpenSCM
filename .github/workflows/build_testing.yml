@@ -1,103 +1,203 @@
-name: OpenSCM Optimized Testing
+name: OpenSCM Testing Release
 
 on:
   workflow_dispatch:
 
+
 jobs:
-  # STAGE 1: Compile the binaries once per architecture
-  compile:
-    name: Compile ${{ matrix.target }}
-    runs-on: ubuntu-latest
+  build-and-package:
+    name: Build ${{ matrix.app }} (${{ matrix.target }})
+    # Use macOS runner for Apple builds, Ubuntu for everything else
+    runs-on: ${{ matrix.os }}
     strategy:
-      matrix:
-        target: ["aarch64-unknown-linux-musl", "x86_64-unknown-linux-musl", "x86_64-pc-windows-gnu"]
-    steps:
-      - uses: actions/checkout@v4
-      
-      - name: Setup Rust & Zig
-        run: |
-          cargo install cargo-zigbuild
-          rustup target add ${{ matrix.target }}
-      
-      - name: Install Zig
-        uses: goto-bus-stop/setup-zig@v2
-
-      - name: Build Binaries
-        run: |
-          # Build both client and server in this runner to save setup time
-          cargo zigbuild --release --target ${{ matrix.target }} -p scmclient
-          cargo zigbuild --release --target ${{ matrix.target }} -p scmserver
-          
-          # Stage them for the next job
-          mkdir -p build/bin
-          cp target/${{ matrix.target }}/release/scmclient* build/bin/
-          cp target/${{ matrix.target }}/release/scmserver* build/bin/
-
-      - name: Upload Raw Binaries
-        uses: actions/upload-artifact@v4
-        with:
-          name: binaries-${{ matrix.target }}
-          path: build/bin/*
-          retention-days: 1
-
-  # STAGE 2: Create all package formats in parallel
-  package:
-    needs: compile
-    name: Package ${{ matrix.app }} (${{ matrix.format }})
-    runs-on: ubuntu-latest
-    strategy:
+      fail-fast: false
       matrix:
         app: [client, server]
-        # Define formats only for Linux ARM; Windows uses a separate include
-        format: [deb, rpm, archlinux]
+        target: [
+          "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
+          "riscv64gc-unknown-linux-musl", "armv7-unknown-linux-musleabihf"
+          "powerpc64le-unknown-linux-musl", "x86_64-pc-windows-gnu",
+          "x86_64-unknown-freebsd", "universal2-apple-darwin"
+        ]
         include:
-          - app: client
-            format: nsis
-            target: "x86_64-pc-windows-gnu"
+          - target: "universal2-apple-darwin"
+            os: macos-latest
+          - os: ubuntu-latest # Default for Linux, Windows (cross-compile), FreeBSD
+          
+          # Server Exclusions (Targeting only stable platforms for Server)
           - app: server
-            format: nsis
-            target: "x86_64-pc-windows-gnu"
-        # Skip standard Linux formats for Windows target
-        exclude:
-          - format: deb
-            app: client
-          - format: rpm
-            app: client
-          - format: archlinux
-            app: client
-          # (Repeat for server as needed)
+            target: "powerpc64le-unknown-linux-musl"
+            skip: true
+          - app: server
+            target: "x86_64-unknown-freebsd"
+            skip: true
+          - app: server
+            target: "universal2-apple-darwin"
+            skip: true
 
     steps:
-      - uses: actions/checkout@v4
+      - name: Checkout Source
+        if: matrix.skip != true
+        uses: actions/checkout@v4
 
-      - name: Setup Tools
+      - name: Setup Linux/Windows/FreeBSD Tools
+        if: matrix.skip != true && runner.os == 'Linux'
         run: |
-          sudo apt-get update && sudo apt-get install -y nsis
+          sudo apt-get update && sudo apt-get install -y nsis gettext-base pax
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
+          cargo install cargo-zigbuild
+          rustup target add ${{ matrix.target }}
 
-      - name: Download Compiled Binaries
-        uses: actions/download-artifact@v4
-        with:
-          # Logic to pick the right architecture artifact
-          name: binaries-${{ matrix.target || 'aarch64-unknown-linux-musl' }}
-          path: build/bin
+      - name: Install Zig
+        if: matrix.skip != true && runner.os == 'Linux'
+        uses: goto-bus-stop/setup-zig@v2
 
-      - name: Create Final Package
+      - name: Build Binary
+        if: matrix.skip != true
+        run: |
+          BINARY_NAME="scm${{ matrix.app }}"
+          mkdir -p build/bin
+          
+          if [[ "${{ matrix.target }}" == *"darwin"* ]]; then
+            rustup target add ${{ matrix.target }}
+            cargo build --release --target ${{ matrix.target }} -p $BINARY_NAME
+          else
+            cargo zigbuild --release --target ${{ matrix.target }} -p $BINARY_NAME
+          fi
+          
+          # Stage binary for packaging (handles .exe automatically)
+          cp target/${{ matrix.target }}/release/${BINARY_NAME}* build/bin/
+
+      - name: Package Release
+        if: matrix.skip != true
         run: |
           mkdir -p dist
-          VERSION=$(grep -m 1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          APP_NAME="scm${{ matrix.app }}"
+          VERSION=$(grep -m 1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=${{ github.run_number }}
           
-          if [[ "${{ matrix.format }}" == "nsis" ]]; then
-            makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
-            mv scm${{ matrix.app }}/package/windows/*.exe dist/
-          else
-            nfpm pkg --packager ${{ matrix.format }} --config config/scm${{ matrix.app }}.yaml --target dist/
+          # --- Linux / Windows / FreeBSD logic remains as before ---
+          if [[ "${{ matrix.target }}" == *"linux"* ]]; then
+            for PKG in deb rpm archlinux; do
+              nfpm pkg --packager $PKG --config config/${APP_NAME}.yaml --target dist/
+            done
+
+          elif [[ "${{ matrix.target }}" == *"windows"* ]]; then
+            makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" ${APP_NAME}/package/windows/${APP_NAME}.nsi
+            mv ${APP_NAME}/package/windows/*.exe dist/
+
+
+          # --- 4. Hardened MacOS Packaging ---
+          elif [[ "${{ matrix.target }}" == *"darwin"* ]]; then
+            IDENTIFIER="io.openscm.${APP_NAME}"
+            STAGE_DIR="/tmp/pkg-create"
+            ROOT_DIR="${STAGE_DIR}/root"
+            SCRIPTS_DIR="${STAGE_DIR}/scripts"
+            OUTPUT_PKG="${{ github.workspace }}/dist/${APP_NAME}_${VERSION}-${RELEASE}_macos.pkg"
+
+            echo "📦 Starting macOS package build for ${APP_NAME} v${VERSION}..."
+            
+            # Setup Structure
+            rm -rf "${STAGE_DIR}"
+            mkdir -p "${ROOT_DIR}/usr/local/bin"
+            mkdir -p "${ROOT_DIR}/usr/local/etc/openscm/keys"
+            mkdir -p "${ROOT_DIR}/Library/LaunchDaemons"
+            mkdir -p "${ROOT_DIR}/var/log/openscm"
+            mkdir -p "${SCRIPTS_DIR}"
+
+            # Copy Assets
+            cp "build/bin/${APP_NAME}" "${ROOT_DIR}/usr/local/bin/${APP_NAME}"
+            chmod 755 "${ROOT_DIR}/usr/local/bin/${APP_NAME}"
+            cp "${APP_NAME}/package/darwin/${IDENTIFIER}.plist" "${ROOT_DIR}/Library/LaunchDaemons/"
+            chmod 644 "${ROOT_DIR}/Library/LaunchDaemons/${IDENTIFIER}.plist"
+
+            # Metrics
+            sync
+            INSTALL_KBYTES=$(du -sk "${ROOT_DIR}" | awk '{print $1}')
+            FILE_COUNT=$(find "${ROOT_DIR}" -type f | wc -l)
+
+            # Metadata (Using Export for envsubst)
+            export IDENTIFIER VERSION INSTALL_KBYTES FILE_COUNT
+            # Note: envsubst is part of gettext; if not found, we can use brew install gettext
+            if ! command -v envsubst &> /dev/null; then brew install gettext; fi
+            $(brew --prefix gettext)/bin/envsubst '${IDENTIFIER} ${VERSION} ${INSTALL_KBYTES} ${FILE_COUNT}' \
+                < "${APP_NAME}/package/darwin/PackageInfo" \
+                > "${STAGE_DIR}/PackageInfo"
+
+            # Scripts
+            cp "${APP_NAME}/package/darwin/preinstall"  "${SCRIPTS_DIR}/preinstall" 2>/dev/null || true
+            cp "${APP_NAME}/package/darwin/postinstall" "${SCRIPTS_DIR}/postinstall" 2>/dev/null || true
+            chmod +x "${SCRIPTS_DIR}/preinstall" "${SCRIPTS_DIR}/postinstall" 2>/dev/null || true
+
+            # Internal Archives
+            (cd "${ROOT_DIR}" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Payload")
+            (cd "${STAGE_DIR}" && mkbom root Bom)
+            (cd "${SCRIPTS_DIR}" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
+
+            # Final Assembly
+            (cd "${STAGE_DIR}" && xar --compression none -c -f "${OUTPUT_PKG}" Payload Bom PackageInfo Scripts)
+            
+            echo "✅ Success! Created: $OUTPUT_PKG"
+          
+          elif [[ "${{ matrix.target }}" == *"freebsd"* ]]; then
+            BINARY_SOURCE="build/bin/${APP_NAME}"
+            PKG_METADATA_DIR="${APP_NAME}/package/freebsd"
+            RC_SOURCE="${PKG_METADATA_DIR}/${APP_NAME}.rc"
+            
+            # 1. Prepare staging area
+            PKG_STAGE="/tmp/pkg-create"
+            rm -rf "$PKG_STAGE"
+            mkdir -p "$PKG_STAGE/usr/local/bin"
+            mkdir -p "$PKG_STAGE/usr/local/etc/rc.d"
+            
+            echo "Staging files for FreeBSD..."
+            cp "$BINARY_SOURCE" "$PKG_STAGE/usr/local/bin/${APP_NAME}"
+            cp "$RC_SOURCE" "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
+            
+            # 2. Set permissions
+            chmod 555 "$PKG_STAGE/usr/local/bin/${APP_NAME}"
+            chmod 555 "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
+            
+            # 3. Compute metadata
+            FLAT_SIZE=$(wc -c < "$PKG_STAGE/usr/local/bin/${APP_NAME}")
+            # Adding RC size to flat size as per your script logic
+            RC_SIZE=$(wc -c < "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}")
+            FLAT_SIZE=$((FLAT_SIZE + RC_SIZE))
+            
+            BIN_MTIME=$(stat -c %Y "$PKG_STAGE/usr/local/bin/${APP_NAME}")
+            RC_MTIME=$(stat -c %Y "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}")
+            
+            # 4. Process manifests from templates
+            export APP_NAME VERSION FLAT_SIZE BIN_MTIME RC_MTIME
+            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
+                < "${PKG_METADATA_DIR}/MANIFEST.template" \
+                > "$PKG_STAGE/+MANIFEST"
+            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
+                < "${PKG_METADATA_DIR}/COMPACT_MANIFEST.template" \
+                > "$PKG_STAGE/+COMPACT_MANIFEST"
+                
+            # 5. Create .pkg file (using x86_64 specifically as per your matrix)
+            echo "Creating FreeBSD package..."
+            PKG_FILE="${APP_NAME}-${VERSION}-${RELEASE}-freebsd-x86_64.pkg"
+            
+            tar -cJf "dist/${PKG_FILE}" \
+                -C "$PKG_STAGE" +MANIFEST +COMPACT_MANIFEST \
+                --transform 's|^usr/|/usr/|' \
+                -C "$PKG_STAGE" \
+                usr/local/bin/${APP_NAME} \
+                usr/local/etc/rc.d/${APP_NAME}
+                
+            echo "✅ Success! Created FreeBSD package: ${PKG_FILE}"
           fi
 
-      - name: Upload Final Artifact
+      - name: Upload Build Artifacts
+        if: matrix.skip != true
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.app }}-${{ matrix.format }}
+          name: release-${{ matrix.app }}-${{ matrix.target }}
           path: dist/*
+
+
+
+
