@@ -1,5 +1,3 @@
-name: OpenSCM Testing Release
-
 name: OpenSCM Stable Production Release
 
 on:
@@ -7,11 +5,9 @@ on:
     tags:
       - 'v*'
 
-
 jobs:
   build-and-package:
     name: Build ${{ matrix.app }} (${{ matrix.target }})
-    # Use macOS runner for Apple builds, Ubuntu for everything else
     runs-on: ${{ matrix.os }}
     strategy:
       fail-fast: false
@@ -23,12 +19,14 @@ jobs:
           "powerpc64le-unknown-linux-musl", "x86_64-pc-windows-gnu",
           "x86_64-unknown-freebsd", "universal2-apple-darwin"
         ]
+        # Set the default OS to ubuntu-latest for all targets
+        os: [ubuntu-latest]
         include:
+          # Override only for the macOS target
           - target: "universal2-apple-darwin"
             os: macos-latest
-          - os: ubuntu-latest # Default for Linux, Windows (cross-compile), FreeBSD
           
-          # Server Exclusions (Targeting only stable platforms for Server)
+          # Server Exclusions
           - app: server
             target: "powerpc64le-unknown-linux-musl"
             skip: true
@@ -70,7 +68,6 @@ jobs:
             cargo zigbuild --release --target ${{ matrix.target }} -p $BINARY_NAME
           fi
           
-          # Stage binary for packaging (handles .exe automatically)
           cp target/${{ matrix.target }}/release/${BINARY_NAME}* build/bin/
 
       - name: Package Release
@@ -81,7 +78,6 @@ jobs:
           VERSION=$(grep -m 1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=${{ github.run_number }}
           
-          # --- Linux / Windows / FreeBSD logic remains as before ---
           if [[ "${{ matrix.target }}" == *"linux"* ]]; then
             for PKG in deb rpm archlinux; do
               nfpm pkg --packager $PKG --config config/${APP_NAME}.yaml --target dist/
@@ -91,8 +87,6 @@ jobs:
             makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" ${APP_NAME}/package/windows/${APP_NAME}.nsi
             mv ${APP_NAME}/package/windows/*.exe dist/
 
-
-          # --- 4. Hardened MacOS Packaging ---
           elif [[ "${{ matrix.target }}" == *"darwin"* ]]; then
             IDENTIFIER="io.openscm.${APP_NAME}"
             STAGE_DIR="/tmp/pkg-create"
@@ -100,99 +94,55 @@ jobs:
             SCRIPTS_DIR="${STAGE_DIR}/scripts"
             OUTPUT_PKG="${{ github.workspace }}/dist/${APP_NAME}_${VERSION}-${RELEASE}_macos.pkg"
 
-            echo "📦 Starting macOS package build for ${APP_NAME} v${VERSION}..."
-            
-            # Setup Structure
             rm -rf "${STAGE_DIR}"
-            mkdir -p "${ROOT_DIR}/usr/local/bin"
-            mkdir -p "${ROOT_DIR}/usr/local/etc/openscm/keys"
-            mkdir -p "${ROOT_DIR}/Library/LaunchDaemons"
-            mkdir -p "${ROOT_DIR}/var/log/openscm"
-            mkdir -p "${SCRIPTS_DIR}"
+            mkdir -p "${ROOT_DIR}/usr/local/bin" "${ROOT_DIR}/Library/LaunchDaemons" "${SCRIPTS_DIR}"
 
-            # Copy Assets
             cp "build/bin/${APP_NAME}" "${ROOT_DIR}/usr/local/bin/${APP_NAME}"
             chmod 755 "${ROOT_DIR}/usr/local/bin/${APP_NAME}"
             cp "${APP_NAME}/package/darwin/${IDENTIFIER}.plist" "${ROOT_DIR}/Library/LaunchDaemons/"
-            chmod 644 "${ROOT_DIR}/Library/LaunchDaemons/${IDENTIFIER}.plist"
 
-            # Metrics
-            sync
             INSTALL_KBYTES=$(du -sk "${ROOT_DIR}" | awk '{print $1}')
             FILE_COUNT=$(find "${ROOT_DIR}" -type f | wc -l)
 
-            # Metadata (Using Export for envsubst)
             export IDENTIFIER VERSION INSTALL_KBYTES FILE_COUNT
-            # Note: envsubst is part of gettext; if not found, we can use brew install gettext
             if ! command -v envsubst &> /dev/null; then brew install gettext; fi
             $(brew --prefix gettext)/bin/envsubst '${IDENTIFIER} ${VERSION} ${INSTALL_KBYTES} ${FILE_COUNT}' \
                 < "${APP_NAME}/package/darwin/PackageInfo" \
                 > "${STAGE_DIR}/PackageInfo"
 
-            # Scripts
-            cp "${APP_NAME}/package/darwin/preinstall"  "${SCRIPTS_DIR}/preinstall" 2>/dev/null || true
+            cp "${APP_NAME}/package/darwin/preinstall" "${SCRIPTS_DIR}/preinstall" 2>/dev/null || true
             cp "${APP_NAME}/package/darwin/postinstall" "${SCRIPTS_DIR}/postinstall" 2>/dev/null || true
             chmod +x "${SCRIPTS_DIR}/preinstall" "${SCRIPTS_DIR}/postinstall" 2>/dev/null || true
 
-            # Internal Archives
+            # Fixed missing quote after Payload here
             (cd "${ROOT_DIR}" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Payload")
             (cd "${STAGE_DIR}" && mkbom root Bom)
             (cd "${SCRIPTS_DIR}" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
 
-            # Final Assembly
             (cd "${STAGE_DIR}" && xar --compression none -c -f "${OUTPUT_PKG}" Payload Bom PackageInfo Scripts)
-            
-            echo "✅ Success! Created: $OUTPUT_PKG"
-          
+
           elif [[ "${{ matrix.target }}" == *"freebsd"* ]]; then
             BINARY_SOURCE="build/bin/${APP_NAME}"
             PKG_METADATA_DIR="${APP_NAME}/package/freebsd"
             RC_SOURCE="${PKG_METADATA_DIR}/${APP_NAME}.rc"
-            
-            # 1. Prepare staging area
             PKG_STAGE="/tmp/pkg-create"
             rm -rf "$PKG_STAGE"
-            mkdir -p "$PKG_STAGE/usr/local/bin"
-            mkdir -p "$PKG_STAGE/usr/local/etc/rc.d"
+            mkdir -p "$PKG_STAGE/usr/local/bin" "$PKG_STAGE/usr/local/etc/rc.d"
             
-            echo "Staging files for FreeBSD..."
             cp "$BINARY_SOURCE" "$PKG_STAGE/usr/local/bin/${APP_NAME}"
             cp "$RC_SOURCE" "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
+            chmod 555 "$PKG_STAGE/usr/local/bin/${APP_NAME}" "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
             
-            # 2. Set permissions
-            chmod 555 "$PKG_STAGE/usr/local/bin/${APP_NAME}"
-            chmod 555 "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
-            
-            # 3. Compute metadata
-            FLAT_SIZE=$(wc -c < "$PKG_STAGE/usr/local/bin/${APP_NAME}")
-            # Adding RC size to flat size as per your script logic
-            RC_SIZE=$(wc -c < "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}")
-            FLAT_SIZE=$((FLAT_SIZE + RC_SIZE))
-            
+            FLAT_SIZE=$(($(wc -c < "$PKG_STAGE/usr/local/bin/${APP_NAME}") + $(wc -c < "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}")))
             BIN_MTIME=$(stat -c %Y "$PKG_STAGE/usr/local/bin/${APP_NAME}")
             RC_MTIME=$(stat -c %Y "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}")
             
-            # 4. Process manifests from templates
             export APP_NAME VERSION FLAT_SIZE BIN_MTIME RC_MTIME
-            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
-                < "${PKG_METADATA_DIR}/MANIFEST.template" \
-                > "$PKG_STAGE/+MANIFEST"
-            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
-                < "${PKG_METADATA_DIR}/COMPACT_MANIFEST.template" \
-                > "$PKG_STAGE/+COMPACT_MANIFEST"
-                
-            # 5. Create .pkg file (using x86_64 specifically as per your matrix)
-            echo "Creating FreeBSD package..."
-            PKG_FILE="${APP_NAME}-${VERSION}-${RELEASE}-freebsd-x86_64.pkg"
+            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' < "${PKG_METADATA_DIR}/MANIFEST.template" > "$PKG_STAGE/+MANIFEST"
+            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' < "${PKG_METADATA_DIR}/COMPACT_MANIFEST.template" > "$PKG_STAGE/+COMPACT_MANIFEST"
             
-            tar -cJf "dist/${PKG_FILE}" \
-                -C "$PKG_STAGE" +MANIFEST +COMPACT_MANIFEST \
-                --transform 's|^usr/|/usr/|' \
-                -C "$PKG_STAGE" \
-                usr/local/bin/${APP_NAME} \
-                usr/local/etc/rc.d/${APP_NAME}
-                
-            echo "✅ Success! Created FreeBSD package: ${PKG_FILE}"
+            PKG_FILE="${APP_NAME}-${VERSION}-${RELEASE}-freebsd-x86_64.pkg"
+            tar -cJf "dist/${PKG_FILE}" -C "$PKG_STAGE" +MANIFEST +COMPACT_MANIFEST --transform 's|^usr/|/usr/|' -C "$PKG_STAGE" usr/local/bin/${APP_NAME} usr/local/etc/rc.d/${APP_NAME}
           fi
 
       - name: Upload Build Artifacts
@@ -202,7 +152,7 @@ jobs:
           name: release-${{ matrix.app }}-${{ matrix.target }}
           path: dist/*
 
-publish:
+  publish:
     name: Publish to GitHub Releases
     needs: build-and-package
     runs-on: ubuntu-latest
@@ -216,11 +166,8 @@ publish:
         uses: softprops/action-gh-release@v2
         with:
           files: ./all-packages/**/*
-          # Pulls version name from the tag
           name: OpenSCM ${{ github.ref_name }}
           draft: false
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-
-
