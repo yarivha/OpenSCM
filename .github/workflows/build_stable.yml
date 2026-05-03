@@ -10,7 +10,9 @@ on:
 
 jobs:
 
-  # ── LINUX (deb / rpm / archlinux) ─────────────────────────────────────────
+  # ── LINUX ─────────────────────────────────────────────────────────────────
+  # Client: x86_64 / aarch64 / armv7 / riscv64 / ppc64le  →  deb + rpm + archlinux
+  # Server: x86_64 / aarch64 only                          →  deb + rpm only
   build-linux:
     name: Linux · ${{ matrix.app }} · ${{ matrix.target }}
     runs-on: ubuntu-latest
@@ -25,7 +27,6 @@ jobs:
           - riscv64gc-unknown-linux-musl
           - powerpc64le-unknown-linux-musl
         exclude:
-          # Server only supported on x86_64 and ARM64
           - app: server
             target: armv7-unknown-linux-musleabihf
           - app: server
@@ -51,7 +52,7 @@ jobs:
           cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
-      - name: Package (deb / rpm / archlinux)
+      - name: Package
         run: |
           case "${{ matrix.target }}" in
             x86_64-*)       ARCH=amd64   ;;
@@ -63,7 +64,13 @@ jobs:
           export ARCH
           export VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           export RELEASE=${{ github.run_number }}
-          for PKG in deb rpm archlinux; do
+          # Server: deb + rpm only. Client: deb + rpm + archlinux
+          if [[ "${{ matrix.app }}" == "server" ]]; then
+            PACKAGERS="deb rpm"
+          else
+            PACKAGERS="deb rpm archlinux"
+          fi
+          for PKG in $PACKAGERS; do
             nfpm pkg --packager $PKG --config config/scm${{ matrix.app }}.yaml --target dist/
           done
 

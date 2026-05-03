@@ -83,7 +83,13 @@ jobs:
           export ARCH
           export VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           export RELEASE=${{ github.run_number }}
-          for PKG in deb rpm archlinux; do
+          # Server: deb + rpm only. Client: deb + rpm + archlinux
+          if [[ "${{ matrix.app }}" == "server" ]]; then
+            PACKAGERS="deb rpm"
+          else
+            PACKAGERS="deb rpm archlinux"
+          fi
+          for PKG in $PACKAGERS; do
             nfpm pkg --packager $PKG --config config/scm${{ matrix.app }}.yaml --target dist/
           done
 
