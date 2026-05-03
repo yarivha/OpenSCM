@@ -242,11 +242,54 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_next_run ON policy_schedules (enabled, next_run)",
-    )
-    .execute(pool)
-    .await?;
+    // ── INDEXES ──────────────────────────────────────────────────────────────
+    // Already existed
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_next_run ON policy_schedules (enabled, next_run)")
+        .execute(pool).await?;
+
+    // results — scheduler queries by test_id; PK only covers (tenant_id, system_id, test_id)
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_results_tenant_test ON results (tenant_id, test_id)")
+        .execute(pool).await?;
+
+    // test_conditions — fetched for every test on every scan
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_test_conditions_tenant_test ON test_conditions (tenant_id, test_id)")
+        .execute(pool).await?;
+
+    // systems — nearly every query filters by tenant + status
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_systems_tenant_status ON systems (tenant_id, status)")
+        .execute(pool).await?;
+
+    // systems — dashboard orders by compliance_score per tenant
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_systems_tenant_score ON systems (tenant_id, compliance_score)")
+        .execute(pool).await?;
+
+    // systems_in_groups — PK is (tenant, system, group); group lookups need their own index
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sig_tenant_group ON systems_in_groups (tenant_id, group_id)")
+        .execute(pool).await?;
+
+    // systems_in_policy — reverse lookup: group → policies
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_sip_tenant_group ON systems_in_policy (tenant_id, group_id)")
+        .execute(pool).await?;
+
+    // tests_in_policy — reverse lookup: test → policies
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_tip_tenant_test ON tests_in_policy (tenant_id, test_id)")
+        .execute(pool).await?;
+
+    // compliance_history — trend charts query by tenant ordered by date
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_compliance_history_tenant_date ON compliance_history (tenant_id, check_date)")
+        .execute(pool).await?;
+
+    // notify — per-user notification queries
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_notify_tenant_owner ON notify (tenant_id, owner_id)")
+        .execute(pool).await?;
+
+    // tenant_keys — looked up on every authenticated request
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_tenant_keys_tenant_active ON tenant_keys (tenant_id, is_active)")
+        .execute(pool).await?;
+
+    // reports — listing ordered by submission date per tenant
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_reports_tenant_date ON reports (tenant_id, submission_date)")
+        .execute(pool).await?;
 
 
     // Create tests_in_policy table
