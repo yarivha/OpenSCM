@@ -108,16 +108,17 @@
 
       <!-- One card per policy -->
       {% for policy in report.policy_groups %}
-      <div class="card card-outline {% if policy.is_passed %}card-success{% else %}card-danger{% endif %} shadow-sm">
+      {% set exempt = policy.pass_count == 0 and policy.fail_count == 0 %}
+      <div class="card card-outline {% if exempt %}card-secondary{% elif policy.is_passed %}card-success{% else %}card-danger{% endif %} shadow-sm">
         <div class="card-header">
           <h3 class="card-title font-weight-bold">
-            <i class="fas fa-shield-alt mr-2 {% if policy.is_passed %}text-success{% else %}text-danger{% endif %}"></i>
+            <i class="fas fa-shield-alt mr-2 {% if exempt %}text-muted{% elif policy.is_passed %}text-success{% else %}text-danger{% endif %}"></i>
             {{ policy.policy_name }}
             <small class="text-muted ml-1">v{{ policy.policy_version }}</small>
           </h3>
           <div class="card-tools">
-            <span class="badge {% if policy.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1 mr-1">
-              {% if policy.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
+            <span class="badge {% if exempt %}badge-secondary{% elif policy.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1 mr-1">
+              {% if exempt %}NOT APPLICABLE{% elif policy.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
             </span>
             <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
           </div>
@@ -156,11 +157,17 @@
               <div class="col-sm-8">
                 <h6 class="mb-0 font-weight-bold">Policy Verdict</h6>
                 <small class="text-muted">
-                  {{ policy.pass_count }} passed &nbsp;·&nbsp; {{ policy.fail_count }} failed
+                  {% if exempt %}
+                    No applicable tests ran on this system
+                  {% else %}
+                    {{ policy.pass_count }} passed &nbsp;·&nbsp; {{ policy.fail_count }} failed
+                  {% endif %}
                 </small>
               </div>
               <div class="col-sm-4 text-right">
-                {% if policy.is_passed %}
+                {% if exempt %}
+                  <span class="h5 text-muted font-weight-bold"><i class="fas fa-minus-circle mr-1"></i> NOT APPLICABLE</span>
+                {% elif policy.is_passed %}
                   <span class="h5 text-success font-weight-bold"><i class="fas fa-shield-alt mr-1"></i> PASSED</span>
                 {% else %}
                   <span class="h5 text-danger font-weight-bold"><i class="fas fa-exclamation-triangle mr-1"></i> FAILED</span>

@@ -1312,20 +1312,25 @@ pub async fn system_report(
             policy_name,
             policy_version,
             results: Vec::new(),
-            is_passed: true,
+            is_passed: false,
             pass_count: 0,
             fail_count: 0,
         });
 
         match status.as_str() {
             "PASS" => entry.pass_count += 1,
-            "FAIL" => { entry.fail_count += 1; entry.is_passed = false; }
-            _      => {} // NA / NOT_SCANNED don't affect pass/fail
+            "FAIL" => entry.fail_count += 1,
+            _      => {} // NA / NOT_SCANNED don't affect counts
         }
         entry.results.push(IndividualResult { test_name, status });
     }
 
-    let policy_groups: Vec<PolicyResultGroup> = policy_map.into_values().collect();
+    // is_passed requires at least one PASS and zero FAILs.
+    // pass=0 + fail=0 means all-NA (not applicable) — handled separately in the template.
+    let mut policy_groups: Vec<PolicyResultGroup> = policy_map.into_values().collect();
+    for p in &mut policy_groups {
+        p.is_passed = p.pass_count > 0 && p.fail_count == 0;
+    }
 
     let total_pass = policy_groups.iter().map(|p| p.pass_count).sum();
     let total_fail = policy_groups.iter().map(|p| p.fail_count).sum();
