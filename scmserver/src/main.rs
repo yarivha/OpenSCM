@@ -4,7 +4,8 @@ use tracing_subscriber::{fmt, EnvFilter, registry, layer::SubscriberExt, util::S
 use base64::{Engine as _, engine::general_purpose};
 use hkdf::Hkdf;
 use sha2::Sha256;
-use sqlx::sqlite::{SqliteConnectOptions, SqlitePoolOptions};
+use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
+use std::time::Duration;
 use tokio::sync::mpsc;
 
 // Importing the public items from our own library (scmserver)
@@ -109,7 +110,10 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // run_migrations() is sufficient.
     let database_url = format!("sqlite://{}", db_path());
     let options = SqliteConnectOptions::from_str(&database_url)?
-        .create_if_missing(true);
+        .create_if_missing(true)
+        .journal_mode(SqliteJournalMode::Wal)        // readers never blocked by writers
+        .synchronous(SqliteSynchronous::Normal)      // safe + faster than Full
+        .busy_timeout(Duration::from_secs(5));       // queue writes instead of immediate error
 
     let pool = SqlitePoolOptions::new()
         .max_connections(5)
