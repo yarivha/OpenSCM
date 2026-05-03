@@ -32,9 +32,15 @@ REPO_BASE="/repo/openscm/${STAGE}"
 GPG_KEY="OpenSCM <support@openscm.io>"
 
 # ── Dependency check ──────────────────────────────────────────────────────────
-for cmd in curl jq gpg rpmsign createrepo reprepro repo-add; do
+for cmd in curl jq rpmsign createrepo reprepro repo-add; do
     command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' not found — please install it first"
 done
+
+# Prefer gpg2 over gpg (rpmsign needs the explicit path on some systems)
+if   command -v gpg2 >/dev/null 2>&1; then GPG_BIN="$(command -v gpg2)"
+elif command -v gpg  >/dev/null 2>&1; then GPG_BIN="$(command -v gpg)"
+else die "'gpg' / 'gpg2' not found — please install gnupg"
+fi
 
 # ── Repo directories ──────────────────────────────────────────────────────────
 mkdir -p \
@@ -85,7 +91,7 @@ for file in "$WORK_DIR"/*; do
 
         # ── RPM package ───────────────────────────────────────────────────────
         *.rpm)
-            rpmsign --addsign --key-id="$GPG_KEY" "$file"
+            rpmsign --addsign --key-id="$GPG_KEY" --gpg-path="$GPG_BIN" "$file"
             cp "$file" "$REPO_BASE/redhat/"
             ok "Signed and copied to RedHat repo"
             RPM_ADDED=1
@@ -93,7 +99,7 @@ for file in "$WORK_DIR"/*; do
 
         # ── Arch Linux package ────────────────────────────────────────────────
         *.pkg.tar.zst)
-            gpg --default-key "$GPG_KEY" --armor --detach-sign \
+            "$GPG_BIN" --default-key "$GPG_KEY" --armor --detach-sign \
                 --output "${file}.sig" "$file"
             cp "$file"          "$REPO_BASE/arch/"
             cp "${file}.sig"    "$REPO_BASE/arch/"
@@ -132,7 +138,7 @@ if [[ $RPM_ADDED -eq 1 ]]; then
     echo
     info "Updating RedHat repo metadata..."
     createrepo --update "$REPO_BASE/redhat/"
-    gpg --default-key "$GPG_KEY" --armor --detach-sign \
+    "$GPG_BIN" --default-key "$GPG_KEY" --armor --detach-sign \
         --output "$REPO_BASE/redhat/repodata/repomd.xml.asc" \
         "$REPO_BASE/redhat/repodata/repomd.xml"
     ok "repomd.xml updated and signed"
@@ -142,7 +148,7 @@ fi
 if [[ $ARCH_ADDED -eq 1 ]]; then
     echo
     info "Updating Arch repo database..."
-    repo-add --sign --key "$GPG_KEY" \
+    repo-add --sign --key "$GPG_KEY" --gpg-key "$GPG_BIN" \
         "$REPO_BASE/arch/openscm.db.tar.gz" \
         "$REPO_BASE/arch/"*.pkg.tar.zst
     ok "openscm.db updated"
