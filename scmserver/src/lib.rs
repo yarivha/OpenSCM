@@ -16,7 +16,21 @@ pub mod scheduler;
 pub mod install;
 
 // 2. Imports needed for the public API
-use std::{sync::{Arc, atomic::{AtomicBool, Ordering}}, path::PathBuf, error::Error};
+use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
+
+// Version registry — set once at binary startup so EE/SaaS show their own version.
+static APP_VERSION: OnceLock<String> = OnceLock::new();
+
+/// Call this from each binary's main() before starting the server.
+/// Uses the calling crate's CARGO_PKG_VERSION.
+pub fn set_app_version(version: &str) {
+    let _ = APP_VERSION.set(version.to_string());
+}
+
+/// Returns the version set by set_app_version(), or CE's version as fallback.
+pub fn app_version() -> &'static str {
+    APP_VERSION.get().map(|s| s.as_str()).unwrap_or(env!("CARGO_PKG_VERSION"))
+}
 use axum::{Router, Extension, response::IntoResponse, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
 use axum::middleware;
 use tera::Tera;

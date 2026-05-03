@@ -24,7 +24,7 @@ pub async fn render_template(
 ) -> Result<Html<String>, StatusCode> {
 
     // Global context — available on every page
-    context.insert("version", env!("CARGO_PKG_VERSION"));
+    context.insert("version", crate::app_version());
 
     // Database-driven context
     if let Some(db_pool) = pool {

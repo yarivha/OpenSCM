@@ -36,7 +36,8 @@ OPTIONS:
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
-    
+    scmserver::set_app_version(env!("CARGO_PKG_VERSION"));
+
 // 0. Usage
     let version = env!("CARGO_PKG_VERSION");
     let args: Vec<String> = std::env::args().collect();
