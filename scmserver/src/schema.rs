@@ -811,5 +811,22 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v4 → v5 complete.");
     }
 
+    // v5 → v6: add email_verified to users (default 1 so CE/EE users are unaffected)
+    if version < 6 {
+        info!("Running schema migration v5 → v6 (email_verified)...");
+
+        let _ = sqlx::query(
+            "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"
+        )
+        .execute(pool)
+        .await;
+
+        sqlx::query("UPDATE schema_info SET version = 6")
+            .execute(pool)
+            .await?;
+
+        info!("Schema migration v5 → v6 complete.");
+    }
+
     Ok(())
 }

@@ -151,14 +151,14 @@ pub async fn login_submit(
 
     let row = match &tenant_id_filter {
         Some(tid) => sqlx::query(
-            "SELECT password, username, id, tenant_id, role FROM users WHERE username = ? AND tenant_id = ?",
+            "SELECT password, username, id, tenant_id, role, email_verified FROM users WHERE username = ? AND tenant_id = ?",
         )
         .bind(&form.username)
         .bind(tid)
         .fetch_optional(&pool)
         .await,
         None => sqlx::query(
-            "SELECT password, username, id, tenant_id, role FROM users WHERE username = ?",
+            "SELECT password, username, id, tenant_id, role, email_verified FROM users WHERE username = ?",
         )
         .bind(&form.username)
         .fetch_optional(&pool)
@@ -190,6 +190,13 @@ pub async fn login_submit(
             let username: String = row.get("username");
             let userid: i32 = row.get("id");
             let role: String = row.get("role");
+
+            // email_verified defaults to 1 for CE/EE rows; SaaS sets 0 until verified
+            let email_verified: i64 = row.try_get("email_verified").unwrap_or(1);
+            if email_verified == 0 {
+                warn!("Login blocked for unverified user '{}'", username);
+                return (jar, Redirect::to("/login?error_message=Please+verify+your+email+address+before+signing+in."));
+            }
 
             let tenant_id: String = row.try_get::<String, _>("tenant_id")
                 .unwrap_or_else(|_| "default".to_string());

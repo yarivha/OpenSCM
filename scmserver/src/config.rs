@@ -54,8 +54,24 @@ pub fn config_path() -> &'static str { CONFIG_PATH }
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct Config {
     pub server: ServerConfig,
-    pub database: DatabaseConfig, // Added this
-    pub key: KeyConfig,           // Added this
+    pub database: DatabaseConfig,
+    pub key: KeyConfig,
+    #[serde(default)]
+    pub email: EmailConfig,
+}
+
+/// Email / transactional-mail settings.
+/// Used by SaaS for verification and password-reset emails.
+/// CE and EE ignore this section entirely.
+#[derive(Debug, Deserialize, Clone, Serialize, Default)]
+pub struct EmailConfig {
+    /// Resend API key (sk_...)
+    pub resend_api_key: Option<String>,
+    /// "From" address, e.g. "OpenSCM <noreply@openscm.io>"
+    pub from_address: Option<String>,
+    /// Public base URL of the app, e.g. "https://app.openscm.io"
+    /// Used to build verification / password-reset links.
+    pub app_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize)]
@@ -91,6 +107,7 @@ impl Default for Config {
                 public_key: Some(PUBLIC_KEY_PATH.to_string()),
                 private_key: Some(PRIVATE_KEY_PATH.to_string()),
             },
+            email: EmailConfig::default(),
         }
     }
 }
