@@ -174,7 +174,7 @@ jobs:
           (cd "${STAGE_DIR}"             && mkbom root Bom)
           (cd "${STAGE_DIR}/pkg-scripts" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
           (cd "${STAGE_DIR}"             && xar --compression none -c \
-            -f "${{ github.workspace }}/dist/${APP_NAME}_${VERSION}_macos.pkg" \
+            -f "${{ github.workspace }}/dist/${APP_NAME}_${VERSION}-${RELEASE}_macos.pkg" \
             Payload Bom PackageInfo Scripts)
 
       - uses: actions/upload-artifact@v4
@@ -227,7 +227,7 @@ jobs:
           envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
             < "${APP_NAME}/package/freebsd/COMPACT_MANIFEST.template" > "$PKG_STAGE/+COMPACT_MANIFEST"
 
-          tar -cJf "dist/${APP_NAME}-${VERSION}-freebsd-x86_64.pkg" \
+          tar -cJf "dist/${APP_NAME}-${VERSION}-${RELEASE}-freebsd-x86_64.pkg" \
             -C "$PKG_STAGE" +MANIFEST +COMPACT_MANIFEST \
             --transform 's|^usr/|/usr/|' \
             -C "$PKG_STAGE" usr/local/bin/${APP_NAME} usr/local/etc/rc.d/${APP_NAME}

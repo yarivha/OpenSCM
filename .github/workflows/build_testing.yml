@@ -146,7 +146,7 @@ jobs:
           (cd "${STAGE_DIR}"             && mkbom root Bom)
           (cd "${STAGE_DIR}/pkg-scripts" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
           (cd "${STAGE_DIR}"             && xar --compression none -c \
-            -f "${{ github.workspace }}/dist/${APP_NAME}_${VERSION}_macos.pkg" \
+            -f "${{ github.workspace }}/dist/${APP_NAME}_${VERSION}-${RELEASE}_macos.pkg" \
             Payload Bom PackageInfo Scripts)
 
       - uses: actions/upload-artifact@v4
