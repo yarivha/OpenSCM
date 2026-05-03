@@ -12,22 +12,6 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Init Database......");
 
 
-    // schema_info
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS schema_info (
-            id INTEGER PRIMARY KEY CHECK (id = 1),
-            version INTEGER NOT NULL
-        )"
-    )
-    .execute(pool)
-    .await?;
-
-    // Seed schema version for fresh installs — skips all migrations
-    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 5)")
-        .execute(pool)
-        .await?;
-
-
     //  Tenants Table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tenants (
