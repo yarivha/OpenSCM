@@ -13,6 +13,10 @@ All notable changes to OpenSCM are documented here.
 ### Added
 - **CMD enabled warning** — scmclient logs a warning at startup when `cmd_enabled = true` to alert operators that the client will execute commands received from the server.
 
+### Changed
+- **`tenant_id` renamed to `organization`** — the client config field, Windows registry key, and wire protocol now use `organization` instead of `tenant_id`, aligning with standard terminology. The server accepts both names for backward compatibility with older clients. Existing config files and registry entries are migrated automatically on first run.
+- **Self-healing config on every startup** — the client normalizes and rewrites its config on every startup. Missing settings are filled in with defaults, stale or renamed keys are removed, and legacy field names are rewritten in canonical form. Upgraded clients will automatically gain any new settings added in future releases.
+
 ### Fixed
 - **CMD element captures stderr** — commands that write to stderr instead of stdout (e.g. macOS `softwareupdate`) now evaluate correctly against OUTPUT conditions. Previously they always returned False.
 
