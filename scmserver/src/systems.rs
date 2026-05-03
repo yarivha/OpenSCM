@@ -11,7 +11,12 @@ use tracing::{info, warn, error};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
-use crate::models::{ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession};
+use std::collections::BTreeMap;
+use crate::handlers::normalize_status;
+use crate::models::{
+    ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
+    IndividualResult, PolicyResultGroup, SystemReportData,
+};
 use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data};
 
@@ -1220,4 +1225,154 @@ pub async fn systems_bulk_add_group(
     info!("Bulk added {} systems to group {} by '{}'.", added, group_id, auth.username);
     let msg = urlencoding::encode(&format!("{} system(s) added to group.", added)).to_string();
     Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
+}
+
+
+// ============================================================
+// SYSTEM LIVE REPORT
+// ============================================================
+
+pub async fn system_report(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    // 1. Fetch system header
+    let sys_row = match sqlx::query(
+        "SELECT id, name, os, arch, ip, compliance_score, last_seen
+         FROM systems WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .fetch_optional(&*pool)
+    .await
+    {
+        Ok(Some(row)) => row,
+        Ok(None) => return axum::http::StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            error!(error = ?e, system_id = %id, "Failed to fetch system for report");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 2. One query: all policies → tests → results for this system
+    let raw = match sqlx::query(r#"
+        SELECT
+            p.id        AS policy_id,
+            p.name      AS policy_name,
+            p.version   AS policy_version,
+            t.name      AS test_name,
+            COALESCE(r.result, 'NOT_SCANNED') AS status
+        FROM systems_in_groups sig
+        JOIN systems_in_policy sip
+            ON sig.group_id = sip.group_id AND sig.tenant_id = sip.tenant_id
+        JOIN policies p
+            ON sip.policy_id = p.id AND p.tenant_id = sip.tenant_id
+        JOIN tests_in_policy tip
+            ON tip.policy_id = p.id AND tip.tenant_id = p.tenant_id
+        JOIN tests t
+            ON tip.test_id = t.id
+        LEFT JOIN results r
+            ON r.test_id = t.id AND r.system_id = ? AND r.tenant_id = ?
+        WHERE sig.system_id = ? AND sig.tenant_id = ?
+        ORDER BY p.name, t.name
+    "#)
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!(error = ?e, system_id = %id, "Failed to fetch policy results for system report");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // 3. Group by policy (preserve insertion order with BTreeMap keyed on policy_id)
+    let mut policy_map: BTreeMap<i32, PolicyResultGroup> = BTreeMap::new();
+    for row in &raw {
+        let policy_id: i32    = row.get("policy_id");
+        let policy_name: String  = row.get("policy_name");
+        let policy_version: String = row.get("policy_version");
+        let test_name: String  = row.get("test_name");
+        let status_raw: String = row.get("status");
+        let status = normalize_status(&status_raw).to_string();
+
+        let entry = policy_map.entry(policy_id).or_insert_with(|| PolicyResultGroup {
+            policy_id,
+            policy_name,
+            policy_version,
+            results: Vec::new(),
+            is_passed: true,
+            pass_count: 0,
+            fail_count: 0,
+        });
+
+        match status.as_str() {
+            "PASS" => entry.pass_count += 1,
+            "FAIL" => { entry.fail_count += 1; entry.is_passed = false; }
+            _      => {} // NA / NOT_SCANNED don't affect pass/fail
+        }
+        entry.results.push(IndividualResult { test_name, status });
+    }
+
+    let policy_groups: Vec<PolicyResultGroup> = policy_map.into_values().collect();
+
+    let total_pass = policy_groups.iter().map(|p| p.pass_count).sum();
+    let total_fail = policy_groups.iter().map(|p| p.fail_count).sum();
+    let total_na: usize = policy_groups.iter()
+        .flat_map(|p| p.results.iter())
+        .filter(|r| r.status == "NA" || r.status == "NOT_SCANNED")
+        .count();
+
+    let last_seen: Option<String> = sys_row
+        .get::<Option<DateTime<Utc>>, _>("last_seen")
+        .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string());
+
+    let report = SystemReportData {
+        system_id:        sys_row.get("id"),
+        system_name:      sys_row.get("name"),
+        os:               sys_row.get::<Option<String>, _>("os").unwrap_or_default(),
+        arch:             sys_row.get("arch"),
+        ip:               sys_row.get("ip"),
+        compliance_score: sys_row.get::<f64, _>("compliance_score"),
+        last_seen,
+        policy_groups,
+        total_pass,
+        total_fail,
+        total_na,
+    };
+
+    let compliance_sat: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_sat'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(80);
+
+    let compliance_marginal: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_marginal'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(60);
+
+    let mut context = Context::new();
+    context.insert("report", &report);
+    context.insert("compliance_sat", &compliance_sat);
+    context.insert("compliance_marginal", &compliance_marginal);
+    render_template(&tera, Some(&pool), "systems_report.html", context, Some(auth))
+        .await
+        .into_response()
 }

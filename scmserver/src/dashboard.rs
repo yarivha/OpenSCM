@@ -108,10 +108,10 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
     // 3. Get Highest Risk Assets
     let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(
-        "SELECT name as system_name, os, compliance_score as compliance, 
+        "SELECT id as system_id, name as system_name, os, compliance_score as compliance,
         tests_passed, tests_failed,
         MAX(0, total_tests - tests_passed - tests_failed) as tests_na
-        FROM systems WHERE status='active' AND tenant_id = ? 
+        FROM systems WHERE status='active' AND tenant_id = ?
         AND compliance_score >= 0 ORDER BY compliance_score ASC LIMIT 5"
     )
     .bind(&auth.tenant_id)

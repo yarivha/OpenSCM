@@ -158,6 +158,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/users/edit/{id}", get(users::users_edit).post(users::users_edit_save))
         .route("/users/changepassword/{id}", post(users::change_password))
         .route("/systems", get(systems::systems))
+        .route("/systems/report/{id}", get(systems::system_report))
         .route("/systems/delete/{id}", get(systems::systems_delete))
         .route("/systems/edit/{id}", get(systems::systems_edit).post(systems::systems_edit_save))
         .route("/systems/pending", get(systems::systems_pending))

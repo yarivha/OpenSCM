@@ -202,12 +202,41 @@ pub struct PolicyCompliance {
 
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct SystemFailRow {
+    pub system_id: i32,
     pub system_name: String,
     pub os: String,
     pub compliance: f64, // Alias for compliance_score
     pub tests_passed: i32,
     pub tests_failed: i32,
     pub tests_na: i64,
+}
+
+/// One policy's worth of results for a single system
+#[derive(Debug, Serialize, Deserialize)]
+pub struct PolicyResultGroup {
+    pub policy_id: i32,
+    pub policy_name: String,
+    pub policy_version: String,
+    pub results: Vec<IndividualResult>,
+    pub is_passed: bool,
+    pub pass_count: usize,
+    pub fail_count: usize,
+}
+
+/// All data needed by the system live-report page
+#[derive(Debug, Serialize, Deserialize)]
+pub struct SystemReportData {
+    pub system_id: i32,
+    pub system_name: String,
+    pub os: String,
+    pub arch: Option<String>,
+    pub ip: Option<String>,
+    pub compliance_score: f64,
+    pub last_seen: Option<String>,
+    pub policy_groups: Vec<PolicyResultGroup>,
+    pub total_pass: usize,
+    pub total_fail: usize,
+    pub total_na: usize,
 }
 
 #[derive(sqlx::FromRow, serde::Serialize)]
@@ -275,10 +304,10 @@ pub struct SystemReport {
     pub is_passed: bool,
 }
 
-#[derive(Serialize, Deserialize)]
+#[derive(Debug, Serialize, Deserialize)]
 pub struct IndividualResult {
     pub test_name: String,
-    pub status: String, 
+    pub status: String,
 }
 
 

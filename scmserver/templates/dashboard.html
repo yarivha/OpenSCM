@@ -182,7 +182,7 @@
                     <tr><td colspan="3" class="text-center py-5 text-muted">All systems meeting compliance targets.</td></tr>
                   {% else %}
                     {% for sys in top_failed_systems %}
-                    <tr>
+                    <tr style="cursor: pointer;" onclick="window.location='/systems/report/{{ sys.system_id }}'">
                       <td>
                         <span class="font-weight-bold">{{ sys.system_name }}</span><br>
                         <small class="text-muted">{{ sys.os }}</small>

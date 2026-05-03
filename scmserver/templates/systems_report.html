@@ -1,0 +1,187 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .verdict-box {
+    border: 1px solid #dee2e6;
+    background: rgba(0,0,0,0.02);
+    border-radius: 4px;
+  }
+  .dark-mode .verdict-box {
+    border-color: #4b545c;
+    background: rgba(255,255,255,0.05);
+  }
+  .status-icon { width: 20px; text-align: center; }
+  @media print {
+    .btn, .main-footer, .breadcrumb { display: none !important; }
+    .content-wrapper { margin-left: 0 !important; }
+  }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1 class="m-0"><i class="fas fa-server mr-2 text-primary"></i>System Compliance Report</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/systems">Systems</a></li>
+            <li class="breadcrumb-item active">Live Report</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {% if error_message %}<div class="alert alert-danger">{{ error_message }}</div>{% endif %}
+
+      <!-- System header card -->
+      <div class="row">
+        <div class="col-md-12">
+          <div class="card card-outline card-dark shadow-sm">
+            <div class="card-body">
+              <div class="row">
+                <div class="col-md-8 border-right">
+                  <h4>{{ report.system_name }}</h4>
+                  <p class="text-sm text-muted mb-1">
+                    <i class="fas fa-desktop mr-1"></i><strong>OS:</strong> {{ report.os }}
+                    {% if report.arch %}&nbsp;&nbsp;<i class="fas fa-microchip mr-1"></i>{{ report.arch }}{% endif %}
+                    {% if report.ip %}&nbsp;&nbsp;<i class="fas fa-network-wired mr-1"></i>{{ report.ip }}{% endif %}
+                  </p>
+                  {% if report.last_seen %}
+                  <p class="text-sm text-muted mb-0">
+                    <i class="fas fa-clock mr-1"></i><strong>Last Seen:</strong> {{ report.last_seen }}
+                  </p>
+                  {% endif %}
+                </div>
+
+                <div class="col-md-4 text-center">
+                  <div class="row">
+                    <div class="col-4">
+                      <h3 class="text-success mb-0">{{ report.total_pass }}</h3>
+                      <small class="text-uppercase text-muted text-xs">Pass</small>
+                    </div>
+                    <div class="col-4">
+                      <h3 class="{% if report.total_fail > 0 %}text-danger{% else %}text-success{% endif %} mb-0">
+                        {{ report.total_fail }}
+                      </h3>
+                      <small class="text-uppercase text-muted text-xs">Fail</small>
+                    </div>
+                    <div class="col-4">
+                      <h3 class="text-muted mb-0">{{ report.total_na }}</h3>
+                      <small class="text-uppercase text-muted text-xs">NA</small>
+                    </div>
+                  </div>
+
+                  <div class="mt-2">
+                    {% if report.compliance_score < 0 %}
+                      <span class="badge badge-secondary px-2 py-1">Not Scanned</span>
+                    {% elif report.compliance_score >= compliance_sat %}
+                      <span class="badge badge-success px-2 py-1">{{ report.compliance_score | round(method="ceil", precision=0) }}% Compliant</span>
+                    {% elif report.compliance_score >= compliance_marginal %}
+                      <span class="badge badge-warning px-2 py-1">{{ report.compliance_score | round(method="ceil", precision=0) }}% Marginal</span>
+                    {% else %}
+                      <span class="badge badge-danger px-2 py-1">{{ report.compliance_score | round(method="ceil", precision=0) }}% Non-Compliant</span>
+                    {% endif %}
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% if report.policy_groups | length == 0 %}
+      <div class="alert alert-info">
+        <i class="fas fa-info-circle mr-1"></i>
+        This system is not assigned to any policy group, or no scan results are available yet.
+      </div>
+      {% endif %}
+
+      <!-- One card per policy -->
+      {% for policy in report.policy_groups %}
+      <div class="card card-outline {% if policy.is_passed %}card-success{% else %}card-danger{% endif %} shadow-sm">
+        <div class="card-header">
+          <h3 class="card-title font-weight-bold">
+            <i class="fas fa-shield-alt mr-2 {% if policy.is_passed %}text-success{% else %}text-danger{% endif %}"></i>
+            {{ policy.policy_name }}
+            <small class="text-muted ml-1">v{{ policy.policy_version }}</small>
+          </h3>
+          <div class="card-tools">
+            <span class="badge {% if policy.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1 mr-1">
+              {% if policy.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
+            </span>
+            <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
+          </div>
+        </div>
+
+        <div class="card-body p-0">
+          <table class="table table-valign-middle mb-0">
+            <thead>
+              <tr class="text-xs text-muted text-uppercase">
+                <th style="padding-left: 20px;">Security Requirement</th>
+                <th class="text-center" style="width: 150px;">Status</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for res in policy.results %}
+              <tr>
+                <td style="padding-left: 20px;">{{ res.test_name }}</td>
+                <td class="text-center">
+                  {% if res.status == "PASS" %}
+                    <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
+                  {% elif res.status == "NA" %}
+                    <span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>
+                  {% elif res.status == "NOT_SCANNED" %}
+                    <span class="text-muted text-sm"><i class="fas fa-question-circle mr-1"></i>Not Scanned</span>
+                  {% else %}
+                    <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+
+          <div class="p-3 verdict-box m-3">
+            <div class="row align-items-center">
+              <div class="col-sm-8">
+                <h6 class="mb-0 font-weight-bold">Policy Verdict</h6>
+                <small class="text-muted">
+                  {{ policy.pass_count }} passed &nbsp;·&nbsp; {{ policy.fail_count }} failed
+                </small>
+              </div>
+              <div class="col-sm-4 text-right">
+                {% if policy.is_passed %}
+                  <span class="h5 text-success font-weight-bold"><i class="fas fa-shield-alt mr-1"></i> PASSED</span>
+                {% else %}
+                  <span class="h5 text-danger font-weight-bold"><i class="fas fa-exclamation-triangle mr-1"></i> FAILED</span>
+                {% endif %}
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+      {% endfor %}
+
+      <div class="row pb-4">
+        <div class="col-12 text-right">
+          <hr>
+          <a class="btn btn-secondary btn-sm" href="/systems">
+            <i class="fas fa-arrow-left mr-1"></i> Back to Systems
+          </a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+</div>
+{% endblock %}
