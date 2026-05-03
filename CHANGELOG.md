@@ -8,6 +8,24 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.2.2] - 2026-05-03
+
+### Added
+- **System compliance report** — new live report page (`/systems/report/:id`) showing every policy the system belongs to, with each test result (PASS / FAIL / NA) grouped per policy. Includes overall pass/fail/NA counters and a per-policy verdict.
+- **Dashboard drill-down for systems** — Top Failed Systems table now links directly to the system compliance report on click, matching the existing behaviour of the Top Failed Policies table.
+- **Compliance report button** — green clipboard button added to each active system row in the Systems table for one-click access to the system report.
+- **Policy report link from dashboard** — Top Failed Policies table now links directly to the live policy report.
+
+### CI / Build
+- Replaced manual build script with GitHub Actions workflows triggered on version tag (`v*`).
+- **Stable workflow** builds all targets, packages deb / rpm / archlinux / Windows exe / macOS pkg / FreeBSD pkg, pushes a Docker multi-arch image (amd64 + arm64) to Docker Hub, and creates a draft GitHub Release with all artifacts attached.
+- **Testing workflow** (manual trigger) builds and packages all targets for validation without publishing.
+
+### Fixed
+- Error 500 on system groups add and edit pages.
+
+---
+
 ## [0.2.0] - 2026-04-30
 
 ### Added
