@@ -1,0 +1,10 @@
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Type = Package
+Target = scmserver
+
+[Action]
+Description = Reloading systemd daemon and restarting OpenSCM server...
+When = PostTransaction
+Exec = /bin/sh -c 'systemctl daemon-reload; systemctl enable scmserver.service; systemctl restart scmserver.service'
