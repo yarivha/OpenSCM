@@ -46,7 +46,7 @@ if [ "$1" = "configure" ] || [ "$1" = "1" ] || [ "$1" = "2" ] || \
     echo ""
     echo "  Edit the config to point to your OpenSCM server:"
     echo "    url = \"https://your-openscm-server.com\""
-    echo "    tenant_id = \"default\""
+    echo "    organization = \"default\""
     echo ""
     echo "  Then restart the service:"
     echo "    sudo systemctl restart $APP_NAME"
