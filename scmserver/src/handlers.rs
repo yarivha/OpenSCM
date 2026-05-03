@@ -25,6 +25,7 @@ pub async fn render_template(
 
     // Global context — available on every page
     context.insert("version", crate::app_version());
+    context.insert("edition", crate::app_edition());
 
     // Database-driven context
     if let Some(db_pool) = pool {

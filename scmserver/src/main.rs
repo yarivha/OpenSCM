@@ -37,6 +37,7 @@ OPTIONS:
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     scmserver::set_app_version(env!("CARGO_PKG_VERSION"));
+    scmserver::set_app_edition("Community Edition");
 
 // 0. Usage
     let version = env!("CARGO_PKG_VERSION");

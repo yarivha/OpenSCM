@@ -22,7 +22,6 @@ use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, 
 static APP_VERSION: OnceLock<String> = OnceLock::new();
 
 /// Call this from each binary's main() before starting the server.
-/// Uses the calling crate's CARGO_PKG_VERSION.
 pub fn set_app_version(version: &str) {
     let _ = APP_VERSION.set(version.to_string());
 }
@@ -30,6 +29,19 @@ pub fn set_app_version(version: &str) {
 /// Returns the version set by set_app_version(), or CE's version as fallback.
 pub fn app_version() -> &'static str {
     APP_VERSION.get().map(|s| s.as_str()).unwrap_or(env!("CARGO_PKG_VERSION"))
+}
+
+// Edition registry — "Community Edition", "Enterprise Edition", "SaaS Edition"
+static APP_EDITION: OnceLock<String> = OnceLock::new();
+
+/// Call this from each binary's main() to set the edition label shown in the UI.
+pub fn set_app_edition(edition: &str) {
+    let _ = APP_EDITION.set(edition.to_string());
+}
+
+/// Returns the edition set by set_app_edition(), or "Community Edition" as fallback.
+pub fn app_edition() -> &'static str {
+    APP_EDITION.get().map(|s| s.as_str()).unwrap_or("Community Edition")
 }
 use axum::{Router, Extension, response::IntoResponse, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
 use axum::middleware;
