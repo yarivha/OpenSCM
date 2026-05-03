@@ -139,8 +139,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Log Level      : {}", log_level);
     info!("=============================================================");
 
-    if !config.client.cmd_enabled.unwrap_or(false) {
-        warn!("CMD element is disabled — tests using CMD will be skipped. Set 'cmd_enabled = true' in [client] config to enable.");
+    if config.client.cmd_enabled.unwrap_or(false) {
+        warn!("CMD element is ENABLED — this client will execute commands received from the server. Ensure you trust the server completely.");
     }
 
     // Apply log level from config
