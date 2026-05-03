@@ -8,7 +8,7 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
-## [0.2.3] - TBD
+## [0.2.3] - 2026-05-03
 
 ### Added
 - **CMD enabled warning** — scmclient logs a warning at startup when `cmd_enabled = true` to alert operators that the client will execute commands received from the server.
@@ -19,6 +19,7 @@ All notable changes to OpenSCM are documented here.
 
 ### Fixed
 - **CMD element captures stderr** — commands that write to stderr instead of stdout (e.g. macOS `softwareupdate`) now evaluate correctly against OUTPUT conditions. Previously they always returned False.
+- **Policy verdict when all tests are NA** — a policy where every test returned NA (e.g. no applicable OS tests, or `cmd_enabled = false`) previously showed as COMPLIANT / PASSED. It now correctly shows as NOT APPLICABLE with a grey badge.
 
 ### Build
 - Windows installer filename no longer includes the redundant `windows` label — e.g. `scmclient-0.2.3-1-x86_64.exe`.
