@@ -227,7 +227,7 @@ jobs:
           envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
             < "${APP_NAME}/package/freebsd/COMPACT_MANIFEST.template" > "$PKG_STAGE/+COMPACT_MANIFEST"
 
-          tar -cJf "dist/${APP_NAME}-${VERSION}-${RELEASE}-freebsd-x86_64.pkg" \
+          tar -cJf "dist/${APP_NAME}-${VERSION}-${RELEASE}-freebsd-amd64.pkg" \
             -C "$PKG_STAGE" +MANIFEST +COMPACT_MANIFEST \
             --transform 's|^usr/|/usr/|' \
             -C "$PKG_STAGE" usr/local/bin/${APP_NAME} usr/local/etc/rc.d/${APP_NAME}
