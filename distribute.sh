@@ -91,7 +91,7 @@ for file in "$WORK_DIR"/*; do
 
         # ── RPM package ───────────────────────────────────────────────────────
         *.rpm)
-            rpmsign --addsign --key-id="$GPG_KEY" --gpg-path="$GPG_BIN" "$file"
+            rpmsign --addsign --key-id="$GPG_KEY" --define "__gpg $GPG_BIN" "$file"
             cp "$file" "$REPO_BASE/redhat/"
             ok "Signed and copied to RedHat repo"
             RPM_ADDED=1
@@ -148,7 +148,7 @@ fi
 if [[ $ARCH_ADDED -eq 1 ]]; then
     echo
     info "Updating Arch repo database..."
-    repo-add --sign --key "$GPG_KEY" --gpg-key "$GPG_BIN" \
+    repo-add --sign --key "$GPG_KEY" \
         "$REPO_BASE/arch/openscm.db.tar.gz" \
         "$REPO_BASE/arch/"*.pkg.tar.zst
     ok "openscm.db updated"
