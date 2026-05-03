@@ -60,15 +60,20 @@ jobs:
           BINARY_NAME="scm${{ matrix.app }}"
 
           if [[ "${{ matrix.target }}" == *"darwin"* ]]; then
-            rustup target add ${{ matrix.target }}
-            cargo build --release --target ${{ matrix.target }} -p $BINARY_NAME
+            # Universal binary via lipo (universal2 target unreliable on ARM64 runner)
+            rustup target add aarch64-apple-darwin x86_64-apple-darwin
+            cargo build --release --target aarch64-apple-darwin -p $BINARY_NAME
+            cargo build --release --target x86_64-apple-darwin  -p $BINARY_NAME
+            lipo -create \
+              target/aarch64-apple-darwin/release/$BINARY_NAME \
+              target/x86_64-apple-darwin/release/$BINARY_NAME \
+              -output build/bin/$BINARY_NAME
           else
             cargo zigbuild --release --target ${{ matrix.target }} -p $BINARY_NAME
+            # Stage binary (.exe extension handled automatically by glob)
+            cp target/${{ matrix.target }}/release/${BINARY_NAME}* build/bin/ 2>/dev/null || \
+            cp target/${{ matrix.target }}/release/${BINARY_NAME}  build/bin/
           fi
-
-          # Stage binary (.exe extension handled automatically by glob)
-          cp target/${{ matrix.target }}/release/${BINARY_NAME}* build/bin/ 2>/dev/null || \
-          cp target/${{ matrix.target }}/release/${BINARY_NAME}  build/bin/
 
       - name: Package Linux
         if: contains(matrix.target, 'linux')

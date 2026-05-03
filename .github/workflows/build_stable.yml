@@ -131,10 +131,15 @@ jobs:
           IDENTIFIER="io.openscm.${APP_NAME}"
           STAGE_DIR="/tmp/pkg-create"
 
-          # Universal binary (ARM64 + x86_64)
-          rustup target add universal2-apple-darwin
-          cargo build --release --target universal2-apple-darwin -p $APP_NAME
-          cp target/universal2-apple-darwin/release/$APP_NAME build/bin/
+          # Universal binary — build each arch separately then combine with lipo
+          # (universal2-apple-darwin target is unreliable on the ARM64 runner with pinned toolchain)
+          rustup target add aarch64-apple-darwin x86_64-apple-darwin
+          cargo build --release --target aarch64-apple-darwin -p $APP_NAME
+          cargo build --release --target x86_64-apple-darwin  -p $APP_NAME
+          lipo -create \
+            target/aarch64-apple-darwin/release/$APP_NAME \
+            target/x86_64-apple-darwin/release/$APP_NAME \
+            -output build/bin/$APP_NAME
 
           # Stage files
           mkdir -p "${STAGE_DIR}/root/usr/local/bin" \
