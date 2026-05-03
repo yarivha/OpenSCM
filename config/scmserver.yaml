@@ -1,4 +1,4 @@
-name: "openscm-server"
+name: "scmserver"
 arch: "${ARCH}"
 platform: "linux"
 version: "${VERSION}"

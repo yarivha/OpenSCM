@@ -1,4 +1,4 @@
-name: "openscm-client"
+name: "scmclient"
 arch: "${ARCH}"
 platform: "linux"
 version: "${VERSION}"
