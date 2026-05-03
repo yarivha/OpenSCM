@@ -177,30 +177,33 @@ jobs:
 
 
   # ── FREEBSD (.pkg) ────────────────────────────────────────────────────────
+  # zigbuild can't cross-compile sysinfo's FreeBSD backend (needs libkvm/libprocstat).
+  # We use a QEMU FreeBSD VM via cross-platform-actions for a native build instead.
   build-freebsd:
     name: FreeBSD · Client
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Setup Environment
+      - name: Build Binary (FreeBSD VM)
+        uses: cross-platform-actions/action@v0.25.0
+        with:
+          operating_system: freebsd
+          version: '14.2'
+          run: |
+            sudo pkg install -y rust
+            mkdir -p build/bin
+            cargo build --release -p scmclient
+            cp target/release/scmclient build/bin/
+
+      - name: Package
         run: |
           sudo apt-get update && sudo apt-get install -y gettext-base
-          cargo install cargo-zigbuild
-          rustup target add x86_64-unknown-freebsd
-
-      - uses: goto-bus-stop/setup-zig@v2
-
-      - name: Build and Package
-        run: |
-          mkdir -p dist build/bin
           APP_NAME=scmclient
           VERSION=$(grep -m1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=${{ github.run_number }}
 
-          cargo zigbuild --release --target x86_64-unknown-freebsd -p $APP_NAME
-          cp target/x86_64-unknown-freebsd/release/$APP_NAME build/bin/
-
+          mkdir -p dist
           PKG_STAGE="/tmp/pkg-create"
           mkdir -p "$PKG_STAGE/usr/local/bin" "$PKG_STAGE/usr/local/etc/rc.d"
           cp "build/bin/${APP_NAME}" "$PKG_STAGE/usr/local/bin/${APP_NAME}"

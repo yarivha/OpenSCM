@@ -21,7 +21,6 @@ jobs:
           - riscv64gc-unknown-linux-musl
           - powerpc64le-unknown-linux-musl
           - x86_64-pc-windows-gnu
-          - x86_64-unknown-freebsd
           - universal2-apple-darwin
         include:
           - target: universal2-apple-darwin
@@ -34,8 +33,6 @@ jobs:
             target: riscv64gc-unknown-linux-musl
           - app: server
             target: powerpc64le-unknown-linux-musl
-          - app: server
-            target: x86_64-unknown-freebsd
           - app: server
             target: universal2-apple-darwin
 
@@ -141,13 +138,38 @@ jobs:
             -f "${{ github.workspace }}/dist/${APP_NAME}_${VERSION}_macos.pkg" \
             Payload Bom PackageInfo Scripts)
 
+      - uses: actions/upload-artifact@v4
+        with:
+          name: test-${{ matrix.app }}-${{ matrix.target }}
+          path: dist/*
+
+
+  # ── FREEBSD (native QEMU VM — zigbuild can't cross-compile sysinfo) ──────
+  build-freebsd:
+    name: client · freebsd
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build Binary (FreeBSD VM)
+        uses: cross-platform-actions/action@v0.25.0
+        with:
+          operating_system: freebsd
+          version: '14.2'
+          run: |
+            sudo pkg install -y rust
+            mkdir -p build/bin
+            cargo build --release -p scmclient
+            cp target/release/scmclient build/bin/
+
       - name: Package FreeBSD
-        if: contains(matrix.target, 'freebsd')
         run: |
-          APP_NAME="scm${{ matrix.app }}"
+          sudo apt-get update && sudo apt-get install -y gettext-base
+          APP_NAME=scmclient
           VERSION=$(grep -m1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=${{ github.run_number }}
 
+          mkdir -p dist
           PKG_STAGE="/tmp/pkg-create"
           mkdir -p "$PKG_STAGE/usr/local/bin" "$PKG_STAGE/usr/local/etc/rc.d"
           cp "build/bin/${APP_NAME}" "$PKG_STAGE/usr/local/bin/${APP_NAME}"
@@ -171,5 +193,5 @@ jobs:
 
       - uses: actions/upload-artifact@v4
         with:
-          name: test-${{ matrix.app }}-${{ matrix.target }}
+          name: test-client-freebsd
           path: dist/*
