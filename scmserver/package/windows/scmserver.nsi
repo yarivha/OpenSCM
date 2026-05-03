@@ -9,9 +9,6 @@
 !ifndef VERSION
     !define VERSION "0.0.0"
 !endif
-!ifndef BUILD_DIR
-    !define BUILD_DIR "build"
-!endif
 
 # --- ICON Defenition ---
 !define MUI_ICON "scmserver.ico"
@@ -86,7 +83,7 @@ Section "Install"
     # --- 2. DEPLOY BINARIES ---
     SetOutPath "$INSTDIR"
 
-    File "${BUILD_DIR}\bin\scmserver.exe"
+    File "scmserver.exe"
     File "scmserver-service.exe"
     File "scmserver-service.xml"
     File "scmserver.ico"

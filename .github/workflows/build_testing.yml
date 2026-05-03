@@ -67,9 +67,12 @@ jobs:
               -output build/bin/$BINARY_NAME
           else
             cargo zigbuild --release --target ${{ matrix.target }} -p $BINARY_NAME
-            # Stage binary (.exe extension handled automatically by glob)
-            cp target/${{ matrix.target }}/release/${BINARY_NAME}* build/bin/ 2>/dev/null || \
-            cp target/${{ matrix.target }}/release/${BINARY_NAME}  build/bin/
+            # Stage binary — Windows target produces .exe, others have no extension
+            if [[ "${{ matrix.target }}" == *"windows"* ]]; then
+              cp "target/${{ matrix.target }}/release/${BINARY_NAME}.exe" build/bin/
+            else
+              cp "target/${{ matrix.target }}/release/${BINARY_NAME}" build/bin/
+            fi
           fi
 
       - name: Package Linux
@@ -100,6 +103,9 @@ jobs:
         run: |
           VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=${{ github.run_number }}
+          # Copy binary next to the .nsi script (NSIS CDs to script dir at compile time)
+          cp build/bin/scm${{ matrix.app }}.exe \
+             scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.exe
           makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
           mv scm${{ matrix.app }}/package/windows/*.exe dist/
 

@@ -105,7 +105,9 @@ jobs:
           VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           RELEASE=${{ github.run_number }}
           cargo zigbuild --release --target x86_64-pc-windows-gnu -p scm${{ matrix.app }}
-          cp target/x86_64-pc-windows-gnu/release/scm${{ matrix.app }}.exe build/bin/
+          # Copy binary next to the .nsi script (NSIS CDs to script dir at compile time)
+          cp target/x86_64-pc-windows-gnu/release/scm${{ matrix.app }}.exe \
+             scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.exe
           makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
           mv scm${{ matrix.app }}/package/windows/*.exe dist/
 

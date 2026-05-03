@@ -10,9 +10,6 @@
 !ifndef VERSION
     !define VERSION "0.0.0"
 !endif
-!ifndef BUILD_DIR
-    !define BUILD_DIR "build"
-!endif
 
 
 # --- Icon Defenition ---  
@@ -104,7 +101,7 @@ Section "Install"
     # --- 2. DEPLOY BINARIES ---
     SetOutPath "$INSTDIR"
 
-    File "${BUILD_DIR}\bin\scmclient.exe"
+    File "scmclient.exe"
     File "scmclient-service.exe"
     File "scmclient-service.xml"
     File "scmclient.ico" 
