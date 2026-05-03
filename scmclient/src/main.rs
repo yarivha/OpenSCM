@@ -139,6 +139,10 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     info!("Log Level      : {}", log_level);
     info!("=============================================================");
 
+    if !config.client.cmd_enabled.unwrap_or(false) {
+        warn!("CMD element is disabled — tests using CMD will be skipped. Set 'cmd_enabled = true' in [client] config to enable.");
+    }
+
     // Apply log level from config
     let _ = reload_handle.reload(EnvFilter::new(log_level));
 
