@@ -98,7 +98,7 @@ fn write_private_file(path: &PathBuf, contents: &str) -> Result<(), Box<dyn std:
 /// Send a compliance result to the server.
 async fn send_result(
     client_id_int: i64,
-    tenant_id: &str,
+    organization: &str,
     test_id: i64,
     result: &str,
     signing_key: &SigningKey,
@@ -107,7 +107,7 @@ async fn send_result(
 ) {
     let payload = ComplianceResult {
         client_id: client_id_int,
-        tenant_id: tenant_id.to_string(),
+        organization: organization.to_string(),
         test_id,
         result: result.to_string(),
     };
@@ -147,7 +147,7 @@ async fn send_result(
 async fn process_compliance_tests(
     tests: Vec<Test>,
     client_id: &str,
-    tenant_id: &str,
+    organization: &str,
     signing_key: &SigningKey,
     http_client: &reqwest::Client,
     result_url: &str,
@@ -204,7 +204,7 @@ async fn process_compliance_tests(
 
                 if !is_applicable {
                     debug!("Test ID {} is not applicable — sending NA.", test_id);
-                    send_result(client_id_int, tenant_id, test_id, "NA", signing_key, http_client, result_url).await;
+                    send_result(client_id_int, organization, test_id, "NA", signing_key, http_client, result_url).await;
                     debug!("Completed evaluation of test ID {}", test_id);
                     continue;
                 }
@@ -258,7 +258,7 @@ async fn process_compliance_tests(
         };
 
         debug!("Test ID {} result: {}", test_id, final_result);
-        send_result(client_id_int, tenant_id, test_id, &final_result, signing_key, http_client, result_url).await;
+        send_result(client_id_int, organization, test_id, &final_result, signing_key, http_client, result_url).await;
         debug!("Completed evaluation of test ID {}", test_id);
     }
 }
@@ -341,7 +341,7 @@ pub async fn send_system_info(
 
     let unsigned_payload = UnsignedPayload {
         id:         current_id.clone(),
-        tenant_id:  config.server.tenant_id.clone(),
+        organization: config.server.organization.clone(),
         hostname:   my_hostname.clone(),
         ver:        my_ver.clone(),
         ip:         my_local_ip.clone(),
@@ -441,7 +441,7 @@ pub async fn send_system_info(
                         process_compliance_tests(
                             tests,
                             &current_id,
-                            &config.server.tenant_id,
+                            &config.server.organization,
                             &signing_key,
                             &http_client,
                             &result_url,

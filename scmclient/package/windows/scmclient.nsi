@@ -113,7 +113,7 @@ Section "Install"
 
     # --- 4. REGISTRY UPDATE ---
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL" "$ServerURL"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "TenantId" "default"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Organization" "default"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$ProgramData\OpenSCM\Client\keys"

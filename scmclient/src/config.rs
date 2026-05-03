@@ -55,7 +55,7 @@ pub struct Config {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ServerConfig {
     pub url: String,
-    pub tenant_id: String,
+    pub organization: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -76,7 +76,7 @@ impl Default for Config {
         Self {
             server: ServerConfig {
                 url: "http://localhost:8000".to_string(),
-                tenant_id: "default".to_string(),
+                organization: "default".to_string(),
             },
             client: ClientConfig {
                 heartbeat: Some("300".to_string()),
@@ -103,7 +103,7 @@ impl Config {
                 let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
                 key.set_value("ServerURL", &self.server.url)?;
-                key.set_value("TenantId", &self.server.tenant_id)?;
+                key.set_value("Organization", &self.server.organization)?;
                 
                 if let Some(hb) = &self.client.heartbeat {
                     key.set_value("Heartbeat", hb)?;
@@ -181,7 +181,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
 
     let needs_repair = [
         key.get_value::<String, _>("ServerURL").is_err(),
-        key.get_value::<String, _>("TenantId").is_err(),
+        key.get_value::<String, _>("Organization").is_err(),
         key.get_value::<String, _>("Heartbeat").is_err(),
         key.get_value::<String, _>("LogLevel").is_err(),
         key.get_value::<String, _>("CmdEnabled").is_err(),
@@ -199,7 +199,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let config = Config {
         server: ServerConfig {
             url,
-            tenant_id: read_val("TenantId", "default"),
+            organization: read_val("Organization", "default"),
         },
         client: ClientConfig {
             heartbeat:   Some(read_val("Heartbeat", "300")),
@@ -238,9 +238,9 @@ fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
         return Err("server.url is required but empty in config file".into());
     }
 
-    if config.server.tenant_id.trim().is_empty() {
-        error!("Configuration error: 'server.tenant_id' is empty in '{}'.", path.display());
-        return Err("server.tenant_id is required but empty in config file".into());
+    if config.server.organization.trim().is_empty() {
+        error!("Configuration error: 'server.organization' is empty in '{}'.", path.display());
+        return Err("server.organization is required but empty in config file".into());
     }
 
     Ok(config)

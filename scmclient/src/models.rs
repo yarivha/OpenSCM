@@ -7,7 +7,7 @@ use serde::{Serialize, Deserialize};
 #[derive(Serialize, Deserialize, Debug, Clone)]
 pub struct UnsignedPayload {
     pub id: String,
-    pub tenant_id: String,
+    pub organization: String,
     pub hostname: String,
     pub ver: String,
     pub ip: String,
@@ -69,7 +69,7 @@ pub struct TestCondition {
 #[derive(Debug, Serialize, Deserialize)]
 pub struct ComplianceResult {
     pub client_id: i64,
-    pub tenant_id: String,
+    pub organization: String,
     pub test_id: i64,
     pub result: String, // "PASS", "FAIL", or "NA"
 }

@@ -107,10 +107,10 @@ pub async fn send(
 ) -> impl IntoResponse {
     let payload = &signed_req.payload;
 
-    let tenant_id = if payload.tenant_id.is_empty() {
+    let tenant_id = if payload.organization.is_empty() {
         "default"
     } else {
-        &payload.tenant_id
+        &payload.organization
     };
 
     let id = match payload.id.parse::<i64>() {
@@ -508,10 +508,10 @@ pub async fn receive_result(
 ) -> impl IntoResponse {
     let payload = &signed_req.payload;
 
-    let tenant_id = if payload.tenant_id.is_empty() {
+    let tenant_id = if payload.organization.is_empty() {
         "default"
     } else {
-        &payload.tenant_id
+        &payload.organization
     };
 
     info!(
