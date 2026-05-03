@@ -1020,8 +1020,16 @@ pub fn evaluate(
                     match output {
                         Ok(o) => {
                             let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
-                            debug!("CMD '{}' stdout: '{}'", input, stdout);
-                            if apply_string_condition(&stdout, condition, sinput_trim) {
+                            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                            // Some commands (e.g. softwareupdate) write to stderr instead of stdout.
+                            // Combine both so conditions match regardless of which stream is used.
+                            let combined = match (stdout.is_empty(), stderr.is_empty()) {
+                                (false, false) => format!("{}\n{}", stdout, stderr),
+                                (true,  false) => stderr,
+                                (_,      _   ) => stdout,
+                            };
+                            debug!("CMD '{}' output: '{}'", input, combined);
+                            if apply_string_condition(&combined, condition, sinput_trim) {
                                 EvalResult::Pass
                             } else {
                                 EvalResult::Fail
