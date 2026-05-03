@@ -118,9 +118,11 @@ jobs:
           IDENTIFIER="io.openscm.${APP_NAME}"
           STAGE_DIR="/tmp/pkg-create"
 
+          # Note: use "pkg-scripts" not "scripts" — macOS filesystem is case-insensitive
+          # so a dir named "scripts" and a file named "Scripts" would collide
           mkdir -p "${STAGE_DIR}/root/usr/local/bin" \
                    "${STAGE_DIR}/root/Library/LaunchDaemons" \
-                   "${STAGE_DIR}/scripts"
+                   "${STAGE_DIR}/pkg-scripts"
           cp "build/bin/${APP_NAME}" "${STAGE_DIR}/root/usr/local/bin/${APP_NAME}"
           chmod 755 "${STAGE_DIR}/root/usr/local/bin/${APP_NAME}"
           cp "${APP_NAME}/package/darwin/${IDENTIFIER}.plist" "${STAGE_DIR}/root/Library/LaunchDaemons/"
@@ -134,13 +136,13 @@ jobs:
             '${IDENTIFIER} ${VERSION} ${INSTALL_KBYTES} ${FILE_COUNT}' \
             < "${APP_NAME}/package/darwin/PackageInfo" > "${STAGE_DIR}/PackageInfo"
 
-          cp "${APP_NAME}/package/darwin/preinstall"  "${STAGE_DIR}/scripts/" 2>/dev/null || true
-          cp "${APP_NAME}/package/darwin/postinstall" "${STAGE_DIR}/scripts/" 2>/dev/null || true
-          chmod +x "${STAGE_DIR}/scripts/"*install 2>/dev/null || true
-          (cd "${STAGE_DIR}/root"    && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Payload")
-          (cd "${STAGE_DIR}"         && mkbom root Bom)
-          (cd "${STAGE_DIR}/scripts" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
-          (cd "${STAGE_DIR}"         && xar --compression none -c \
+          cp "${APP_NAME}/package/darwin/preinstall"  "${STAGE_DIR}/pkg-scripts/" 2>/dev/null || true
+          cp "${APP_NAME}/package/darwin/postinstall" "${STAGE_DIR}/pkg-scripts/" 2>/dev/null || true
+          chmod +x "${STAGE_DIR}/pkg-scripts/"*install 2>/dev/null || true
+          (cd "${STAGE_DIR}/root"        && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Payload")
+          (cd "${STAGE_DIR}"             && mkbom root Bom)
+          (cd "${STAGE_DIR}/pkg-scripts" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
+          (cd "${STAGE_DIR}"             && xar --compression none -c \
             -f "${{ github.workspace }}/dist/${APP_NAME}_${VERSION}_macos.pkg" \
             Payload Bom PackageInfo Scripts)
 
