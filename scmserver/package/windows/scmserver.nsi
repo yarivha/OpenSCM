@@ -10,7 +10,7 @@
     !define VERSION "0.0.0"
 !endif
 !ifndef BUILD_DIR
-    !define BUILD_DIR "/Apps/OpenSCM/build"
+    !define BUILD_DIR "build"
 !endif
 
 # --- ICON Defenition ---
@@ -86,7 +86,7 @@ Section "Install"
     # --- 2. DEPLOY BINARIES ---
     SetOutPath "$INSTDIR"
 
-    File "${BUILD_DIR}\target\x86_64-pc-windows-gnu\release\scmserver.exe"
+    File "${BUILD_DIR}\bin\scmserver.exe"
     File "scmserver-service.exe"
     File "scmserver-service.xml"
     File "scmserver.ico"
