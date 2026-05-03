@@ -112,11 +112,13 @@ Section "Install"
     CreateDirectory "$ProgramData\OpenSCM\Client\keys"
 
     # --- 4. REGISTRY UPDATE ---
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL" "$ServerURL"
+    # Write all keys that match CURRENT_REGISTRY_KEYS in config.rs
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL"    "$ServerURL"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Organization" "default"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat" "300"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel" "info"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "KeyPath" "$ProgramData\OpenSCM\Client\keys"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat"    "300"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel"     "info"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "CmdEnabled"   "false"
+    # NOTE: KeyPath was removed — key storage path is a hardcoded constant in the binary
 
     # --- 5. SERVICE RESTART ---
     DetailPrint "Registering and starting OpenSCM Agent service..."

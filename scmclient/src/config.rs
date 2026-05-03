@@ -17,12 +17,10 @@ cfg_if! {
 }
 
 
-
 // ============================================================
 // CONSTANTS
 // ============================================================
 
-// --- Constants ---
 cfg_if! {
     if #[cfg(target_os = "linux")] {
         const CONFIG_PATH: &str = "/etc/openscm/scmclient.config";
@@ -43,6 +41,23 @@ pub fn key_path() -> &'static str { KEY_PATH }
 pub fn config_path() -> &'static str { CONFIG_PATH }
 
 // ============================================================
+// REGISTRY SCHEMA (Windows)
+// ============================================================
+//
+// Defines the canonical set of registry values.
+// On every startup, values NOT in this list are deleted automatically.
+// When adding a new setting: add it here + add it to normalize() below.
+//
+#[cfg(target_os = "windows")]
+const CURRENT_REGISTRY_KEYS: &[&str] = &[
+    "ServerURL",
+    "Organization",
+    "Heartbeat",
+    "LogLevel",
+    "CmdEnabled",
+];
+
+// ============================================================
 // STRUCTS
 // ============================================================
 
@@ -55,13 +70,14 @@ pub struct Config {
 #[derive(Debug, Deserialize, Clone, Serialize)]
 pub struct ServerConfig {
     pub url: String,
+    #[serde(alias = "tenant_id")]   // v0.2.2 and older used tenant_id
     pub organization: String,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
 pub struct ClientConfig {
-    pub heartbeat: Option<String>,
-    pub loglevel: Option<String>,
+    pub heartbeat:   Option<String>,
+    pub loglevel:    Option<String>,
     pub cmd_enabled: Option<bool>,
 }
 
@@ -72,15 +88,14 @@ pub struct ClientConfig {
 
 impl Default for Config {
     fn default() -> Self {
-
         Self {
             server: ServerConfig {
-                url: "http://localhost:8000".to_string(),
+                url:          "http://localhost:8000".to_string(),
                 organization: "default".to_string(),
             },
             client: ClientConfig {
-                heartbeat: Some("300".to_string()),
-                loglevel: Some("info".to_string()),
+                heartbeat:   Some("300".to_string()),
+                loglevel:    Some("info".to_string()),
                 cmd_enabled: Some(false),
             },
         }
@@ -88,43 +103,54 @@ impl Default for Config {
 }
 
 
+// ============================================================
+// NORMALIZE
+// ============================================================
+//
+// Fills any absent optional fields with their defaults.
+// Called on every load so the on-disk config is always up to date.
+//
+// When adding a new optional setting:
+//   1. Add the field to ClientConfig above
+//   2. Add its default to Config::default() above
+//   3. Add one line here
+//   4. Add the registry key name to CURRENT_REGISTRY_KEYS (Windows)
+//   5. Add it to the NSIS installer WriteRegStr block
+//
+impl Config {
+    fn normalize(mut self) -> Self {
+        let d = Config::default();
+        if self.client.heartbeat.is_none()   { self.client.heartbeat   = d.client.heartbeat;   }
+        if self.client.loglevel.is_none()    { self.client.loglevel    = d.client.loglevel;    }
+        if self.client.cmd_enabled.is_none() { self.client.cmd_enabled = d.client.cmd_enabled; }
+        self
+    }
+}
+
 
 // ============================================================
-// CONFIG IMPLEMENTATION
+// SAVE
 // ============================================================
-
 
 impl Config {
     pub fn save(&self) -> Result<(), Box<dyn Error>> {
         cfg_if! {
             if #[cfg(target_os = "windows")] {
-                // --- Windows Registry Logic ---
                 let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
                 let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
-                key.set_value("ServerURL", &self.server.url)?;
+                key.set_value("ServerURL",    &self.server.url)?;
                 key.set_value("Organization", &self.server.organization)?;
-                
-                if let Some(hb) = &self.client.heartbeat {
-                    key.set_value("Heartbeat", hb)?;
-                }
-                if let Some(ll) = &self.client.loglevel {
-                    key.set_value("LogLevel", ll)?;
-                }
-                if let Some(cmd) = self.client.cmd_enabled {
-                    key.set_value("CmdEnabled", &cmd.to_string())?;
-                }
 
-                info!("Configuration saved to Windows Registry.");
+                if let Some(hb)  = &self.client.heartbeat   { key.set_value("Heartbeat",  hb)?; }
+                if let Some(ll)  = &self.client.loglevel     { key.set_value("LogLevel",   ll)?; }
+                if let Some(cmd) =  self.client.cmd_enabled  { key.set_value("CmdEnabled", &cmd.to_string())?; }
+
                 Ok(())
             } else {
-                // --- Unix (FreeBSD/Linux) TOML Logic ---
                 let path = PathBuf::from(CONFIG_PATH);
                 let toml_string = toml::to_string_pretty(self)?;
-                
                 fs::write(&path, toml_string)?;
-                
-                info!("Configuration saved to {:?}.", path);
                 Ok(())
             }
         }
@@ -139,12 +165,10 @@ impl Config {
 pub fn get_config() -> Result<Config, Box<dyn Error>> {
     cfg_if! {
         if #[cfg(target_os = "windows")] {
-            // Windows logic: Just pull from the Registry
             load_from_registry()
         } else {
-            // Unix logic: Handle the TOML file and bootstrapping
             let path = PathBuf::from(CONFIG_PATH);
-            
+
             if !path.exists() {
                 warn!(
                     "Config file not found at '{}'. Bootstrapping defaults.",
@@ -152,12 +176,11 @@ pub fn get_config() -> Result<Config, Box<dyn Error>> {
                 );
                 bootstrap_default_config(&path)?;
             }
-            
+
             load_from_toml(&path)
         }
     }
 }
-
 
 
 // ============================================================
@@ -169,8 +192,6 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     let hklm = RegKey::predef(HKEY_LOCAL_MACHINE);
     let (key, _) = hklm.create_subkey("SOFTWARE\\OpenSCM\\Client")?;
 
-    // Read a registry value, stripping null terminators and whitespace.
-    // Returns the default string if the value is missing.
     let read_val = |name: &str, default: &str| -> String {
         key.get_value::<String, _>(name)
             .unwrap_or_else(|_| default.to_string())
@@ -179,38 +200,54 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
             .to_string()
     };
 
-    let needs_repair = [
-        key.get_value::<String, _>("ServerURL").is_err(),
-        key.get_value::<String, _>("Organization").is_err(),
-        key.get_value::<String, _>("Heartbeat").is_err(),
-        key.get_value::<String, _>("LogLevel").is_err(),
-        key.get_value::<String, _>("CmdEnabled").is_err(),
-    ]
-    .iter()
-    .any(|&missing| missing);
+    // Field migration: TenantId → Organization (v0.2.3)
+    let organization = {
+        let org = read_val("Organization", "");
+        if org.is_empty() {
+            let legacy = read_val("TenantId", "default");
+            if legacy != "default" {
+                warn!("Migrating registry: 'TenantId' → 'Organization'.");
+            }
+            legacy
+        } else {
+            org
+        }
+    };
 
     let url = read_val("ServerURL", "http://localhost:8000");
-
     if url.is_empty() {
         error!("Registry: ServerURL is empty. Please set a valid server URL.");
         return Err("ServerURL is required but empty in registry".into());
     }
 
     let config = Config {
-        server: ServerConfig {
-            url,
-            organization: read_val("Organization", "default"),
-        },
+        server: ServerConfig { url, organization },
         client: ClientConfig {
-            heartbeat:   Some(read_val("Heartbeat", "300")),
-            loglevel:    Some(read_val("LogLevel", "info")),
+            heartbeat:   Some(read_val("Heartbeat",  "300")),
+            loglevel:    Some(read_val("LogLevel",   "info")),
             cmd_enabled: Some(read_val("CmdEnabled", "false") == "true"),
         },
-    };
+    }
+    .normalize();
 
-    if needs_repair {
-        warn!("Registry settings incomplete. Performing self-repair...");
-        config.save()?;
+    // Always save — writes current schema, fills any gaps from upgrades
+    if let Err(e) = config.save() {
+        warn!("Failed to update registry: {}.", e);
+    }
+
+    // Delete any registry values outside the current schema (stale / renamed)
+    let existing: Vec<String> = key
+        .enum_values()
+        .filter_map(|r| r.ok().map(|(name, _)| name))
+        .collect();
+
+    for name in &existing {
+        if !CURRENT_REGISTRY_KEYS.contains(&name.as_str()) {
+            match key.delete_value(name) {
+                Ok(_)  => info!("Removed stale registry value: '{}'.", name),
+                Err(e) => warn!("Could not remove stale registry value '{}': {}.", name, e),
+            }
+        }
     }
 
     Ok(config)
@@ -231,16 +268,22 @@ fn bootstrap_default_config(path: &Path) -> Result<(), Box<dyn Error>> {
 #[cfg(not(target_os = "windows"))]
 fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
     let content = fs::read_to_string(path)?;
-    let config: Config = toml::from_str(&content)?;
+    let config: Config = toml::from_str(&content)?;  // serde aliases handle field renames
 
     if config.server.url.trim().is_empty() {
         error!("Configuration error: 'server.url' is empty in '{}'.", path.display());
         return Err("server.url is required but empty in config file".into());
     }
-
     if config.server.organization.trim().is_empty() {
         error!("Configuration error: 'server.organization' is empty in '{}'.", path.display());
         return Err("server.organization is required but empty in config file".into());
+    }
+
+    let config = config.normalize();
+
+    // Always save — rewrites with current field names and fills any new settings
+    if let Err(e) = config.save() {
+        warn!("Failed to update config file: {}.", e);
     }
 
     Ok(config)
