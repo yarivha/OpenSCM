@@ -32,7 +32,7 @@ REPO_BASE="/repo/openscm/${STAGE}"
 GPG_KEY="OpenSCM <support@openscm.io>"
 
 # ── Dependency check ──────────────────────────────────────────────────────────
-for cmd in gh gpg rpmsign createrepo reprepro repo-add; do
+for cmd in curl jq gpg rpmsign createrepo reprepro repo-add; do
     command -v "$cmd" >/dev/null 2>&1 || die "'$cmd' not found — please install it first"
 done
 
@@ -50,11 +50,20 @@ WORK_DIR="$(mktemp -d)"
 trap 'rm -rf "$WORK_DIR"' EXIT
 
 info "Downloading release assets for ${TAG} (${STAGE})..."
-gh release download "$TAG" --repo "$GITHUB_REPO" --dir "$WORK_DIR" --skip-existing
 
-FILES=("$WORK_DIR"/*)
-[[ ${#FILES[@]} -gt 0 ]] || die "No assets found for tag $TAG"
-echo "    Found ${#FILES[@]} asset(s)"
+API_URL="https://api.github.com/repos/${GITHUB_REPO}/releases/tags/${TAG}"
+RELEASE_JSON=$(curl -fsSL "$API_URL") \
+    || die "Failed to fetch release info for $TAG — check tag name and network"
+
+mapfile -t ASSET_URLS < <(echo "$RELEASE_JSON" | jq -r '.assets[].browser_download_url')
+[[ ${#ASSET_URLS[@]} -gt 0 ]] || die "No assets found for tag $TAG"
+echo "    Found ${#ASSET_URLS[@]} asset(s)"
+
+for url in "${ASSET_URLS[@]}"; do
+    name=$(basename "$url")
+    echo "    Downloading ${name}..."
+    curl -fsSL -o "$WORK_DIR/$name" "$url"
+done
 
 # ── Process each asset ────────────────────────────────────────────────────────
 info "Processing assets..."
