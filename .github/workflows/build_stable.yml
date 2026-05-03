@@ -1,4 +1,7 @@
-name: OpenSCM Stable Production Release
+name: OpenSCM Production Release
+
+env:
+  FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
 
 on:
   push:
@@ -6,168 +9,308 @@ on:
       - 'v*'
 
 jobs:
-  build-and-package:
-    name: Build ${{ matrix.app }} (${{ matrix.target }})
-    runs-on: ${{ matrix.os }}
+
+  # ── LINUX (deb / rpm / archlinux) ─────────────────────────────────────────
+  build-linux:
+    name: Linux · ${{ matrix.app }} · ${{ matrix.target }}
+    runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         app: [client, server]
-        target: [
-          "x86_64-unknown-linux-musl", "aarch64-unknown-linux-musl",
-          "riscv64gc-unknown-linux-musl", "armv7-unknown-linux-musleabihf",
-          "powerpc64le-unknown-linux-musl", "x86_64-pc-windows-gnu",
-          "x86_64-unknown-freebsd", "universal2-apple-darwin"
-        ]
-        # Set the default OS to ubuntu-latest for all targets
-        os: [ubuntu-latest]
-        include:
-          # Override only for the macOS target
-          - target: "universal2-apple-darwin"
-            os: macos-latest
-          
-          # Server Exclusions
+        target:
+          - x86_64-unknown-linux-musl
+          - aarch64-unknown-linux-musl
+          - armv7-unknown-linux-musleabihf
+          - riscv64gc-unknown-linux-musl
+          - powerpc64le-unknown-linux-musl
+        exclude:
+          # Server only supported on x86_64 and ARM64
           - app: server
-            target: "powerpc64le-unknown-linux-musl"
-            skip: true
+            target: armv7-unknown-linux-musleabihf
           - app: server
-            target: "x86_64-unknown-freebsd"
-            skip: true
+            target: riscv64gc-unknown-linux-musl
           - app: server
-            target: "universal2-apple-darwin"
-            skip: true
-
+            target: powerpc64le-unknown-linux-musl
     steps:
-      - name: Checkout Source
-        if: matrix.skip != true
-        uses: actions/checkout@v4
+      - uses: actions/checkout@v4
 
-      - name: Setup Linux/Windows/FreeBSD Tools
-        if: matrix.skip != true && runner.os == 'Linux'
+      - name: Setup Environment
         run: |
-          sudo apt-get update && sudo apt-get install -y nsis gettext-base pax
+          sudo apt-get update && sudo apt-get install -y gettext-base
           go install github.com/goreleaser/nfpm/v2/cmd/nfpm@latest
           echo "$(go env GOPATH)/bin" >> $GITHUB_PATH
           cargo install cargo-zigbuild
           rustup target add ${{ matrix.target }}
 
-      - name: Install Zig
-        if: matrix.skip != true && runner.os == 'Linux'
-        uses: goto-bus-stop/setup-zig@v2
+      - uses: goto-bus-stop/setup-zig@v2
 
       - name: Build Binary
-        if: matrix.skip != true
         run: |
-          BINARY_NAME="scm${{ matrix.app }}"
-          mkdir -p build/bin
-          
-          if [[ "${{ matrix.target }}" == *"darwin"* ]]; then
-            rustup target add ${{ matrix.target }}
-            cargo build --release --target ${{ matrix.target }} -p $BINARY_NAME
-          else
-            cargo zigbuild --release --target ${{ matrix.target }} -p $BINARY_NAME
-          fi
-          
-          cp target/${{ matrix.target }}/release/${BINARY_NAME}* build/bin/
+          mkdir -p dist build/bin
+          cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
+          cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
-      - name: Package Release
-        if: matrix.skip != true
+      - name: Package (deb / rpm / archlinux)
         run: |
-          mkdir -p dist
-          APP_NAME="scm${{ matrix.app }}"
-          VERSION=$(grep -m 1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
-          RELEASE=${{ github.run_number }}
-          
-          if [[ "${{ matrix.target }}" == *"linux"* ]]; then
-            for PKG in deb rpm archlinux; do
-              nfpm pkg --packager $PKG --config config/${APP_NAME}.yaml --target dist/
-            done
+          case "${{ matrix.target }}" in
+            x86_64-*)       ARCH=amd64   ;;
+            aarch64-*)      ARCH=arm64   ;;
+            armv7-*)        ARCH=arm7    ;;
+            riscv64gc-*)    ARCH=riscv64 ;;
+            powerpc64le-*)  ARCH=ppc64le ;;
+          esac
+          export ARCH
+          export VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          export RELEASE=${{ github.run_number }}
+          for PKG in deb rpm archlinux; do
+            nfpm pkg --packager $PKG --config config/scm${{ matrix.app }}.yaml --target dist/
+          done
 
-          elif [[ "${{ matrix.target }}" == *"windows"* ]]; then
-            makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" ${APP_NAME}/package/windows/${APP_NAME}.nsi
-            mv ${APP_NAME}/package/windows/*.exe dist/
-
-          elif [[ "${{ matrix.target }}" == *"darwin"* ]]; then
-            IDENTIFIER="io.openscm.${APP_NAME}"
-            STAGE_DIR="/tmp/pkg-create"
-            ROOT_DIR="${STAGE_DIR}/root"
-            SCRIPTS_DIR="${STAGE_DIR}/scripts"
-            OUTPUT_PKG="${{ github.workspace }}/dist/${APP_NAME}_${VERSION}-${RELEASE}_macos.pkg"
-
-            rm -rf "${STAGE_DIR}"
-            mkdir -p "${ROOT_DIR}/usr/local/bin" "${ROOT_DIR}/Library/LaunchDaemons" "${SCRIPTS_DIR}"
-
-            cp "build/bin/${APP_NAME}" "${ROOT_DIR}/usr/local/bin/${APP_NAME}"
-            chmod 755 "${ROOT_DIR}/usr/local/bin/${APP_NAME}"
-            cp "${APP_NAME}/package/darwin/${IDENTIFIER}.plist" "${ROOT_DIR}/Library/LaunchDaemons/"
-
-            INSTALL_KBYTES=$(du -sk "${ROOT_DIR}" | awk '{print $1}')
-            FILE_COUNT=$(find "${ROOT_DIR}" -type f | wc -l)
-
-            export IDENTIFIER VERSION INSTALL_KBYTES FILE_COUNT
-            if ! command -v envsubst &> /dev/null; then brew install gettext; fi
-            $(brew --prefix gettext)/bin/envsubst '${IDENTIFIER} ${VERSION} ${INSTALL_KBYTES} ${FILE_COUNT}' \
-                < "${APP_NAME}/package/darwin/PackageInfo" \
-                > "${STAGE_DIR}/PackageInfo"
-
-            cp "${APP_NAME}/package/darwin/preinstall" "${SCRIPTS_DIR}/preinstall" 2>/dev/null || true
-            cp "${APP_NAME}/package/darwin/postinstall" "${SCRIPTS_DIR}/postinstall" 2>/dev/null || true
-            chmod +x "${SCRIPTS_DIR}/preinstall" "${SCRIPTS_DIR}/postinstall" 2>/dev/null || true
-
-            # Fixed missing quote after Payload here
-            (cd "${ROOT_DIR}" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Payload")
-            (cd "${STAGE_DIR}" && mkbom root Bom)
-            (cd "${SCRIPTS_DIR}" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
-
-            (cd "${STAGE_DIR}" && xar --compression none -c -f "${OUTPUT_PKG}" Payload Bom PackageInfo Scripts)
-
-          elif [[ "${{ matrix.target }}" == *"freebsd"* ]]; then
-            BINARY_SOURCE="build/bin/${APP_NAME}"
-            PKG_METADATA_DIR="${APP_NAME}/package/freebsd"
-            RC_SOURCE="${PKG_METADATA_DIR}/${APP_NAME}.rc"
-            PKG_STAGE="/tmp/pkg-create"
-            rm -rf "$PKG_STAGE"
-            mkdir -p "$PKG_STAGE/usr/local/bin" "$PKG_STAGE/usr/local/etc/rc.d"
-            
-            cp "$BINARY_SOURCE" "$PKG_STAGE/usr/local/bin/${APP_NAME}"
-            cp "$RC_SOURCE" "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
-            chmod 555 "$PKG_STAGE/usr/local/bin/${APP_NAME}" "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
-            
-            FLAT_SIZE=$(($(wc -c < "$PKG_STAGE/usr/local/bin/${APP_NAME}") + $(wc -c < "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}")))
-            BIN_MTIME=$(stat -c %Y "$PKG_STAGE/usr/local/bin/${APP_NAME}")
-            RC_MTIME=$(stat -c %Y "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}")
-            
-            export APP_NAME VERSION FLAT_SIZE BIN_MTIME RC_MTIME
-            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' < "${PKG_METADATA_DIR}/MANIFEST.template" > "$PKG_STAGE/+MANIFEST"
-            envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' < "${PKG_METADATA_DIR}/COMPACT_MANIFEST.template" > "$PKG_STAGE/+COMPACT_MANIFEST"
-            
-            PKG_FILE="${APP_NAME}-${VERSION}-${RELEASE}-freebsd-x86_64.pkg"
-            tar -cJf "dist/${PKG_FILE}" -C "$PKG_STAGE" +MANIFEST +COMPACT_MANIFEST --transform 's|^usr/|/usr/|' -C "$PKG_STAGE" usr/local/bin/${APP_NAME} usr/local/etc/rc.d/${APP_NAME}
-          fi
-
-      - name: Upload Build Artifacts
-        if: matrix.skip != true
-        uses: actions/upload-artifact@v4
+      - uses: actions/upload-artifact@v4
         with:
-          name: release-${{ matrix.app }}-${{ matrix.target }}
+          name: linux-${{ matrix.app }}-${{ matrix.target }}
           path: dist/*
 
-  publish:
-    name: Publish to GitHub Releases
-    needs: build-and-package
+
+  # ── WINDOWS (NSIS installer) ───────────────────────────────────────────────
+  build-windows:
+    name: Windows · ${{ matrix.app }}
     runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        app: [client, server]
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update && sudo apt-get install -y nsis
+          cargo install cargo-zigbuild
+          rustup target add x86_64-pc-windows-gnu
+
+      - uses: goto-bus-stop/setup-zig@v2
+
+      - name: Build and Package
+        run: |
+          mkdir -p dist build/bin
+          VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          RELEASE=${{ github.run_number }}
+          cargo zigbuild --release --target x86_64-pc-windows-gnu -p scm${{ matrix.app }}
+          cp target/x86_64-pc-windows-gnu/release/scm${{ matrix.app }}.exe build/bin/
+          makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
+          mv scm${{ matrix.app }}/package/windows/*.exe dist/
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: windows-${{ matrix.app }}
+          path: dist/*
+
+
+  # ── MACOS (universal .pkg) ────────────────────────────────────────────────
+  build-macos:
+    name: macOS · Client
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Build and Package
+        run: |
+          mkdir -p dist build/bin
+          APP_NAME=scmclient
+          VERSION=$(grep -m1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          RELEASE=${{ github.run_number }}
+          IDENTIFIER="io.openscm.${APP_NAME}"
+          STAGE_DIR="/tmp/pkg-create"
+
+          # Universal binary (ARM64 + x86_64)
+          rustup target add universal2-apple-darwin
+          cargo build --release --target universal2-apple-darwin -p $APP_NAME
+          cp target/universal2-apple-darwin/release/$APP_NAME build/bin/
+
+          # Stage files
+          mkdir -p "${STAGE_DIR}/root/usr/local/bin" \
+                   "${STAGE_DIR}/root/Library/LaunchDaemons" \
+                   "${STAGE_DIR}/scripts"
+          cp "build/bin/${APP_NAME}" "${STAGE_DIR}/root/usr/local/bin/${APP_NAME}"
+          chmod 755 "${STAGE_DIR}/root/usr/local/bin/${APP_NAME}"
+          cp "${APP_NAME}/package/darwin/${IDENTIFIER}.plist" "${STAGE_DIR}/root/Library/LaunchDaemons/"
+          chmod 644 "${STAGE_DIR}/root/Library/LaunchDaemons/${IDENTIFIER}.plist"
+
+          # PackageInfo
+          if ! command -v envsubst &>/dev/null; then brew install gettext; fi
+          export IDENTIFIER VERSION
+          export INSTALL_KBYTES=$(du -sk "${STAGE_DIR}/root" | awk '{print $1}')
+          export FILE_COUNT=$(find "${STAGE_DIR}/root" -type f | wc -l)
+          $(brew --prefix gettext)/bin/envsubst \
+            '${IDENTIFIER} ${VERSION} ${INSTALL_KBYTES} ${FILE_COUNT}' \
+            < "${APP_NAME}/package/darwin/PackageInfo" > "${STAGE_DIR}/PackageInfo"
+
+          # Scripts and payload archives
+          cp "${APP_NAME}/package/darwin/preinstall"  "${STAGE_DIR}/scripts/" 2>/dev/null || true
+          cp "${APP_NAME}/package/darwin/postinstall" "${STAGE_DIR}/scripts/" 2>/dev/null || true
+          chmod +x "${STAGE_DIR}/scripts/"*install 2>/dev/null || true
+          (cd "${STAGE_DIR}/root"    && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Payload")
+          (cd "${STAGE_DIR}"         && mkbom root Bom)
+          (cd "${STAGE_DIR}/scripts" && find . -type f | sed 's|^\./||' | pax -w -x cpio | gzip -9n > "${STAGE_DIR}/Scripts")
+          (cd "${STAGE_DIR}"         && xar --compression none -c \
+            -f "${{ github.workspace }}/dist/${APP_NAME}_${VERSION}_macos.pkg" \
+            Payload Bom PackageInfo Scripts)
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: macos-client
+          path: dist/*
+
+
+  # ── FREEBSD (.pkg) ────────────────────────────────────────────────────────
+  build-freebsd:
+    name: FreeBSD · Client
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Environment
+        run: |
+          sudo apt-get update && sudo apt-get install -y gettext-base
+          cargo install cargo-zigbuild
+          rustup target add x86_64-unknown-freebsd
+
+      - uses: goto-bus-stop/setup-zig@v2
+
+      - name: Build and Package
+        run: |
+          mkdir -p dist build/bin
+          APP_NAME=scmclient
+          VERSION=$(grep -m1 '^version =' ${APP_NAME}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          RELEASE=${{ github.run_number }}
+
+          cargo zigbuild --release --target x86_64-unknown-freebsd -p $APP_NAME
+          cp target/x86_64-unknown-freebsd/release/$APP_NAME build/bin/
+
+          PKG_STAGE="/tmp/pkg-create"
+          mkdir -p "$PKG_STAGE/usr/local/bin" "$PKG_STAGE/usr/local/etc/rc.d"
+          cp "build/bin/${APP_NAME}" "$PKG_STAGE/usr/local/bin/${APP_NAME}"
+          cp "${APP_NAME}/package/freebsd/${APP_NAME}.rc" "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
+          chmod 555 "$PKG_STAGE/usr/local/bin/${APP_NAME}" "$PKG_STAGE/usr/local/etc/rc.d/${APP_NAME}"
+
+          export APP_NAME VERSION
+          export FLAT_SIZE=$(($(wc -c < "build/bin/$APP_NAME") + $(wc -c < "$PKG_STAGE/usr/local/etc/rc.d/$APP_NAME")))
+          export BIN_MTIME=$(stat -c %Y "build/bin/$APP_NAME")
+          export RC_MTIME=$(stat -c %Y "$PKG_STAGE/usr/local/etc/rc.d/$APP_NAME")
+
+          envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
+            < "${APP_NAME}/package/freebsd/MANIFEST.template" > "$PKG_STAGE/+MANIFEST"
+          envsubst '${APP_NAME} ${VERSION} ${FLAT_SIZE} ${BIN_MTIME} ${RC_MTIME}' \
+            < "${APP_NAME}/package/freebsd/COMPACT_MANIFEST.template" > "$PKG_STAGE/+COMPACT_MANIFEST"
+
+          tar -cJf "dist/${APP_NAME}-${VERSION}-freebsd-x86_64.pkg" \
+            -C "$PKG_STAGE" +MANIFEST +COMPACT_MANIFEST \
+            --transform 's|^usr/|/usr/|' \
+            -C "$PKG_STAGE" usr/local/bin/${APP_NAME} usr/local/etc/rc.d/${APP_NAME}
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: freebsd-client
+          path: dist/*
+
+
+  # ── DOCKER (amd64 + arm64 → Docker Hub) ──────────────────────────────────
+  build-docker:
+    name: Docker · ${{ matrix.arch }}
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: amd64
+            target: x86_64-unknown-linux-musl
+            platform: linux/amd64
+          - arch: arm64
+            target: aarch64-unknown-linux-musl
+            platform: linux/arm64
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Build Tools
+        run: |
+          cargo install cargo-zigbuild
+          rustup target add ${{ matrix.target }}
+
+      - uses: goto-bus-stop/setup-zig@v2
+
+      - name: Build Server Binary
+        run: |
+          cargo zigbuild --release --target ${{ matrix.target }} -p scmserver
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Setup Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and Push Image
+        run: |
+          VERSION=$(grep -m1 '^version =' scmserver/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          mkdir -p /tmp/docker-stage
+          cp target/${{ matrix.target }}/release/scmserver /tmp/docker-stage/scmserver
+
+          docker buildx build \
+            --platform ${{ matrix.platform }} \
+            --build-arg VERSION=$VERSION \
+            --tag openscm/scmserver:${VERSION}-${{ matrix.arch }} \
+            --push \
+            -f scmserver/package/docker/Dockerfile \
+            /tmp/docker-stage
+
+
+  # ── DOCKER MANIFEST (combine amd64 + arm64) ───────────────────────────────
+  docker-manifest:
+    name: Docker · Manifest
+    runs-on: ubuntu-latest
+    needs: build-docker
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Create and Push Multi-Arch Manifest
+        run: |
+          VERSION=$(grep -m1 '^version =' scmserver/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
+          docker buildx imagetools create \
+            -t openscm/scmserver:${VERSION} \
+            -t openscm/scmserver:latest \
+            openscm/scmserver:${VERSION}-amd64 \
+            openscm/scmserver:${VERSION}-arm64
+
+
+  # ── DRAFT RELEASE ─────────────────────────────────────────────────────────
+  publish:
+    name: Create Draft Release
+    runs-on: ubuntu-latest
+    needs: [build-linux, build-windows, build-macos, build-freebsd, docker-manifest]
     steps:
       - name: Download All Artifacts
         uses: actions/download-artifact@v4
         with:
           path: ./all-packages
+          merge-multiple: true
 
-      - name: Create Release and Upload Files
+      - name: Create Draft Release
         uses: softprops/action-gh-release@v2
         with:
-          files: ./all-packages/**/*
+          files: ./all-packages/*
           name: OpenSCM ${{ github.ref_name }}
-          draft: false
+          draft: true
           prerelease: false
+          generate_release_notes: true
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
