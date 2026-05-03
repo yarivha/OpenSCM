@@ -108,7 +108,7 @@ jobs:
           # Copy binary next to the .nsi script (NSIS CDs to script dir at compile time)
           cp target/x86_64-pc-windows-gnu/release/scm${{ matrix.app }}.exe \
              scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.exe
-          INSTALLER="scm${{ matrix.app }}-${VERSION}-${RELEASE}-windows-x86_64.exe"
+          INSTALLER="scm${{ matrix.app }}-${VERSION}-${RELEASE}-x86_64.exe"
           makensis -DVERSION="$VERSION" -DRELEASE="$RELEASE" \
             "-DINSTALLER_NAME=${INSTALLER}" \
             scm${{ matrix.app }}/package/windows/scm${{ matrix.app }}.nsi
