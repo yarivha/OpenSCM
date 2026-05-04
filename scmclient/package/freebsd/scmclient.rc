@@ -16,7 +16,7 @@ start_cmd="${name}_start"
 
 scmclient_start()
 {
-    /usr/sbin/daemon -p ${pidfile} -o ${logfile} -f ${command}
+    /usr/sbin/daemon -r -R 10 -p ${pidfile} -o ${logfile} -f ${command}
 }
 
 load_rc_config $name

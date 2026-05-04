@@ -322,7 +322,12 @@ pub async fn send_system_info(
 
     // 4. Collect system metadata
     let osinfo       = os_info::get();
-    let my_local_ip  = local_ip_address::local_ip()?.to_string();
+    let my_local_ip  = local_ip_address::local_ip()
+        .map(|ip| ip.to_string())
+        .unwrap_or_else(|e| {
+            warn!("Could not determine local IP address: {} — reporting 0.0.0.0", e);
+            "0.0.0.0".to_string()
+        });
     let my_hostname  = gethostname::gethostname().to_string_lossy().into_owned();
     let my_os        = format!("{} {}", osinfo.os_type(), osinfo.version());
     let my_arch      = std::env::consts::ARCH.to_string();
