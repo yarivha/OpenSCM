@@ -28,8 +28,17 @@ All notable changes to OpenSCM are documented here.
 - **CMD element captures stderr** — commands that write to stderr instead of stdout (e.g. macOS `softwareupdate`) now evaluate correctly against OUTPUT conditions. Previously they always returned False.
 - **Policy verdict when all tests are NA** — a policy where every test returned NA (e.g. no applicable OS tests, or `cmd_enabled = false`) previously showed as COMPLIANT / PASSED. It now correctly shows as NOT APPLICABLE with a grey badge.
 
+### Performance
+- **Database indexes** — 11 composite indexes added covering the most frequent query patterns (results by tenant/test, systems by tenant/status/score, compliance history, notifications, reports). Existing installs gain the indexes automatically on first startup with no migration required.
+- **SQLite WAL mode** — server now opens the database with WAL journal mode, `synchronous=Normal`, and a 5-second busy timeout. Readers no longer block writers, write throughput improves, and concurrent requests queue instead of returning an immediate busy error.
+
+### SaaS
+- **`[email]` config section** — new optional config block (`resend_api_key`, `from_address`, `app_url`) used by the SaaS edition for transactional email. CE and EE ignore it entirely.
+- **`email_verified` user flag** — schema migration v5→v6 adds `email_verified` column to the users table (default `1` for all existing CE/EE users). The SaaS edition uses this to gate login until the user's email address is confirmed.
+
 ### Build
 - Windows installer filename no longer includes the redundant `windows` label — e.g. `scmclient-0.2.3-1-x86_64.exe`.
+- GitHub Actions workflow changed from draft to published release.
 
 ---
 
