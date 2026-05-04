@@ -8,6 +8,13 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.2.4] - 2026-05-04
+
+### Fixed
+- **v0.2.2 clients rejected with 401 after server upgrade to v0.2.3** — the signature verification function re-serialized the deserialized payload struct before checking the signature. When a v0.2.2 client sent the wire field as `tenant_id`, the server deserialized it into the renamed `organization` field and re-serialized it back — producing different JSON bytes from what the client had signed, causing every pre-v0.2.3 client to be rejected. Fixed by verifying signatures against the raw received JSON bytes rather than a re-serialized struct. All client versions are now accepted by the same server.
+
+---
+
 ## [0.2.3] - 2026-05-03
 
 ### Added
