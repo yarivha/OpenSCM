@@ -168,7 +168,9 @@ pub struct SignedRequest<T> {
 
 #[derive(Deserialize)]
 pub struct SignedResult {
-    pub payload: ComplianceResult,
+    /// Raw JSON value preserved for signature verification.
+    /// Parse into `ComplianceResult` after verifying.
+    pub payload: serde_json::Value,
     pub signature: String,
 }
 

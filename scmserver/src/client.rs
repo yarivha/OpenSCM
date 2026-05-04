@@ -6,7 +6,7 @@ use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
 
-use crate::models::{SignedRequest, SignedResult, UnsignedPayload, SignedResponse, Test, TestCondition, TestWithConditions};
+use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions};
 
 
 #[derive(sqlx::FromRow)]
@@ -80,14 +80,18 @@ fn decode_signature(base64_sig: &str) -> Result<Signature, String> {
 }
 
 
-fn verify_signature<T: serde::Serialize>(
-    payload: &T,
+/// Verify a signature against the raw JSON bytes of the payload value.
+/// We use `serde_json::Value` (not a typed struct) so the bytes match exactly
+/// what the client signed — regardless of whether the client serialized the
+/// field as `tenant_id` (≤v0.2.2) or `organization` (≥v0.2.3).
+fn verify_signature(
+    raw_payload: &serde_json::Value,
     signature_b64: &str,
     public_key_b64: &str,
 ) -> Result<(), String> {
     let verifier = decode_public_key(public_key_b64)?;
     let signature = decode_signature(signature_b64)?;
-    let payload_bytes = serde_json::to_vec(payload)
+    let payload_bytes = serde_json::to_vec(raw_payload)
         .map_err(|e| format!("Failed to serialize payload for verification: {}", e))?;
 
     verifier
@@ -103,9 +107,23 @@ fn verify_signature<T: serde::Serialize>(
 /// Handle agent registration and heartbeat (POST /send)
 pub async fn send(
     Extension(pool): Extension<SqlitePool>,
-    Json(signed_req): Json<SignedRequest<UnsignedPayload>>,
+    Json(signed_req): Json<SignedRequest<serde_json::Value>>,
 ) -> impl IntoResponse {
-    let payload = &signed_req.payload;
+    // Parse the typed payload from the raw JSON value.
+    // The raw value is kept for signature verification so the bytes match
+    // exactly what the client signed — works for both field names:
+    //   tenant_id   (≤v0.2.2)
+    //   organization (≥v0.2.3)
+    let payload: UnsignedPayload = match serde_json::from_value(signed_req.payload.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("Failed to parse payload: {}", e);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid payload"})),
+            ).into_response();
+        }
+    };
 
     let tenant_id = if payload.organization.is_empty() {
         "default"
@@ -282,7 +300,7 @@ pub async fn send(
         } else {
 
         debug!("Verifying signature for Agent ID {} (Tenant: {}).", id, tenant_id);
-        if let Err(err) = verify_signature(payload, &signed_req.signature, &auth.key) {
+        if let Err(err) = verify_signature(&signed_req.payload, &signed_req.signature, &auth.key) {
             warn!(
                 "SECURITY: Invalid signature from Agent ID {} (Tenant: '{}'): {}",
                 id, tenant_id, err
@@ -506,7 +524,17 @@ pub async fn receive_result(
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     Json(signed_req): Json<SignedResult>,
 ) -> impl IntoResponse {
-    let payload = &signed_req.payload;
+    // Parse typed payload from raw JSON — same pattern as /send
+    let payload: ComplianceResult = match serde_json::from_value(signed_req.payload.clone()) {
+        Ok(p) => p,
+        Err(e) => {
+            warn!("Failed to parse result payload: {}", e);
+            return (
+                StatusCode::BAD_REQUEST,
+                Json(serde_json::json!({"error": "Invalid payload"})),
+            ).into_response();
+        }
+    };
 
     let tenant_id = if payload.organization.is_empty() {
         "default"
@@ -600,7 +628,7 @@ pub async fn receive_result(
         }
     };
 
-    if let Err(err) = verify_signature(payload, &signed_req.signature, &auth_check.key) {
+    if let Err(err) = verify_signature(&signed_req.payload, &signed_req.signature, &auth_check.key) {
         error!(
             "SECURITY ALERT: Invalid signature on results from Agent ID {} (Tenant: '{}'): {}",
             payload.client_id, tenant_id, err
