@@ -12,6 +12,8 @@ All notable changes to OpenSCM are documented here.
 
 ### Fixed
 - **v0.2.2 clients rejected with 401 after server upgrade to v0.2.3** — the signature verification function re-serialized the deserialized payload struct before checking the signature. When a v0.2.2 client sent the wire field as `tenant_id`, the server deserialized it into the renamed `organization` field and re-serialized it back — producing different JSON bytes from what the client had signed, causing every pre-v0.2.3 client to be rejected. Fixed by verifying signatures against the raw received JSON bytes rather than a re-serialized struct. All client versions are now accepted by the same server.
+- **FreeBSD service stops silently after crash** — the RC script now uses `daemon -r -R 10` so the service automatically restarts after any unexpected exit with a 10-second cooldown. Previously a single crash would leave the service permanently stopped with no indication.
+- **FreeBSD agent exits when local IP cannot be determined** — a failed `local_ip_address` lookup no longer aborts the heartbeat cycle. The agent logs a warning and continues with `0.0.0.0`, allowing it to keep running when the network interface is temporarily unavailable.
 
 ---
 
