@@ -6,6 +6,7 @@ use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
 
+use serde_json::value::RawValue;
 use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions};
 
 
@@ -80,22 +81,25 @@ fn decode_signature(base64_sig: &str) -> Result<Signature, String> {
 }
 
 
-/// Verify a signature against the raw JSON bytes of the payload value.
-/// We use `serde_json::Value` (not a typed struct) so the bytes match exactly
-/// what the client signed — regardless of whether the client serialized the
-/// field as `tenant_id` (≤v0.2.2) or `organization` (≥v0.2.3).
+/// Verify a signature against the verbatim JSON bytes of the payload.
+///
+/// `raw_payload` is a `RawValue` — it stores the exact bytes that arrived
+/// over the wire without any parsing or re-serialisation.  This means
+/// key order is always preserved and the bytes fed to the verifier are
+/// identical to the bytes the client originally signed, regardless of
+/// whether the client used `tenant_id` (≤v0.2.2) or `organization`
+/// (≥v0.2.3).
 fn verify_signature(
-    raw_payload: &serde_json::Value,
+    raw_payload: &RawValue,
     signature_b64: &str,
     public_key_b64: &str,
 ) -> Result<(), String> {
     let verifier = decode_public_key(public_key_b64)?;
     let signature = decode_signature(signature_b64)?;
-    let payload_bytes = serde_json::to_vec(raw_payload)
-        .map_err(|e| format!("Failed to serialize payload for verification: {}", e))?;
+    let payload_bytes = raw_payload.get().as_bytes(); // exact original bytes — no re-serialisation
 
     verifier
-        .verify(&payload_bytes, &signature)
+        .verify(payload_bytes, &signature)
         .map_err(|_| "Signature verification failed".to_string())
 }
 
@@ -107,14 +111,13 @@ fn verify_signature(
 /// Handle agent registration and heartbeat (POST /send)
 pub async fn send(
     Extension(pool): Extension<SqlitePool>,
-    Json(signed_req): Json<SignedRequest<serde_json::Value>>,
+    Json(signed_req): Json<SignedRequest>,
 ) -> impl IntoResponse {
-    // Parse the typed payload from the raw JSON value.
-    // The raw value is kept for signature verification so the bytes match
-    // exactly what the client signed — works for both field names:
-    //   tenant_id   (≤v0.2.2)
-    //   organization (≥v0.2.3)
-    let payload: UnsignedPayload = match serde_json::from_value(signed_req.payload.clone()) {
+    // Parse the typed payload from the raw bytes.
+    // `signed_req.payload` is a RawValue — exact bytes as received.
+    // Parsing into UnsignedPayload here only to extract fields; signature
+    // verification always uses the original raw bytes so key order is preserved.
+    let payload: UnsignedPayload = match serde_json::from_str(signed_req.payload.get()) {
         Ok(p) => p,
         Err(e) => {
             warn!("Failed to parse payload: {}", e);
@@ -524,8 +527,8 @@ pub async fn receive_result(
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     Json(signed_req): Json<SignedResult>,
 ) -> impl IntoResponse {
-    // Parse typed payload from raw JSON — same pattern as /send
-    let payload: ComplianceResult = match serde_json::from_value(signed_req.payload.clone()) {
+    // Parse typed payload from raw bytes — same pattern as /send
+    let payload: ComplianceResult = match serde_json::from_str(signed_req.payload.get()) {
         Ok(p) => p,
         Err(e) => {
             warn!("Failed to parse result payload: {}", e);

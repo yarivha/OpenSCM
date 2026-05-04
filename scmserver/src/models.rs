@@ -1,4 +1,5 @@
 use serde::{Deserialize, Serialize};
+use serde_json::value::RawValue;
 use sqlx::FromRow;
 use chrono::{DateTime, Utc};
 
@@ -159,18 +160,21 @@ pub struct UnsignedPayload {
 }
 
 
-#[derive(Debug, Serialize, Deserialize)]
-pub struct SignedRequest<T> {
-    pub payload: T,
+#[derive(Debug, Deserialize)]
+pub struct SignedRequest {
+    /// Raw JSON bytes exactly as received — used for signature verification
+    /// without re-serialization so key order is preserved across all client
+    /// versions (e.g. `tenant_id` from ≤v0.2.2 vs `organization` from ≥v0.2.3).
+    pub payload: Box<RawValue>,
     pub signature: String,
 }
 
 
 #[derive(Deserialize)]
 pub struct SignedResult {
-    /// Raw JSON value preserved for signature verification.
-    /// Parse into `ComplianceResult` after verifying.
-    pub payload: serde_json::Value,
+    /// Raw JSON bytes exactly as received — same byte-preservation guarantee
+    /// as SignedRequest.payload.
+    pub payload: Box<RawValue>,
     pub signature: String,
 }
 
