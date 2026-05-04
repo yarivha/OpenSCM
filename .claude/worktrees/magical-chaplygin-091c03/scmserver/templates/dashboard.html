@@ -1,0 +1,282 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  /* Ensure the chart background is readable in dark mode */
+  .dark-mode .card { background-color: #343a40 !important; }
+  .dark-mode .table-head-fixed thead tr:nth-child(1) th { background-color: #3f474e !important; }
+  
+  /* Status Color Helpers */
+  .text-xs-caps { font-size: 0.7rem; text-transform: uppercase; font-weight: bold; color: #adb5bd; }
+  .table-valign-middle td { vertical-align: middle !important; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-wrapper">
+  <div class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1 class="m-0"><i class="fas fa-tachometer-alt mr-2 text-primary"></i>Compliance Dashboard</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item active">Home / Dashboard</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <section class="content">
+    <div class="container-fluid">
+      
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> System Alert</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-lg-3 col-6">
+          <div class="small-box bg-info shadow-sm">
+            <div class="inner"><h3>{{ systems_count }}</h3><p>Active Inventory</p></div>
+            <div class="icon"><i class="fas fa-server"></i></div>
+            <a href="/systems" class="small-box-footer">View Systems <i class="fas fa-arrow-circle-right"></i></a>
+          </div>
+        </div>
+        <div class="col-lg-3 col-6">
+          <div class="small-box {% if pending_count > 0 %}bg-danger{% else %}bg-success{% endif %} shadow-sm">
+            <div class="inner"><h3>{{ pending_count }}</h3><p>Pending Enrollment</p></div>
+            <div class="icon"><i class="fas fa-user-plus"></i></div>
+            <a href="/systems?filter=pending" class="small-box-footer">Review Queue <i class="fas fa-arrow-circle-right"></i></a>
+          </div>
+        </div>
+        <div class="col-lg-3 col-6">
+          <div class="small-box bg-warning shadow-sm">
+            <div class="inner"><h3>{{ policies_count }}</h3><p>Active Policies</p></div>
+            <div class="icon"><i class="fas fa-shield-alt"></i></div>
+            <a href="/policies" class="small-box-footer">Manage Policies <i class="fas fa-arrow-circle-right"></i></a>
+          </div>
+        </div>
+        <div class="col-lg-3 col-6">
+          <div class="small-box bg-primary shadow-sm">
+            <div class="inner"><h3>{{ reports_count }}</h3><p>Scan Reports</p></div>
+            <div class="icon"><i class="fas fa-file-contract"></i></div>
+            <a href="/reports" class="small-box-footer">View History <i class="fas fa-arrow-circle-right"></i></a>
+          </div>
+        </div>
+      </div>
+
+      <div class="row">
+  <div class="col-md-12">
+    <div class="card card-outline card-primary shadow-sm">
+      <div class="card-header">
+        <h3 class="card-title font-weight-bold">
+          <i class="fas fa-chart-line mr-2"></i>Compliance Trend
+        </h3>
+        <div class="card-tools">
+          <div class="btn-group shadow-sm">
+            <a href="/?range=daily" class="btn btn-xs btn-outline-primary {% if range == 'daily' %}active{% endif %}">Daily</a>
+            <a href="/?range=weekly" class="btn btn-xs btn-outline-primary {% if range == 'weekly' %}active{% endif %}">Weekly</a>
+            <a href="/?range=monthly" class="btn btn-xs btn-outline-primary {% if range == 'monthly' %}active{% endif %}">Monthly</a>
+            <a href="/?range=yearly" class="btn btn-xs btn-outline-primary {% if range == 'yearly' %}active{% endif %}">Yearly</a>
+          </div>
+        </div>
+      </div>
+      <div class="card-body">
+        <div class="chart">
+          <canvas id="complianceTrendChart" style="min-height: 250px; height: 250px; max-height: 250px; max-width: 100%;"></canvas>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+
+
+
+
+      <div class="row">
+        <div class="col-md-6">
+          <div class="card card-danger card-outline shadow-sm">
+            <div class="card-header border-0">
+              <h3 class="card-title font-weight-bold text-danger"><i class="fas fa-exclamation-triangle mr-2"></i> Critical Policy Failures</h3>
+            </div>
+            <div class="card-body table-responsive p-0" style="height: 300px;">
+              <table class="table table-hover table-head-fixed table-valign-middle">
+                <thead>
+                  <tr class="text-xs-caps">
+                    <th>Policy</th>
+                    <th class="text-center">Score</th>
+                    <th class="text-center">Pass/Fail</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% if top_failed_policies | length == 0 %}
+                    <tr><td colspan="3" class="text-center py-5 text-muted">Environment is currently compliant.</td></tr>
+                  {% else %}
+                    {% for pol in top_failed_policies %}
+                    <tr>
+                      <td>
+                        <span class="font-weight-bold">{{ pol.policy_name }}</span><br>
+                        <small class="text-muted">Version: {{ pol.policy_version }}</small>
+                      </td>
+		      <td class="text-center">
+  			<div class="progress-wrapper" style="width: 80px; margin: 0 auto;">
+    			  {% if pol.compliance < 0 %}
+      			    <small class="badge badge-secondary">Not Scanned</small>
+    			  {% else %}
+      			    <div class="progress progress-xxs mb-1">
+        		      <div class="progress-bar
+				{% if pol.compliance >= compliance_sat %}bg-success
+  				{% elif pol.compliance >= compliance_marginal %}bg-warning
+  				{% else %}bg-danger{% endif %}"
+  				style="width: {{ pol.compliance }}%">
+        		      </div>
+      			    </div>
+      			    <small class="font-weight-bold">{{ pol.compliance | round(precision=2) }}%</small>
+    			    {% endif %}
+   			</div>
+		      </td>
+                      <td class="text-center">
+                         <span class="text-success">{{ pol.systems_passed }} <i class="fas fa-check-circle"></i></span>
+                         <span class="text-muted mx-1">/</span>
+                         <span class="text-danger">{{ pol.systems_failed }} <i class="fas fa-times-circle"></i></span>
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+
+        <div class="col-md-6">
+          <div class="card card-danger card-outline shadow-sm">
+            <div class="card-header border-0">
+              <h3 class="card-title font-weight-bold text-danger"><i class="fas fa-microchip mr-2"></i> Highest Risk Assets</h3>
+            </div>
+            <div class="card-body table-responsive p-0" style="height: 300px;">
+              <table class="table table-hover table-head-fixed table-valign-middle">
+                <thead>
+                  <tr class="text-xs-caps">
+                    <th>Asset Name</th>
+                    <th class="text-center">Risk</th>
+                    <th class="text-center">Checks</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% if top_failed_systems | length == 0 %}
+                    <tr><td colspan="3" class="text-center py-5 text-muted">All systems meeting compliance targets.</td></tr>
+                  {% else %}
+                    {% for sys in top_failed_systems %}
+                    <tr>
+                      <td>
+                        <span class="font-weight-bold">{{ sys.system_name }}</span><br>
+                        <small class="text-muted">{{ sys.os }}</small>
+                      </td>
+                      <td class="text-center">
+			{% if sys.compliance < 0 %}
+    			  <small class="text-muted">Not Scanned</small>
+			{% else %}
+    			  <div class="progress progress-xxs mt-1 mb-1" style="width: 60px; margin: 0 auto;">
+        		    <div class="progress-bar 
+				{% if sys.compliance >= compliance_sat %}bg-success
+  				{% elif sys.compliance >= compliance_marginal %}bg-warning
+  				{% else %}bg-danger{% endif %}"
+  				style="width: {{ sys.compliance }}%">				    
+    			    </div>
+			  </div>
+    			  <small class="font-weight-bold">{{ sys.compliance | round(precision=2) }}%</small>
+			{% endif %}
+                      </td>
+                      <td class="text-center">
+    			<small class="text-success font-weight-bold">{{ sys.tests_passed }} OK</small> / 
+    			<small class="text-danger font-weight-bold">{{ sys.tests_failed }} FAIL</small> /
+    			<small class="text-muted font-weight-bold">{{ sys.tests_na }} NA</small>
+		      </td>
+                    </tr>
+                    {% endfor %}
+                  {% endif %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+var complianceTrendCanvas = document.getElementById('complianceTrendChart').getContext('2d');
+new Chart(complianceTrendCanvas, {
+  type: 'line',
+  data: {
+    // Labels are shared between both datasets (Dates)
+    labels: {{ trend_labels | json_encode | safe }}, 
+    datasets: [
+      {
+        label: 'System Compliance %',
+        data: {{ trend_systems_scores | json_encode | safe }}, 
+        borderColor: '#007bff', // Blue
+        backgroundColor: 'rgba(0, 123, 255, 0.05)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3
+      },
+      {
+        label: 'Policy Compliance %',
+        // New variable from your Rust handler
+        data: {{ trend_policies_scores | json_encode | safe }}, 
+        borderColor: '#28a745', // Green
+        backgroundColor: 'rgba(40, 167, 69, 0.05)',
+        borderWidth: 2,
+        fill: true,
+        tension: 0.3,
+        pointRadius: 3
+      }
+    ]
+  },
+  options: { 
+    maintainAspectRatio: false,
+    plugins: {
+      legend: {
+        display: true,
+        position: 'top',
+        labels: { boxWidth: 12, padding: 20 }
+      },
+      tooltip: {
+        mode: 'index',
+        intersect: false
+      }
+    },
+    scales: { 
+      y: { 
+        min: 0, 
+        max: 100,
+        ticks: { callback: function(value) { return value + "%"; } }
+      },
+      x: {
+        grid: { display: false }
+      }
+    }
+  }
+});
+</script>
+{% endblock %}	

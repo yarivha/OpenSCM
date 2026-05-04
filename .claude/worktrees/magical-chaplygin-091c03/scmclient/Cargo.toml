@@ -1,0 +1,38 @@
+[package]
+name = "scmclient"
+version = "0.1.7"
+edition = "2024"
+authors = ["Yariv Hakim <yariv@openscm.io>"]
+license = "Apache-2.0"
+description = "Client for Open Security Compliance Manager"
+
+
+[dependencies]
+cfg-if = "1.0"
+sysinfo = "0.30"
+os_info = "3.8"
+dns-lookup = "2.0"
+tokio = { version = "1", features = ["full"] }
+reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json", "gzip"] }
+serde = { version = "1.0", features = ["derive"] }
+serde_json = "1.0"
+local-ip-address = "0.5"
+gethostname = "0.2"
+tracing-subscriber = { version = "0.3", features = ["env-filter"] }
+tracing = "0.1"
+toml = "0.8.23"
+ed25519-dalek = { version = "2", features = ["rand_core"] }
+rand = "0.8"
+base64 = "0.22.1"
+hex = "0.4"
+semver = "1.0"
+chrono = "0.4.44"
+sha1 = "0.10"
+sha2 = "0.10"
+regex = "1.10"
+
+[target.'cfg(unix)'.dependencies]
+uzers = "0.11"
+
+[target.'cfg(windows)'.dependencies]
+winreg = "0.52"

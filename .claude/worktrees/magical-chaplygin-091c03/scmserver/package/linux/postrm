@@ -1,0 +1,23 @@
+#!/bin/sh
+
+APP_NAME="scmserver"
+CONFIG_DIR="/etc/openscm"
+DATA_DIR="/var/lib/openscm"
+LOG_DIR="/var/log/openscm"
+
+# Full purge — remove all data, logs and config
+if [ "$1" = "purge" ] || [ "$1" = "0" ]; then
+    echo "Purging $APP_NAME data, logs and configuration..."
+    rm -rf "$DATA_DIR"
+    rm -rf "$LOG_DIR"
+    rm -f "$CONFIG_DIR/scmserver.config"
+fi
+
+# Reload systemd after removal
+if [ "$1" = "remove" ] || [ "$1" = "0" ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0

@@ -1,0 +1,22 @@
+#!/bin/sh
+
+APP_NAME="scmclient"
+CONFIG_DIR="/etc/openscm"
+LOG_DIR="/var/log/openscm"
+
+# Full purge — remove logs and config
+# Keys are preserved so reinstall doesn't require re-registration
+if [ "$1" = "purge" ] || [ "$1" = "0" ]; then
+    echo "Purging $APP_NAME logs and configuration..."
+    rm -rf "$LOG_DIR"
+    rm -f "$CONFIG_DIR/scmclient.config"
+fi
+
+# Reload systemd after removal
+if [ "$1" = "remove" ] || [ "$1" = "0" ]; then
+    if [ -d /run/systemd/system ]; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+    fi
+fi
+
+exit 0

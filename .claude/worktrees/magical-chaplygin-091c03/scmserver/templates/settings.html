@@ -1,0 +1,249 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1 class="m-0"><i class="fas fa-cog mr-2 text-primary"></i>Settings</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">Settings</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>{{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>{{ success_message }}
+      </div>
+      {% endif %}
+
+      <form action="/settings/save" method="post">
+
+        <!-- Nav Tabs -->
+        <ul class="nav nav-tabs" id="settingsTabs" role="tablist">
+          <li class="nav-item">
+            <a class="nav-link active" id="general-tab" data-toggle="tab" href="#general" role="tab">
+              <i class="fas fa-sliders-h mr-1"></i> General
+            </a>
+          </li>
+          <li class="nav-item">
+            <a class="nav-link" id="compliance-tab" data-toggle="tab" href="#compliance" role="tab">
+              <i class="fas fa-shield-alt mr-1"></i> Compliance
+            </a>
+          </li>
+        </ul>
+
+        <div class="tab-content border border-top-0 rounded-bottom p-4 bg-white shadow-sm">
+
+          <!-- General Tab -->
+          <div class="tab-pane fade show active" id="general" role="tabpanel">
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="offline_threshold">
+                    <i class="fas fa-clock mr-1 text-muted"></i>
+                    Offline Threshold (seconds)
+                  </label>
+                  <input type="number" class="form-control" id="offline_threshold"
+                    name="offline_threshold" value="{{ settings.offline_threshold }}"
+                    min="60" max="86400" required>
+                  <small class="form-text text-muted">
+                    Time without activity before a system is marked offline.
+                    Current value: <strong>{{ settings.offline_threshold }}s</strong>
+                    ({{ offline_minutes }} minutes)
+		  </small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="schema_version">
+                    <i class="fas fa-database mr-1 text-muted"></i>
+                    Schema Version
+                  </label>
+                  <input type="text" class="form-control" id="schema_version"
+                    value="{{ settings.schema_version }}" disabled>
+                  <small class="form-text text-muted">Current database schema version — read only.</small>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Compliance Tab -->
+          <div class="tab-pane fade" id="compliance" role="tabpanel">
+            <div class="row mb-3">
+              <div class="col-12">
+                <div class="alert alert-info">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  These thresholds determine the color coding of compliance scores across the dashboard and policies.
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-4">
+                <div class="card card-success card-outline">
+                  <div class="card-header">
+                    <h3 class="card-title">
+                      <i class="fas fa-check-circle text-success mr-1"></i>
+                      SAT Threshold
+                    </h3>
+                  </div>
+                  <div class="card-body">
+                    <div class="form-group">
+                      <label for="compliance_sat">Minimum Score (%)</label>
+                      <input type="number" class="form-control" id="compliance_sat"
+                        name="compliance_sat" value="{{ settings.compliance_sat }}"
+                        min="1" max="100" required>
+                      <small class="form-text text-muted">
+                        Scores at or above this value are shown in <span class="text-success font-weight-bold">green</span>.
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="card card-warning card-outline">
+                  <div class="card-header">
+                    <h3 class="card-title">
+                      <i class="fas fa-exclamation-circle text-warning mr-1"></i>
+                      MARGINAL Threshold
+                    </h3>
+                  </div>
+                  <div class="card-body">
+                    <div class="form-group">
+                      <label for="compliance_marginal">Minimum Score (%)</label>
+                      <input type="number" class="form-control" id="compliance_marginal"
+                        name="compliance_marginal" value="{{ settings.compliance_marginal }}"
+                        min="1" max="100" required>
+                      <small class="form-text text-muted">
+                        Scores at or above this value are shown in <span class="text-warning font-weight-bold">yellow</span>.
+                      </small>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-md-4">
+                <div class="card card-danger card-outline">
+                  <div class="card-header">
+                    <h3 class="card-title">
+                      <i class="fas fa-times-circle text-danger mr-1"></i>
+                      UNSAT
+                    </h3>
+                  </div>
+                  <div class="card-body">
+                    <p class="text-muted text-sm mt-2">
+                      Scores below the MARGINAL threshold are automatically shown in
+                      <span class="text-danger font-weight-bold">red</span>.
+                      No configuration needed.
+                    </p>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Live Preview -->
+            <div class="row mt-2">
+              <div class="col-12">
+                <div class="card card-outline card-dark">
+                  <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-eye mr-1"></i> Live Preview</h3>
+                  </div>
+                  <div class="card-body">
+                    <div class="row text-center">
+                      <div class="col-4">
+                        <div class="progress mb-1">
+                          <div class="progress-bar bg-success" id="preview-sat-bar" style="width: 90%"></div>
+                        </div>
+                        <small id="preview-sat-label">90% — SAT</small>
+                      </div>
+                      <div class="col-4">
+                        <div class="progress mb-1">
+                          <div class="progress-bar bg-warning" id="preview-marginal-bar" style="width: 70%"></div>
+                        </div>
+                        <small id="preview-marginal-label">70% — MARGINAL</small>
+                      </div>
+                      <div class="col-4">
+                        <div class="progress mb-1">
+                          <div class="progress-bar bg-danger" style="width: 40%"></div>
+                        </div>
+                        <small>40% — UNSAT</small>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+          </div>
+        </div>
+
+        <div class="row mt-3">
+          <div class="col-12 text-right">
+            <a href="/" class="btn btn-secondary btn-sm mr-2">
+              <i class="fas fa-times mr-1"></i> Cancel
+            </a>
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i class="fas fa-save mr-1"></i> Save Settings
+            </button>
+          </div>
+        </div>
+
+      </form>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Update live preview when thresholds change
+  function updatePreview() {
+    var sat = parseInt($('#compliance_sat').val()) || 80;
+    var marginal = parseInt($('#compliance_marginal').val()) || 60;
+
+    // Update SAT bar — show a value just above sat threshold
+    var satVal = Math.min(sat + 10, 100);
+    $('#preview-sat-bar').css('width', satVal + '%');
+    $('#preview-sat-label').text(satVal + '% — SAT (≥' + sat + '%)');
+
+    // Update MARGINAL bar — show a value between marginal and sat
+    var marginalVal = Math.round((marginal + sat) / 2);
+    $('#preview-marginal-bar').css('width', marginalVal + '%');
+    $('#preview-marginal-label').text(marginalVal + '% — MARGINAL (≥' + marginal + '%)');
+  }
+
+  $('#compliance_sat, #compliance_marginal').on('input', updatePreview);
+  updatePreview();
+
+  // Validate sat > marginal on submit
+  $('form').on('submit', function(e) {
+    var sat = parseInt($('#compliance_sat').val());
+    var marginal = parseInt($('#compliance_marginal').val());
+    if (marginal >= sat) {
+      e.preventDefault();
+      alert('MARGINAL threshold must be less than SAT threshold.');
+      return false;
+    }
+  });
+</script>
+{% endblock %}

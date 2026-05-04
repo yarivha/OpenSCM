@@ -1,0 +1,266 @@
+{% extends "base.html" %}
+{% block content %}
+
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1>Managed Systems</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">Systems</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+      
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> Success</h5>
+        {{ success_message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-12">
+          <div class="card card-outline card-primary">
+            <div class="card-header">
+              <h3 class="card-title">Systems Inventory</h3>
+              <div class="card-tools">
+                <button type="button" class="btn btn-tool" onclick="window.location.reload();" title="Refresh List">
+                  <i class="fas fa-sync-alt"></i>
+                </button>
+              </div>
+            </div>
+
+            <div class="card-body">
+              <table id="systems_table" class="table table-bordered table-striped table-hover">
+                <thead>
+                  <tr>
+                    <th style="display:none;">Status_Internal</th>
+                    <th style="width: 10px">ID</th>
+                    <th>Name</th>
+                    <th>OS & Architecture</th>
+                    <th>IP Address</th>
+                    <th>Groups</th>
+                    <th>Agent</th>
+                    <th>Last Seen</th>
+                    <th class="text-center" style="width: 180px">Actions</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {% for system in systems %}
+                  {% set os_lower = system.os | lower %}
+                  
+                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}">
+                    <td style="display:none;">{{ system.status }}</td>
+                    <td>{{ system.id }}</td>
+                    <td>
+                      <strong>{{ system.name }}</strong>
+                      {% if system.status == "pending" %}
+                        <span class="badge badge-warning ml-1">New</span>
+                      {% endif %}
+                    </td>
+                    <td>
+                      <i class="fab 
+                        {% if 'windows' in os_lower %}fa-windows
+                        {% elif 'apple' in os_lower or 'mac' in os_lower or 'darwin' in os_lower %}fa-apple
+                        {% elif 'freebsd' in os_lower %}fa-freebsd
+                        {% elif 'ubuntu' in os_lower or 'debian' in os_lower or 'fedora' in os_lower or 'suse' in os_lower or 'centos' in os_lower or 'redhat' in os_lower or 'arch' in os_lower or 'alpine' in os_lower %}fa-linux
+                        {% else %}fa-server
+                        {% endif %} mr-1"></i>
+                      {{ system.os }} ({{ system.arch }})
+                    </td>
+                    <td><code>{{ system.ip }}</code></td>
+                    <td>
+			{% if system.groups and system.groups != "none" %}
+    			{{ system.groups }}
+  			{% else %}
+    			<span class="text-muted">—</span>
+  			{% endif %}
+		    </td>
+                    <td><span class="badge badge-light">v{{ system.ver }}</span></td>
+                    <td class="datetime" data-utc="{{ system.last_seen }}">{{ system.last_seen }}</td>
+                    
+                    <td class="text-right">
+                      {% if system.status == "pending" %}
+                        <a class="btn btn-success btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+			   onclick="{% if is_editor %}return confirm('Approve this system?'){% else %}return false;{% endif %}" 
+			   href="{% if is_editor %}/systems/approve/{{ system.id }}{% else %}#{% endif %}">
+                          <i class="fas {% if is_editor %}fa-check{% else %}fa-lock{% endif %}"></i> Approve
+                        </a>
+                        <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+			   onclick="{% if is_editor %}return confirm('Reject system?'){% else %}return false;{% endif %}" 
+			   href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}">
+                          <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                        </a>
+                      {% else %}
+                        <button type="button" 
+                                class="btn btn-primary btn-sm view-system-btn" 
+                                data-id="{{ system.id }}" 
+                                data-name="{{ system.name }}"
+                                data-os="{{ system.os }}"
+                                data-arch="{{ system.arch }}"
+                                data-ip="{{ system.ip }}"
+                                data-ver="{{ system.ver }}"
+                                data-groups="{{ system.groups }}"
+                                data-seen="{{ system.last_seen }}"
+                                data-created="{{ system.created_date }}"
+                                title="Quick View">
+                          <i class="fas fa-eye mr-1"></i> View
+                        </button>
+                        
+                        <a class="btn btn-info btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                           href="{% if is_editor %}/systems/edit/{{ system.id }}{% else %}#{% endif %}"
+			   {% if is_editor %}title="Edit System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Edit Required"{% endif %}>
+                          <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
+                        </a>
+
+                        <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                           onclick="{% if is_editor %}return confirm('Delete system?'){% else %}return false;{% endif %}" 
+                           href="{% if is_editor %}/systems/delete/{{ system.id }}{% else %}#{% endif %}"
+			   {% if is_editor %}title="Delete System"{% else %}style="opacity: 0.5; cursor: not-allowed;" title="Delete Required"{% endif %}>
+                          <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                        </a>
+                      {% endif %}
+                    </td>
+                  </tr>
+                  {% endfor %}
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+
+<div class="modal fade" id="systemDetailsModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-primary">
+        <h5 class="modal-title" id="modalSystemName">System Details</h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true" style="color: white;">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <div class="col-md-6 border-right">
+            <p><strong>System ID:</strong> <span id="m-id"></span></p>
+            <p><strong>Operating System:</strong> <span id="m-os"></span></p>
+            <p><strong>Architecture:</strong> <span id="m-arch"></span></p>
+            <p><strong>IP Address:</strong> <code id="m-ip"></code></p>
+          </div>
+          <div class="col-md-6">
+            <p><strong>Agent Version:</strong> <span id="m-ver"></span></p>
+            <p><strong>Assigned Groups:</strong> <span id="m-groups"></span></p>
+            <p><strong>Last Communication:</strong> <span id="m-seen"></span></p>
+            <p><strong>Enrollment Date:</strong> <span id="m-created"></span></p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $(function () {
+    // Helper function for Date formatting
+    function formatLocalTime(utcString) {
+      if (!utcString) return "N/A";
+      const date = new Date(utcString);
+      if (isNaN(date.getTime())) return utcString;
+      return date.toLocaleString(undefined, {
+        year: 'numeric', month: '2-digit', day: '2-digit',
+        hour: '2-digit', minute: '2-digit', second: '2-digit',
+        hour12: false
+      });
+    }
+
+    // 1. Modal Logic
+    $(document).on('click', '.view-system-btn', function() {
+        const btn = $(this);
+        
+        $('#modalSystemName').html('<i class="fas fa-server mr-2"></i>' + btn.data('name'));
+        $('#m-id').text(btn.data('id'));
+        $('#m-os').text(btn.data('os'));
+        $('#m-arch').text(btn.data('arch'));
+        $('#m-ip').text(btn.data('ip'));
+        $('#m-ver').text(btn.data('ver'));
+        $('#m-groups').text(btn.data('groups'));
+        
+        // Convert dates to local time for the modal
+        $('#m-seen').text(formatLocalTime(btn.data('seen')));
+        $('#m-created').text(formatLocalTime(btn.data('created')));
+
+        $('#systemDetailsModal').modal('show');
+    });
+
+    // 2. Initial table datetime conversion
+    $('.datetime').each(function() {
+      $(this).text(formatLocalTime($(this).data('utc')));
+    });
+
+    // 3. DataTables
+    const table = $("#systems_table").DataTable({
+      "responsive": true,
+      "lengthChange": true,
+      "autoWidth": false,
+      "order": [[0, "asc"], [2, "asc"]],
+      "columnDefs": [{ "targets": 0, "visible": false }],
+      "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
+    });
+    
+    table.buttons().container().appendTo('#systems_table_wrapper .col-md-6:eq(0)');
+  });
+
+
+$(document).ready(function() {
+    var offlineThreshold = {{ offline_threshold }};
+
+    $('#systems_table tbody tr').each(function() {
+        var lastSeenCell = $(this).find('td.datetime');
+        var lastSeenUtc = lastSeenCell.data('utc');
+
+        if (!lastSeenUtc) return;
+
+        var lastSeenTime = new Date(lastSeenUtc).getTime();
+        var now = new Date().getTime();
+        var diffSeconds = (now - lastSeenTime) / 1000;
+
+        if (diffSeconds > offlineThreshold) {
+            $(this).addClass('text-muted');
+            $(this).css('opacity', '0.5');
+            lastSeenCell.html(
+                lastSeenCell.text() + 
+                ' <span class="badge badge-secondary ml-1">Offline</span>'
+            );
+        }
+    });
+});
+</script>
+{% endblock %}
