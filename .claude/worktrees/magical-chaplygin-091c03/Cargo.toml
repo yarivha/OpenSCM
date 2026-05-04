@@ -1,4 +1,0 @@
-
-[workspace]
-members = ["scmclient","scmserver"]
-resolver = "3"

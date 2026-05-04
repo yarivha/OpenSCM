@@ -1,6 +1,0 @@
-This project uses a dual-license structure:
-
-*   **Client & Common Logic**: Licensed under [Apache License 2.0](LICENSE-APACHE).
-*   **Server & Dashboard**: Licensed under [Functional Source License 1.1](LICENSE-FSL).
-
-See the individual `LICENSE` files in this repository for full text.
