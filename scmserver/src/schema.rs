@@ -362,6 +362,28 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
 
 
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS system_reports (
+            id               INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id        TEXT    NOT NULL DEFAULT 'default',
+            submission_date  DATETIME DEFAULT CURRENT_TIMESTAMP,
+            system_id        INTEGER NOT NULL,
+            system_name      TEXT    NOT NULL,
+            submitter_name   TEXT,
+            report_data      TEXT    NOT NULL,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_system_reports_tenant_date
+         ON system_reports (tenant_id, submission_date)",
+    )
+    .execute(pool)
+    .await?;
+
     // Create compliance history table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS compliance_history (
@@ -826,39 +848,6 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
 
         info!("Schema migration v5 → v6 complete.");
-    }
-
-    // v6 → v7: add system_reports table for saved system compliance snapshots
-    if version < 7 {
-        info!("Running schema migration v6 → v7 (system_reports)...");
-
-        sqlx::query(
-            "CREATE TABLE IF NOT EXISTS system_reports (
-                id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id        TEXT    NOT NULL DEFAULT 'default',
-                submission_date  DATETIME DEFAULT CURRENT_TIMESTAMP,
-                system_id        INTEGER NOT NULL,
-                system_name      TEXT    NOT NULL,
-                submitter_name   TEXT,
-                report_data      TEXT    NOT NULL,
-                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
-            )"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_system_reports_tenant_date
-             ON system_reports (tenant_id, submission_date)"
-        )
-        .execute(pool)
-        .await?;
-
-        sqlx::query("UPDATE schema_info SET version = 7")
-            .execute(pool)
-            .await?;
-
-        info!("Schema migration v6 → v7 complete.");
     }
 
     Ok(())
