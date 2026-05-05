@@ -1,14 +1,17 @@
 //////////////////// Settings /////////////////////////
- 
+
 use axum::response::{IntoResponse, Redirect};
 use axum::extract::{Extension, Query};
 use axum::extract::RawForm;
+use axum::http::StatusCode;
+use axum::Json;
 use tera::{Tera, Context};
 use sqlx::sqlite::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
-use tracing::info;
+use tracing::{info, error};
 use urlencoding;
+use serde::Serialize;
 
 use crate::models::{ErrorQuery, UserRole, AuthSession};
 use crate::auth;
@@ -174,4 +177,158 @@ pub async fn settings_save(
 
     info!("Settings updated by '{}'.", auth.username);
     Redirect::to("/settings?success_message=Settings+saved+successfully").into_response()
+}
+
+// ============================================================
+// TEST EMAIL
+// ============================================================
+
+#[derive(Serialize)]
+pub struct TestEmailResponse {
+    pub ok:      bool,
+    pub message: String,
+}
+
+pub async fn settings_test_email(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+) -> (StatusCode, Json<TestEmailResponse>) {
+    if auth::authorize(&auth.role, UserRole::Admin).is_some() {
+        return (StatusCode::FORBIDDEN, Json(TestEmailResponse {
+            ok: false,
+            message: "Access denied.".into(),
+        }));
+    }
+
+    // Recipient: logged-in user's email address (looked up from DB)
+    let to: String = match sqlx::query_scalar::<_, Option<String>>(
+        "SELECT email FROM users WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(auth.userid)
+    .bind(&auth.tenant_id)
+    .fetch_optional(&pool)
+    .await
+    .unwrap_or(None)
+    .flatten()
+    .filter(|e| !e.is_empty()) {
+        Some(e) => e,
+        None => return (StatusCode::BAD_REQUEST, Json(TestEmailResponse {
+            ok: false,
+            message: "Your account has no email address. Edit your profile and add one first.".into(),
+        })),
+    };
+
+    // Load SMTP settings for this tenant
+    let rows = sqlx::query(
+        "SELECT key, value FROM settings WHERE tenant_id = ?
+         AND key IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default();
+
+    let mut map = std::collections::HashMap::new();
+    for row in rows {
+        let k: String = row.get("key");
+        let v: String = row.get("value");
+        map.insert(k, v);
+    }
+
+    let host = map.get("smtp_host").cloned().unwrap_or_default();
+    if host.is_empty() {
+        return (StatusCode::BAD_REQUEST, Json(TestEmailResponse {
+            ok: false,
+            message: "SMTP Host is not configured. Save your settings first.".into(),
+        }));
+    }
+
+    let port: u16 = map.get("smtp_port").and_then(|v| v.parse().ok()).unwrap_or(587);
+    let username  = map.get("smtp_username").cloned().unwrap_or_default();
+    let password  = map.get("smtp_password").cloned().unwrap_or_default();
+    let from      = map.get("smtp_from").cloned()
+        .filter(|s| !s.is_empty())
+        .unwrap_or_else(|| format!("OpenSCM <noreply@{}>", host));
+    let tls_mode  = map.get("smtp_tls").cloned().unwrap_or_else(|| "starttls".into());
+
+    // Build transport
+    use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
+                 transport::smtp::authentication::Credentials,
+                 message::header::ContentType};
+
+    let creds_opt = if !username.is_empty() {
+        Some(Credentials::new(username, password))
+    } else {
+        None
+    };
+
+    let transport: AsyncSmtpTransport<Tokio1Executor> = match tls_mode.as_str() {
+        "tls" => {
+            let mut b = AsyncSmtpTransport::<Tokio1Executor>::relay(&host)
+                .map_err(|e| e.to_string())
+                .unwrap()
+                .port(port);
+            if let Some(c) = creds_opt { b = b.credentials(c); }
+            b.build()
+        }
+        "none" => {
+            let mut b = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host).port(port);
+            if let Some(c) = creds_opt { b = b.credentials(c); }
+            b.build()
+        }
+        _ => {
+            match AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host) {
+                Ok(builder) => {
+                    let mut b = builder.port(port);
+                    if let Some(c) = creds_opt { b = b.credentials(c); }
+                    b.build()
+                }
+                Err(e) => {
+                    return (StatusCode::BAD_GATEWAY, Json(TestEmailResponse {
+                        ok: false,
+                        message: format!("Failed to create SMTP transport: {}", e),
+                    }));
+                }
+            }
+        }
+    };
+
+    // Build message
+    let message = match Message::builder()
+        .from(from.parse().unwrap_or_else(|_| "OpenSCM <noreply@openscm.io>".parse().unwrap()))
+        .to(match to.parse() {
+            Ok(m) => m,
+            Err(e) => return (StatusCode::BAD_REQUEST, Json(TestEmailResponse {
+                ok: false,
+                message: format!("Invalid recipient address: {}", e),
+            })),
+        })
+        .subject("OpenSCM — SMTP Test Email")
+        .header(ContentType::TEXT_HTML)
+        .body("<p>This is a test email from <strong>OpenSCM</strong>.</p><p>Your SMTP relay is configured correctly.</p>".to_string())
+    {
+        Ok(m) => m,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, Json(TestEmailResponse {
+            ok: false,
+            message: format!("Failed to build email: {}", e),
+        })),
+    };
+
+    // Send
+    match transport.send(message).await {
+        Ok(_) => {
+            info!("Test email sent to {} by '{}'", to, auth.username);
+            (StatusCode::OK, Json(TestEmailResponse {
+                ok: true,
+                message: format!("Test email sent successfully to {}.", to),
+            }))
+        }
+        Err(e) => {
+            error!("Test email failed for '{}': {}", auth.username, e);
+            (StatusCode::BAD_GATEWAY, Json(TestEmailResponse {
+                ok: false,
+                message: format!("SMTP error: {}", e),
+            }))
+        }
+    }
 }

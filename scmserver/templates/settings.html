@@ -300,6 +300,17 @@
                         name="smtp_from" value="{{ settings.smtp_from }}"
                         placeholder="OpenSCM &lt;noreply@example.com&gt;">
                     </div>
+
+                    <!-- Test email -->
+                    <div class="border-top pt-3 mt-2">
+                      <div class="d-flex align-items-center">
+                        <button type="button" id="testEmailBtn" class="btn btn-outline-secondary btn-sm mr-3">
+                          <i class="fas fa-paper-plane mr-1"></i> Send Test Email
+                        </button>
+                        <span id="testEmailResult" class="text-sm" style="display:none"></span>
+                      </div>
+                      <small class="text-muted">Sends a test email to your account address using the <strong>saved</strong> SMTP settings.</small>
+                    </div>
                   </div>
                 </div>
               </div>
@@ -355,6 +366,38 @@
       alert('MARGINAL threshold must be less than SAT threshold.');
       return false;
     }
+  });
+
+  // Test email button
+  $('#testEmailBtn').on('click', function () {
+    var btn = $(this);
+    var result = $('#testEmailResult');
+    btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i> Sending…');
+    result.hide();
+
+    $.ajax({
+      url: '/settings/test-email',
+      type: 'POST',
+      success: function (data) {
+        result
+          .removeClass('text-success text-danger')
+          .addClass(data.ok ? 'text-success' : 'text-danger')
+          .html((data.ok ? '<i class="fas fa-check-circle mr-1"></i>' : '<i class="fas fa-times-circle mr-1"></i>') + data.message)
+          .show();
+      },
+      error: function (xhr) {
+        var msg = 'Request failed.';
+        try { msg = JSON.parse(xhr.responseText).message || msg; } catch(e) {}
+        result
+          .removeClass('text-success')
+          .addClass('text-danger')
+          .html('<i class="fas fa-times-circle mr-1"></i>' + msg)
+          .show();
+      },
+      complete: function () {
+        btn.prop('disabled', false).html('<i class="fas fa-paper-plane mr-1"></i> Send Test Email');
+      }
+    });
   });
 </script>
 {% endblock %}

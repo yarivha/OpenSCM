@@ -229,6 +229,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/reports/system/bulk/delete", post(reports::system_reports_bulk_delete))
         .route("/settings", get(settings::settings))
         .route("/settings/save", post(settings::settings_save))
+        .route("/settings/test-email", post(settings::settings_test_email))
         .route("/send", post(client::send))
         .route("/result", post(client::receive_result))
         .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {
