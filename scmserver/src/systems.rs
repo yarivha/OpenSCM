@@ -1337,6 +1337,7 @@ pub async fn fetch_system_report_data(
 pub async fn system_report(
     auth: AuthSession,
     Path(id): Path<i32>,
+    Query(query): Query<ErrorQuery>,
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
@@ -1376,6 +1377,12 @@ pub async fn system_report(
     context.insert("report", &report);
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);
+    if let Some(msg) = query.success_message {
+        context.insert("success_message", &msg);
+    }
+    if let Some(msg) = query.error_message {
+        context.insert("error_message", &msg);
+    }
     render_template(&tera, Some(&pool), "systems_report.html", context, Some(auth))
         .await
         .into_response()

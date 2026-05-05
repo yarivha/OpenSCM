@@ -699,11 +699,11 @@ pub async fn system_report_save(
         Ok(_) => {
             info!("System report snapshot saved for system '{}' by '{}'.", data.system_name, auth.username);
             let msg = urlencoding::encode(&format!("Report saved for {}.", data.system_name)).to_string();
-            Redirect::to(&format!("/reports?success_message={}", msg)).into_response()
+            Redirect::to(&format!("/systems/report/{}?success_message={}", system_id, msg)).into_response()
         }
         Err(e) => {
             error!("Failed to insert system report snapshot: {}", e);
-            Redirect::to("/reports?error_message=Failed+to+save+report").into_response()
+            Redirect::to(&format!("/systems/report/{}?error_message=Failed+to+save+report", system_id)).into_response()
         }
     }
 }

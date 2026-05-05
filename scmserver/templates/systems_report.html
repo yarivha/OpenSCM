@@ -41,7 +41,18 @@
   <section class="content">
     <div class="container-fluid">
 
-      {% if error_message %}<div class="alert alert-danger">{{ error_message }}</div>{% endif %}
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert">&times;</button>
+        <i class="icon fas fa-ban"></i> {{ error_message }}
+      </div>
+      {% endif %}
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert">&times;</button>
+        <i class="icon fas fa-check"></i> {{ success_message }}
+      </div>
+      {% endif %}
 
       <!-- System header card -->
       <div class="row">
