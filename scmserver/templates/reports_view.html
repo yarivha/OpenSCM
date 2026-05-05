@@ -191,11 +191,24 @@
       <div class="row pb-5 mt-4">
         <div class="col-12 text-right">
           <a class="btn btn-secondary btn-sm" href="/reports">
-            <i class="fas fa-history mr-1"></i> Back to History
+            <i class="fas fa-arrow-left mr-1"></i> Back to Reports
           </a>
           <a class="btn btn-primary btn-sm ml-2" href="/reports/download/{{ report.id }}">
-            <i class="fas fa-download mr-1"></i> Download PDF
+            <i class="fas fa-file-pdf mr-1"></i> Download PDF
           </a>
+          {% if is_runner %}
+            {% if live_policy_id %}
+            <a class="btn btn-outline-primary btn-sm ml-2" href="/policies/report/{{ live_policy_id }}">
+              <i class="fas fa-sync-alt mr-1"></i> View Live Report
+            </a>
+            {% else %}
+            <span class="btn btn-outline-secondary btn-sm ml-2 disabled"
+                  title="This policy no longer exists"
+                  data-toggle="tooltip" data-placement="top">
+              <i class="fas fa-exclamation-triangle mr-1 text-warning"></i> Policy Deleted
+            </span>
+            {% endif %}
+          {% endif %}
         </div>
       </div>
 
@@ -259,6 +272,10 @@
 
 {% block scripts %}
 <script>
+  $(function() {
+    $('[data-toggle="tooltip"]').tooltip();
+  });
+
   $('#testDetailModal').on('show.bs.modal', function (event) {
     var trigger = $(event.relatedTarget);
 

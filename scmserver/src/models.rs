@@ -225,6 +225,7 @@ pub struct PolicyResultGroup {
     pub policy_id: i32,
     pub policy_name: String,
     pub policy_version: String,
+    pub policy_description: Option<String>,
     pub results: Vec<IndividualResult>,
     pub is_passed: bool,
     pub pass_count: usize,

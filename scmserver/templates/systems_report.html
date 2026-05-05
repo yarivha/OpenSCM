@@ -68,9 +68,26 @@
                     {% if report.ip %}&nbsp;&nbsp;<i class="fas fa-network-wired mr-1"></i>{{ report.ip }}{% endif %}
                   </p>
                   {% if report.last_seen %}
-                  <p class="text-sm text-muted mb-0">
+                  <p class="text-sm text-muted mb-1">
                     <i class="fas fa-clock mr-1"></i><strong>Last Seen:</strong> {{ report.last_seen }}
                   </p>
+                  {% endif %}
+                  {% if report.policy_groups | length > 0 %}
+                  <div class="mt-2">
+                    <button class="btn btn-xs btn-default" type="button" data-toggle="collapse" data-target="#policyScope">
+                      <i class="fas fa-search mr-1"></i> View Policy Coverage ({{ report.policy_groups | length }} {% if report.policy_groups | length == 1 %}Policy{% else %}Policies{% endif %})
+                    </button>
+                    <div class="collapse mt-2" id="policyScope">
+                      <div class="p-2 border rounded bg-light-alt text-xs">
+                        {% for policy in report.policy_groups %}
+                        <div class="mb-1">
+                          <b>{{ policy.policy_name }}</b> <span class="text-muted">v{{ policy.policy_version }}</span>
+                          {% if policy.policy_description %} — {{ policy.policy_description }}{% endif %}
+                        </div>
+                        {% endfor %}
+                      </div>
+                    </div>
+                  </div>
                   {% endif %}
                 </div>
 
@@ -136,6 +153,11 @@
         </div>
 
         <div class="card-body p-0">
+          {% if policy.policy_description %}
+          <div class="px-4 py-2 text-sm text-muted border-bottom">
+            <i class="fas fa-info-circle mr-1"></i>{{ policy.policy_description }}
+          </div>
+          {% endif %}
           <table class="table table-valign-middle mb-0">
             <thead>
               <tr class="text-xs text-muted text-uppercase">
@@ -195,6 +217,9 @@
           <hr>
           <a class="btn btn-secondary btn-sm" href="/systems">
             <i class="fas fa-arrow-left mr-1"></i> Back to Systems
+          </a>
+          <a class="btn btn-primary btn-sm ml-2" href="/systems/report/{{ report.system_id }}/download">
+            <i class="fas fa-file-pdf mr-1"></i> Download PDF
           </a>
           {% if is_runner %}
           <a class="btn btn-success btn-sm ml-2"

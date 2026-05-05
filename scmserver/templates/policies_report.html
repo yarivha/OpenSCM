@@ -58,7 +58,18 @@
   <section class="content">
     <div class="container-fluid">
       
-      {% if error_message %}<div class="alert alert-danger">{{ error_message }}</div>{% endif %}
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert">&times;</button>
+        <i class="icon fas fa-ban"></i> {{ error_message }}
+      </div>
+      {% endif %}
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible">
+        <button type="button" class="close" data-dismiss="alert">&times;</button>
+        <i class="icon fas fa-check"></i> {{ success_message }}
+      </div>
+      {% endif %}
 
       <div class="row">
         <div class="col-md-12">
@@ -190,12 +201,12 @@
             <i class="fas fa-arrow-left mr-1"></i> Back to Policies
           </a>
           <a class="btn btn-primary btn-sm ml-2" href="/policies/download/{{ report.policy_id }}">
-            <i class="fas fa-file-pdf mr-1"></i> Export PDF
+            <i class="fas fa-file-pdf mr-1"></i> Download PDF
           </a>
-          <a class="btn btn-success btn-sm ml-2 {% if not is_runner %}disabled{% endif %}" 
+          <a class="btn btn-success btn-sm ml-2 {% if not is_runner %}disabled{% endif %}"
              href="{% if is_runner %}/reports/save/{{ report.policy_id }}{% else %}#{% endif %}"
              {% if not is_runner %}style="cursor: not-allowed; opacity: 0.6;"{% endif %}>
-             <i class="fas {% if is_runner %}fa-save{% else %}fa-lock{% endif %} mr-1"></i> Save to History
+            <i class="fas {% if is_runner %}fa-save{% else %}fa-lock{% endif %} mr-1"></i> Save Report
           </a>
         </div>
       </div>

@@ -10,7 +10,7 @@ use urlencoding;
 use std::collections::BTreeMap;
 use tracing::{info, error};
 use chrono::{Local, Utc};
-use genpdf::{fonts, elements, style, Element};
+use genpdf::{fonts, elements, style, Element, Margins};
 
 use crate::models::{
     ErrorQuery, SystemGroup, Test, Policy, PolicySchedule,
@@ -761,6 +761,7 @@ pub async fn policies_run(
 pub async fn policies_report(
     auth: AuthSession,
     Path(id): Path<i32>,
+    Query(query): Query<ErrorQuery>,
     pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
@@ -775,7 +776,7 @@ pub async fn policies_report(
     .bind(id).bind(&auth.tenant_id).fetch_optional(&*pool).await
     {
         Ok(Some(row)) => row,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => return Redirect::to("/policies?error_message=Policy+not+found").into_response(),
         Err(e) => { error!(error = ?e, policy_id = %id, "Failed to fetch policy details"); return StatusCode::INTERNAL_SERVER_ERROR.into_response(); }
     };
 
@@ -856,11 +857,21 @@ pub async fn policies_report(
     let mut context = Context::new();
     context.insert("report", &report_data);
     context.insert("fail_count", &fail_count);
+    if let Some(msg) = query.success_message {
+        context.insert("success_message", &msg);
+    }
+    if let Some(msg) = query.error_message {
+        context.insert("error_message", &msg);
+    }
     render_template(&tera, Some(&pool), "policies_report.html", context, Some(auth))
         .await
         .into_response()
 }
 
+
+fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
+    Box::new(elements::PaddedElement::new(e, Margins::trbl(1.5, 2.0, 1.5, 2.0)))
+}
 
 pub async fn policies_report_download(
     auth: AuthSession,
@@ -997,12 +1008,12 @@ pub async fn policies_report_download(
     let mut details_table = elements::TableLayout::new(vec![1, 3]);
     details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Policy Name").styled(style::Style::new().bold())),
-        Box::new(elements::Paragraph::new(format!(" {} v{}", report_data.policy_name, report_data.version))),
+        cell(elements::Text::new("Policy Name").styled(style::Style::new().bold())),
+        cell(elements::Paragraph::new(format!("{} v{}", report_data.policy_name, report_data.version))),
     ]) { error!("Failed to add policy name row to PDF: {}", e); }
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
-        Box::new(elements::Paragraph::new(format!(" {}", report_data.description))),
+        cell(elements::Text::new("Description").styled(style::Style::new().bold())),
+        cell(elements::Paragraph::new(report_data.description.clone())),
     ]) { error!("Failed to add description row to PDF: {}", e); }
     doc.push(details_table);
     doc.push(elements::PageBreak::new());
@@ -1017,18 +1028,18 @@ pub async fn policies_report_download(
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new(if system.is_passed { " Compliant" } else { " Non-Compliant" }).styled(
+            cell(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
+            cell(elements::Text::new(if system.is_passed { "Compliant" } else { "Non-Compliant" }).styled(
                 style::Style::new().with_color(if system.is_passed { style::Color::Rgb(0, 128, 0) } else { style::Color::Rgb(200, 0, 0) }).bold(),
             )),
         ]) { error!("Failed to add compliance status row to PDF: {}", e); }
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new(format!(" Critical - {}", violation_count))),
+            cell(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("Critical — {}", violation_count))),
         ]) { error!("Failed to add violation count row to PDF: {}", e); }
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new(format!(" {}", compliant_count))),
+            cell(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", compliant_count))),
         ]) { error!("Failed to add compliant count row to PDF: {}", e); }
         doc.push(summary_table);
         doc.push(elements::Break::new(1.0));
@@ -1038,16 +1049,16 @@ pub async fn policies_report_download(
         let mut rules_table = elements::TableLayout::new(vec![4, 1]);
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
         if let Err(e) = rules_table.push_row(vec![
-            Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Status").styled(style::Style::new().bold())),
         ]) { error!("Failed to add rules table header to PDF: {}", e); }
 
         for res in &system.results {
             let is_pass = res.status == "PASS";
             let (status_text, status_color) = if is_pass { ("PASS", style::Color::Rgb(0, 128, 0)) } else { ("FAIL", style::Color::Rgb(200, 0, 0)) };
             if let Err(e) = rules_table.push_row(vec![
-                Box::new(elements::Paragraph::new(format!(" {}", res.test_name))),
-                Box::new(elements::Text::new(status_text).styled(style::Style::new().with_color(status_color).bold())),
+                cell(elements::Paragraph::new(&res.test_name)),
+                cell(elements::Text::new(status_text).styled(style::Style::new().with_color(status_color).bold())),
             ]) { error!("Failed to add rule row to PDF: {}", e); }
         }
         doc.push(rules_table);

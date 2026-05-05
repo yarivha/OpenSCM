@@ -1250,10 +1250,11 @@ pub async fn fetch_system_report_data(
 
     let raw = sqlx::query(r#"
         SELECT
-            p.id        AS policy_id,
-            p.name      AS policy_name,
-            p.version   AS policy_version,
-            t.name      AS test_name,
+            p.id          AS policy_id,
+            p.name        AS policy_name,
+            p.version     AS policy_version,
+            p.description AS policy_description,
+            t.name        AS test_name,
             COALESCE(r.result, 'NOT_SCANNED') AS status
         FROM systems_in_groups sig
         JOIN systems_in_policy sip
@@ -1278,17 +1279,19 @@ pub async fn fetch_system_report_data(
 
     let mut policy_map: BTreeMap<i32, PolicyResultGroup> = BTreeMap::new();
     for row in &raw {
-        let policy_id: i32         = row.get("policy_id");
-        let policy_name: String    = row.get("policy_name");
-        let policy_version: String = row.get("policy_version");
-        let test_name: String      = row.get("test_name");
-        let status_raw: String     = row.get("status");
+        let policy_id: i32                  = row.get("policy_id");
+        let policy_name: String             = row.get("policy_name");
+        let policy_version: String          = row.get("policy_version");
+        let policy_description: Option<String> = row.get("policy_description");
+        let test_name: String               = row.get("test_name");
+        let status_raw: String              = row.get("status");
         let status = normalize_status(&status_raw).to_string();
 
         let entry = policy_map.entry(policy_id).or_insert_with(|| PolicyResultGroup {
             policy_id,
             policy_name,
             policy_version,
+            policy_description,
             results: Vec::new(),
             is_passed: false,
             pass_count: 0,
@@ -1349,7 +1352,7 @@ pub async fn system_report(
     let report = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
         Ok(r) => r,
         Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
-            return axum::http::StatusCode::NOT_FOUND.into_response();
+            return Redirect::to("/systems?error_message=System+not+found").into_response();
         }
         Err(e) => {
             error!(error = ?e, system_id = %id, "Failed to fetch system report data");

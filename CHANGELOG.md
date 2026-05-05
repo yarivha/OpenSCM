@@ -8,9 +8,21 @@ All notable changes to OpenSCM are documented here.
 
 ### Added
 - **System compliance report snapshots** — save and download (PDF) archived compliance reports per system. The Reports page now has two tabs: Policy Reports and System Reports.
+- **Policy coverage list in system report** — the system header card now shows a collapsible "View Policy Coverage" section listing all policies the system is under, with their descriptions. Mirrors the "View Policy Scope" section in the policy report.
+- **Policy description in system report cards** — each per-policy card in the system report shows the policy description below the test table when one is set.
+- **PDF download from live system report** — a "Download PDF" button is now available on the live system compliance report page, matching the existing button on the live policy report. The PDF includes policy descriptions.
+- **"View Live Report" button on saved report pages** — archived policy and system report snapshots now include a "View Live Report" button linking back to the current live report. If the policy or system has since been deleted, the button is replaced with a greyed-out "Policy Deleted" / "System Deleted" badge.
 
 ### Fixed
 - **Database indexes not applied on existing installs** — the 11 composite indexes added in v0.2.3 were only created by the first-run installer, so upgraded installs never received them. They are now applied via the v6→v7 migration on the next server startup.
+- **Post-save redirect** — saving a compliance report (policy or system) now returns to the same live report page with a success banner, instead of redirecting away to the Reports list or Policies list.
+- **Offline row dimming no longer greys action buttons** — in the Systems table, the opacity/greyscale effect now applies only to data cells; the action buttons in the last column stay fully opaque and remain clickable.
+- **Dashboard report count includes system reports** — the Reports counter on the dashboard now sums both policy reports and system compliance report snapshots.
+- **Fresh install unnecessarily ran all migrations** — a new installation stamped `schema_info` at version 0, causing all 7 migrations to execute on first startup. Fresh installs now stamp the current schema version directly so no migrations are needed.
+- **Navigating to a deleted system or policy report now redirects gracefully** — previously returned a blank 404; now redirects to the Systems or Policies list with a "not found" error banner.
+- **Consistent report action buttons** — all four report pages (live policy, live system, archived policy, archived system) now use identical button labels, icons, colours, and order: Back · Download PDF · Save Report · View Live Report.
+- **PDF cell padding** — all table cells in every PDF report now have uniform padding so text no longer touches the cell border lines.
+- **PDF disclaimer page** — all PDF reports (live policy, archived policy, live system, archived system) now end with the disclaimer on its own dedicated last page, at font size 10, prefixed with "Note:".
 
 ---
 

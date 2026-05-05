@@ -186,6 +186,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/systems", get(systems::systems))
         .route("/systems/report/{id}", get(systems::system_report))
         .route("/systems/report/{id}/save", get(reports::system_report_save))
+        .route("/systems/report/{id}/download", get(reports::system_report_live_download))
         .route("/systems/delete/{id}", get(systems::systems_delete))
         .route("/systems/edit/{id}", get(systems::systems_edit).post(systems::systems_edit_save))
         .route("/systems/pending", get(systems::systems_pending))

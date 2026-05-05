@@ -10,7 +10,7 @@ use std::collections::BTreeMap;
 use tracing::{info, error};
 use serde_json;
 use urlencoding;
-use genpdf::{fonts, elements, style, Element};
+use genpdf::{fonts, elements, style, Element, Margins};
 
 use crate::auth::{self};
 use crate::handlers::{render_template, normalize_status, parse_form_data};
@@ -224,11 +224,11 @@ pub async fn reports_save(
     match save_policy_report_logic(id, &pool, &auth.tenant_id, &auth.username).await {
         Ok(_) => {
             info!("Report saved for policy {} by '{}'.", id, auth.username);
-            Redirect::to("/policies?success_message=Report+saved").into_response()
+            Redirect::to(&format!("/policies/report/{}?success_message=Report+saved", id)).into_response()
         }
         Err(e) => {
             error!("Failed to save report for policy {}: {}", id, e);
-            Redirect::to("/policies?error_message=Failed+to+save+report").into_response()
+            Redirect::to(&format!("/policies/report/{}?error_message=Failed+to+save+report", id)).into_response()
         }
     }
 }
@@ -259,7 +259,7 @@ pub async fn reports_view(
     .await
     {
         Ok(Some(r)) => r,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Ok(None) => return Redirect::to("/reports?error_message=Report+not+found").into_response(),
         Err(e) => {
             error!(error = ?e, report_id = %id, "Failed to fetch report for viewing");
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
@@ -287,6 +287,17 @@ pub async fn reports_view(
         }
     };
 
+    // Check if the originating policy still exists (by name + version)
+    let live_policy_id: Option<i32> = sqlx::query_scalar(
+        "SELECT id FROM policies WHERE name = ? AND version = ? AND tenant_id = ?",
+    )
+    .bind(&report.policy_name)
+    .bind(report.policy_version.as_deref().unwrap_or(""))
+    .bind(&auth.tenant_id)
+    .fetch_optional(&pool)
+    .await
+    .unwrap_or(None);
+
     let fail_count = system_reports.iter().filter(|s| !s.is_passed).count();
 
     let mut context = Context::new();
@@ -294,6 +305,7 @@ pub async fn reports_view(
     context.insert("tests_metadata", &tests_metadata);
     context.insert("system_reports", &system_reports);
     context.insert("fail_count", &fail_count);
+    context.insert("live_policy_id", &live_policy_id);
     render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth))
         .await
         .into_response()
@@ -323,6 +335,13 @@ pub async fn reports_delete(
 
     info!("Report ID {} deleted by '{}'.", id, auth.username);
     Redirect::to("/reports").into_response()
+}
+
+
+/// Wrap a PDF table cell element with uniform vertical + horizontal padding
+/// so text never touches the cell border lines.
+fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
+    Box::new(elements::PaddedElement::new(e, Margins::trbl(1.5, 2.0, 1.5, 2.0)))
 }
 
 
@@ -446,9 +465,9 @@ pub async fn reports_download(
     details_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Policy Name").styled(style::Style::new().bold())),
-        Box::new(elements::Paragraph::new(format!(
-            " {} v{}",
+        cell(elements::Text::new("Policy Name").styled(style::Style::new().bold())),
+        cell(elements::Paragraph::new(format!(
+            "{} v{}",
             report.policy_name,
             report.policy_version.as_deref().unwrap_or(""),
         ))),
@@ -457,11 +476,10 @@ pub async fn reports_download(
     }
 
     if let Err(e) = details_table.push_row(vec![
-        Box::new(elements::Text::new("Description").styled(style::Style::new().bold())),
-        Box::new(elements::Paragraph::new(format!(
-            " {}",
-            report.policy_description.as_deref().unwrap_or(""),
-        ))),
+        cell(elements::Text::new("Description").styled(style::Style::new().bold())),
+        cell(elements::Paragraph::new(
+            report.policy_description.as_deref().unwrap_or("").to_string(),
+        )),
     ]) {
         error!("Failed to add description row to PDF: {}", e);
     }
@@ -485,37 +503,29 @@ pub async fn reports_download(
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
-            Box::new(
-                elements::Text::new(if system.is_passed {
-                    " Compliant"
-                } else {
-                    " Non-Compliant"
-                })
-                .styled(
-                    style::Style::new()
-                        .with_color(if system.is_passed {
-                            style::Color::Rgb(0, 128, 0)
-                        } else {
-                            style::Color::Rgb(200, 0, 0)
-                        })
-                        .bold(),
-                ),
-            ),
+            cell(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
+            cell(elements::Text::new(if system.is_passed { "Compliant" } else { "Non-Compliant" })
+                .styled(style::Style::new()
+                    .with_color(if system.is_passed {
+                        style::Color::Rgb(0, 128, 0)
+                    } else {
+                        style::Color::Rgb(200, 0, 0)
+                    })
+                    .bold())),
         ]) {
             error!("Failed to add compliance status row to PDF: {}", e);
         }
 
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new(format!(" Critical - {}", violation_count))),
+            cell(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("Critical — {}", violation_count))),
         ]) {
             error!("Failed to add violation count row to PDF: {}", e);
         }
 
         if let Err(e) = summary_table.push_row(vec![
-            Box::new(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new(format!(" {}", compliant_count))),
+            cell(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", compliant_count))),
         ]) {
             error!("Failed to add compliant count row to PDF: {}", e);
         }
@@ -526,15 +536,15 @@ pub async fn reports_download(
         // Rules breakdown
         doc.push(
             elements::Text::new("Audit Rules Detailed Breakdown")
-                .styled(style::Style::new().bold().with_font_size(14)),   
+                .styled(style::Style::new().bold().with_font_size(14)),
         );
         doc.push(elements::Break::new(0.5));
         let mut rules_table = elements::TableLayout::new(vec![4, 1]);
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
         if let Err(e) = rules_table.push_row(vec![
-            Box::new(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Status").styled(style::Style::new().bold())),
         ]) {
             error!("Failed to add rules table header to PDF: {}", e);
         }
@@ -548,11 +558,9 @@ pub async fn reports_download(
             };
 
             if let Err(e) = rules_table.push_row(vec![
-                Box::new(elements::Paragraph::new(&res.test_name)),
-                Box::new(
-                    elements::Text::new(status_text)
-                        .styled(style::Style::new().with_color(status_color).bold()),
-                ),
+                cell(elements::Paragraph::new(&res.test_name)),
+                cell(elements::Text::new(status_text)
+                    .styled(style::Style::new().with_color(status_color).bold())),
             ]) {
                 error!("Failed to add rule row to PDF: {}", e);
             }
@@ -765,11 +773,21 @@ pub async fn system_reports_view(
     .await
     .unwrap_or(60);
 
+    let system_exists: bool = sqlx::query_scalar(
+        "SELECT EXISTS(SELECT 1 FROM systems WHERE id = ? AND tenant_id = ?)"
+    )
+    .bind(row.system_id)
+    .bind(&auth.tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(false);
+
     let mut context = Context::new();
     context.insert("meta", &row);
     context.insert("report", &report_data);
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);
+    context.insert("system_exists", &system_exists);
     render_template(&tera, Some(&pool), "system_report_view.html", context, Some(auth))
         .await
         .into_response()
@@ -847,6 +865,147 @@ pub async fn system_reports_bulk_delete(
 }
 
 
+/// Shared PDF builder for system compliance reports.
+/// `subtitle` is the second line under the title (e.g. "Live Report — 2026-05-05" or "Saved on … by …").
+fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Vec<u8>, ()> {
+    const FONT_REGULAR:     &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
+    const FONT_BOLD:        &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
+    const FONT_ITALIC:      &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
+    const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
+    const LOGO_BYTES:       &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
+
+    let font_family = match (
+        fonts::FontData::new(FONT_REGULAR.to_vec(), None),
+        fonts::FontData::new(FONT_BOLD.to_vec(), None),
+        fonts::FontData::new(FONT_ITALIC.to_vec(), None),
+        fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None),
+    ) {
+        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) =>
+            fonts::FontFamily { regular, bold, italic, bold_italic },
+        _ => return Err(()),
+    };
+
+    let mut doc = genpdf::Document::new(font_family);
+    doc.set_title(format!("OpenSCM System Report - {}", data.system_name));
+    let mut decorator = genpdf::SimplePageDecorator::new();
+    decorator.set_margins(15);
+    doc.set_page_decorator(decorator);
+
+    // Title
+    let mut title = elements::Paragraph::new("OpenSCM System Compliance Report");
+    title.set_alignment(genpdf::Alignment::Center);
+    doc.push(title.styled(style::Style::new().with_font_size(28).bold()
+        .with_color(style::Color::Rgb(0, 0, 128))));
+    doc.push(elements::Break::new(1.0));
+
+    let mut sub = elements::Paragraph::new(subtitle);
+    sub.set_alignment(genpdf::Alignment::Center);
+    doc.push(sub.styled(style::Style::new().with_font_size(10)
+        .with_color(style::Color::Rgb(100, 100, 100))));
+    doc.push(elements::Break::new(0.5));
+
+    let cursor = std::io::Cursor::new(LOGO_BYTES);
+    if let Ok(mut logo) = elements::Image::from_reader(cursor) {
+        logo.set_dpi(40.0);
+        logo.set_alignment(genpdf::Alignment::Center);
+        doc.push(logo);
+    }
+    doc.push(elements::Break::new(1.0));
+
+    // System details table
+    doc.push(elements::Text::new("System Details")
+        .styled(style::Style::new().bold().with_font_size(13)));
+    doc.push(elements::Break::new(0.5));
+
+    let mut details = elements::TableLayout::new(vec![1, 3]);
+    details.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+    for (label, value) in &[
+        ("System Name",  data.system_name.as_str()),
+        ("OS",           data.os.as_str()),
+        ("Architecture", data.arch.as_deref().unwrap_or("—")),
+        ("IP Address",   data.ip.as_deref().unwrap_or("—")),
+        ("Last Seen",    data.last_seen.as_deref().unwrap_or("—")),
+    ] {
+        let _ = details.push_row(vec![
+            cell(elements::Text::new(*label).styled(style::Style::new().bold())),
+            cell(elements::Paragraph::new(value.to_string())),
+        ]);
+    }
+    let score_text = if data.compliance_score < 0.0 {
+        "Not Scanned".to_string()
+    } else {
+        format!("{:.0}%  ({} pass / {} fail / {} na)",
+            data.compliance_score, data.total_pass, data.total_fail, data.total_na)
+    };
+    let _ = details.push_row(vec![
+        cell(elements::Text::new("Compliance Score").styled(style::Style::new().bold())),
+        cell(elements::Paragraph::new(score_text)),
+    ]);
+    doc.push(details);
+    doc.push(elements::PageBreak::new());
+
+    // Per-policy sections
+    for policy in &data.policy_groups {
+        let exempt = policy.pass_count == 0 && policy.fail_count == 0;
+        let verdict = if exempt { "NOT APPLICABLE" } else if policy.is_passed { "COMPLIANT" } else { "NON-COMPLIANT" };
+        let verdict_color = if exempt {
+            style::Color::Rgb(100, 100, 100)
+        } else if policy.is_passed {
+            style::Color::Rgb(0, 128, 0)
+        } else {
+            style::Color::Rgb(200, 0, 0)
+        };
+
+        doc.push(elements::Text::new(format!("{} — v{}", policy.policy_name, policy.policy_version))
+            .styled(style::Style::new().bold().with_font_size(13)));
+        if let Some(desc) = &policy.policy_description {
+            if !desc.is_empty() {
+                doc.push(elements::Break::new(0.2));
+                doc.push(elements::Paragraph::new(desc.as_str())
+                    .styled(style::Style::new().with_font_size(9)
+                        .with_color(style::Color::Rgb(100, 100, 100))));
+            }
+        }
+        doc.push(elements::Break::new(0.3));
+        doc.push(elements::Text::new(format!("Verdict: {}", verdict))
+            .styled(style::Style::new().bold().with_color(verdict_color)));
+        doc.push(elements::Break::new(0.5));
+
+        let mut rules_table = elements::TableLayout::new(vec![5, 1]);
+        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+        let _ = rules_table.push_row(vec![
+            cell(elements::Text::new("Security Requirement").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Status").styled(style::Style::new().bold())),
+        ]);
+        for res in &policy.results {
+            let (status_text, color) = match res.status.as_str() {
+                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
+                "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
+                "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
+                _      => ("—",    style::Color::Rgb(150, 150, 150)),
+            };
+            let _ = rules_table.push_row(vec![
+                cell(elements::Paragraph::new(&res.test_name)),
+                cell(elements::Text::new(status_text)
+                    .styled(style::Style::new().with_color(color).bold())),
+            ]);
+        }
+        doc.push(rules_table);
+        doc.push(elements::PageBreak::new());
+    }
+
+    doc.push(elements::Break::new(2.0));
+    doc.push(elements::Paragraph::new(
+        "Note: This report contains confidential information about your infrastructure \
+         and should be treated as such. Unauthorized distribution is strictly prohibited.",
+    ).styled(style::Style::new().with_font_size(10).with_color(style::Color::Rgb(100, 100, 100))));
+
+    let mut buffer = Vec::new();
+    doc.render(&mut buffer).map_err(|_| ())?;
+    Ok(buffer)
+}
+
+
 /// Download a saved system compliance report as PDF.
 pub async fn system_reports_download(
     auth: AuthSession,
@@ -876,9 +1035,7 @@ pub async fn system_reports_download(
         }
     };
 
-    let data: SystemReportData = match serde_json::from_str(
-        row.report_data.as_deref().unwrap_or("{}"),
-    ) {
+    let data: SystemReportData = match serde_json::from_str(row.report_data.as_deref().unwrap_or("{}")) {
         Ok(d) => d,
         Err(e) => {
             error!("Failed to deserialize system report data for PDF: {}", e);
@@ -886,144 +1043,19 @@ pub async fn system_reports_download(
         }
     };
 
-    // PDF generation
-    const FONT_REGULAR:     &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
-    const FONT_BOLD:        &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
-    const FONT_ITALIC:      &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
-    const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
-    const LOGO_BYTES:       &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
-
-    let font_family = match (
-        fonts::FontData::new(FONT_REGULAR.to_vec(), None),
-        fonts::FontData::new(FONT_BOLD.to_vec(), None),
-        fonts::FontData::new(FONT_ITALIC.to_vec(), None),
-        fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None),
-    ) {
-        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) => fonts::FontFamily { regular, bold, italic, bold_italic },
-        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
-    };
-
-    let mut doc = genpdf::Document::new(font_family);
-    doc.set_title(format!("OpenSCM System Report - {}", data.system_name));
-    let mut decorator = genpdf::SimplePageDecorator::new();
-    decorator.set_margins(15);
-    doc.set_page_decorator(decorator);
-
-    // Title
-    let mut title = elements::Paragraph::new("OpenSCM System Compliance Report");
-    title.set_alignment(genpdf::Alignment::Center);
-    doc.push(title.styled(style::Style::new().with_font_size(28).bold()
-        .with_color(style::Color::Rgb(0, 0, 128))));
-    doc.push(elements::Break::new(1.0));
-
-    let mut subtitle = elements::Paragraph::new(format!(
-        "Generated on {}  ·  Saved by {}",
+    let subtitle = format!(
+        "Saved on {}  ·  by {}",
         row.submission_date,
         row.submitter_name.as_deref().unwrap_or("Unknown"),
-    ));
-    subtitle.set_alignment(genpdf::Alignment::Center);
-    doc.push(subtitle.styled(style::Style::new().with_font_size(10)
-        .with_color(style::Color::Rgb(100, 100, 100))));
-    doc.push(elements::Break::new(0.5));
+    );
 
-    let cursor = std::io::Cursor::new(LOGO_BYTES);
-    if let Ok(mut logo) = elements::Image::from_reader(cursor) {
-        logo.set_dpi(40.0);
-        logo.set_alignment(genpdf::Alignment::Center);
-        doc.push(logo);
-    }
-    doc.push(elements::Break::new(1.0));
-
-    // System details table
-    doc.push(elements::Text::new("System Details")
-        .styled(style::Style::new().bold().with_font_size(13)));
-    doc.push(elements::Break::new(0.5));
-
-    let mut details = elements::TableLayout::new(vec![1, 3]);
-    details.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-
-    for (label, value) in &[
-        ("System Name", data.system_name.as_str()),
-        ("OS",          data.os.as_str()),
-        ("Architecture", data.arch.as_deref().unwrap_or("—")),
-        ("IP Address",  data.ip.as_deref().unwrap_or("—")),
-        ("Last Seen",   data.last_seen.as_deref().unwrap_or("—")),
-    ] {
-        let _ = details.push_row(vec![
-            Box::new(elements::Text::new(*label).styled(style::Style::new().bold())),
-            Box::new(elements::Paragraph::new(format!(" {}", value))),
-        ]);
-    }
-
-    // Compliance summary row
-    let score_text = if data.compliance_score < 0.0 {
-        "Not Scanned".to_string()
-    } else {
-        format!("{:.0}%  ({} pass / {} fail / {} na)",
-            data.compliance_score, data.total_pass, data.total_fail, data.total_na)
-    };
-    let _ = details.push_row(vec![
-        Box::new(elements::Text::new("Compliance Score").styled(style::Style::new().bold())),
-        Box::new(elements::Paragraph::new(format!(" {}", score_text))),
-    ]);
-    doc.push(details);
-    doc.push(elements::PageBreak::new());
-
-    // Per-policy sections
-    for policy in &data.policy_groups {
-        let exempt = policy.pass_count == 0 && policy.fail_count == 0;
-        let verdict = if exempt { "NOT APPLICABLE" } else if policy.is_passed { "COMPLIANT" } else { "NON-COMPLIANT" };
-        let verdict_color = if exempt {
-            style::Color::Rgb(100, 100, 100)
-        } else if policy.is_passed {
-            style::Color::Rgb(0, 128, 0)
-        } else {
-            style::Color::Rgb(200, 0, 0)
-        };
-
-        doc.push(elements::Text::new(format!("{} — v{}", policy.policy_name, policy.policy_version))
-            .styled(style::Style::new().bold().with_font_size(13)));
-        doc.push(elements::Break::new(0.3));
-        doc.push(elements::Text::new(format!("Verdict: {}", verdict))
-            .styled(style::Style::new().bold().with_color(verdict_color)));
-        doc.push(elements::Break::new(0.5));
-
-        let mut rules_table = elements::TableLayout::new(vec![5, 1]);
-        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
-        let _ = rules_table.push_row(vec![
-            Box::new(elements::Text::new("Security Requirement").styled(style::Style::new().bold())),
-            Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
-        ]);
-
-        for res in &policy.results {
-            let (status_text, color) = match res.status.as_str() {
-                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
-                "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
-                "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
-                _      => ("—",    style::Color::Rgb(150, 150, 150)),
-            };
-            let _ = rules_table.push_row(vec![
-                Box::new(elements::Paragraph::new(&res.test_name)),
-                Box::new(elements::Text::new(status_text)
-                    .styled(style::Style::new().with_color(color).bold())),
-            ]);
+    let buffer = match build_system_report_pdf(&data, &subtitle) {
+        Ok(b) => b,
+        Err(_) => {
+            error!("Failed to render system report PDF {}", id);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
-
-        doc.push(rules_table);
-        doc.push(elements::Break::new(1.5));
-    }
-
-    doc.push(elements::Break::new(1.0));
-    doc.push(elements::Paragraph::new(
-        "This report contains confidential information about your infrastructure \
-         and should be treated as such. Unauthorized distribution is strictly prohibited.",
-    ).styled(style::Style::new().with_font_size(9).with_color(style::Color::Rgb(120, 120, 120))));
-
-    let mut buffer = Vec::new();
-    if let Err(e) = doc.render(&mut buffer) {
-        error!("Failed to render system report PDF {}: {}", id, e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-    }
+    };
 
     Response::builder()
         .status(StatusCode::OK)
@@ -1032,6 +1064,52 @@ pub async fn system_reports_download(
             header::CONTENT_DISPOSITION,
             format!("attachment; filename=\"OpenSCM_SystemReport_{}_{}.pdf\"",
                 data.system_name.replace(' ', "_"), id),
+        )
+        .body(axum::body::Body::from(buffer))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+
+/// Download the live system compliance report as PDF.
+pub async fn system_report_live_download(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    let data = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
+        Ok(d) => d,
+        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
+            return Redirect::to("/systems?error_message=System+not+found").into_response();
+        }
+        Err(e) => {
+            error!(error = ?e, system_id = %id, "Failed to fetch live system report for PDF");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    use chrono::Local;
+    let subtitle = format!("Live Report  ·  {}", Local::now().format("%Y-%m-%d %H:%M"));
+
+    let buffer = match build_system_report_pdf(&data, &subtitle) {
+        Ok(b) => b,
+        Err(_) => {
+            error!("Failed to render live system report PDF for system {}", id);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/pdf")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"OpenSCM_SystemReport_{}_live.pdf\"",
+                data.system_name.replace(' ', "_")),
         )
         .body(axum::body::Body::from(buffer))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
