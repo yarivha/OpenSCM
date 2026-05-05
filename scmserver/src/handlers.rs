@@ -91,6 +91,7 @@ pub async fn render_template(
         context.insert("tenant_id", &session.tenant_id);
         context.insert("role", &session.role);
 
+        context.insert("is_superuser", &(role_enum >= UserRole::Superuser));
         context.insert("is_admin",  &(role_enum >= UserRole::Admin));
         context.insert("is_editor", &(role_enum >= UserRole::Editor));
         context.insert("is_runner", &(role_enum >= UserRole::Runner));
@@ -98,6 +99,7 @@ pub async fn render_template(
     } else {
         context.insert("username", "Guest");
         context.insert("role", "Guest");
+        context.insert("is_superuser", &false);
         context.insert("is_admin",  &false);
         context.insert("is_editor", &false);
         context.insert("is_runner", &false);

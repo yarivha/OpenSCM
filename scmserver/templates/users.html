@@ -70,7 +70,12 @@
                     <td>{{ user.name }}</td>
                     <td>{{ user.email }}</td>
                     <td>
-                      <span class="badge {% if user.role | lower == 'admin' %}badge-danger{% else %}badge-info{% endif %}">
+                      <span class="badge
+                        {% if user.role | lower == 'superuser' %}badge-dark
+                        {% elif user.role | lower == 'admin' %}badge-danger
+                        {% elif user.role | lower == 'editor' %}badge-warning
+                        {% elif user.role | lower == 'runner' %}badge-info
+                        {% else %}badge-secondary{% endif %}">
                         {{ user.role | capitalize }}
                       </span>
                     </td>

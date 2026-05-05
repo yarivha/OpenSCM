@@ -362,12 +362,14 @@ pub enum UserRole {
     Runner = 1,
     Editor = 2,
     Admin = 3,
+    Superuser = 4,
 }
 
 
 impl From<&str> for UserRole {
     fn from(s: &str) -> Self {
         match s.to_lowercase().as_str() {
+            "superuser" => UserRole::Superuser,
             "admin" => UserRole::Admin,
             "editor" => UserRole::Editor,
             "runner" => UserRole::Runner,

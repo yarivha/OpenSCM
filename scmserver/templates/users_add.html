@@ -108,10 +108,13 @@
                   <label for="role">Access Level / Role</label>
                   <div class="d-flex align-items-center">
                     <select name="role" class="form-control" style="max-width: 300px;">
-                      <option value="viewer">Viewer (Read-only)</option>
-                      <option value="runner">Runner (View + Execute Scans)</option>
-                      <option value="editor">Editor (Full Content Control)</option>
+                      {% if is_superuser %}
+                      <option value="superuser">Superuser (Platform Management)</option>
+                      {% endif %}
                       <option value="admin">Administrator (Full System Access)</option>
+                      <option value="editor">Editor (Full Content Control)</option>
+                      <option value="runner">Runner (View + Execute Scans)</option>
+                      <option value="viewer">Viewer (Read-only)</option>
                     </select>
                     <small class="text-muted ml-3">
                       <i class="fas fa-info-circle mr-1"></i> Defines what the user can see and do in OpenSCM.

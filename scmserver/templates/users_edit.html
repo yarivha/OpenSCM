@@ -100,12 +100,17 @@
                   <label for="role">Assigned Access Role</label>
                   <div class="d-flex align-items-center">
                     <select name="role" id="role" class="form-control" style="max-width: 250px;" {% if not is_admin %} disabled {% endif %}>
+                      {% if is_superuser %}
+                      <option value="superuser" {% if user.role | trim | lower == "superuser" %}selected{% endif %}>Superuser (Platform Management)</option>
+                      {% endif %}
                       <option value="admin"  {% if user.role | trim | lower == "admin" %}selected{% endif %}>Administrator</option>
                       <option value="editor" {% if user.role | trim | lower == "editor" %}selected{% endif %}>Editor</option>
                       <option value="runner" {% if user.role | trim | lower == "runner" %}selected{% endif %}>Runner</option>
                       <option value="viewer" {% if user.role | trim | lower == "viewer" %}selected{% endif %}>Viewer</option>
                     </select>
-                    {% if is_admin %}
+                    {% if is_superuser %}
+                      <small class="text-info ml-3"><i class="fas fa-crown mr-1"></i> Superuser permissions active.</small>
+                    {% elif is_admin %}
                       <small class="text-info ml-3"><i class="fas fa-shield-alt mr-1"></i> Admin permissions active.</small>
                     {% else %}
                       <small class="text-muted ml-3"><i class="fas fa-lock mr-1"></i> Only admins can change roles.</small>
