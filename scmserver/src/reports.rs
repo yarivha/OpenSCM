@@ -168,7 +168,6 @@ pub async fn save_policy_report_logic(
         let t_name: String = row.get("test_name");
         let status_raw: String = row.get("status_text");
         let status = normalize_status(&status_raw).to_string();
-        let passed = status == "PASS";
 
         let entry = reports_map.entry(s_name.clone()).or_insert(SystemReport {
             system_name: s_name,
@@ -176,8 +175,9 @@ pub async fn save_policy_report_logic(
             is_passed: true,
         });
 
-        entry.results.push(IndividualResult { test_name: t_name, status });
-        if !passed { entry.is_passed = false; }
+        entry.results.push(IndividualResult { test_name: t_name, status: status.clone() });
+        // Only FAIL flips the verdict — NA results are ignored
+        if status == "FAIL" { entry.is_passed = false; }
     }
 
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();
