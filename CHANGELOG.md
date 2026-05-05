@@ -14,6 +14,7 @@ All notable changes to OpenSCM are documented here.
 - **SMTP email relay (CE/EE/SaaS)** — Admin Settings now has an Email tab for configuring an SMTP relay (host, port, TLS mode, credentials, from address, app URL). In SaaS, if SMTP is configured new users must verify their email before logging in; if not configured, accounts are activated immediately. Replaces the previous Resend API key approach.
 
 ### Fixed
+- **Account locked out if verification email fails (SaaS)** — if SMTP is configured but the verification email cannot be delivered, the account is immediately activated so the user can still log in. A clear message is shown on the login page explaining what happened.
 - **NA results counted as failures in policy report view** — when saving a report, any NA result incorrectly flipped the system verdict to Non-Compliant. Only explicit FAIL results now affect the verdict.
 - **NA results counted as violations in policy PDF report** — the violation count in the PDF summary used `total − PASS`, which included NA. It now counts only FAIL results. NA tests also now render as grey "N/A" in the per-rule breakdown instead of red "FAIL".
 - **ARM7 deb packages missing from releases** — the CI build workflow used `ARCH=arm7` which is not a valid dpkg architecture. Fixed to `ARCH=armhf` so `.deb` packages are correctly built and published for ARMv7.
