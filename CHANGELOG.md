@@ -11,6 +11,7 @@ All notable changes to OpenSCM are documented here.
 - **Tenant management (EE/SaaS)** — Superusers can list, create, view, suspend, activate, and delete tenants via the new Platform Admin section in the sidebar. The `default` and `platform` tenants are protected from suspension or deletion.
 - **Organization field on EE login page** — multi-tenant users can now specify their organization at login. Leaving the field blank logs in as a platform-level (Superuser) account.
 - **Tenant user management (EE/SaaS)** — Superusers can add new users to a tenant, edit their name/email/role, reset their password, and delete them — all from the tenant detail page via inline modals. No separate pages required.
+- **SMTP email relay (CE/EE/SaaS)** — Admin Settings now has an Email tab for configuring an SMTP relay (host, port, TLS mode, credentials, from address, app URL). In SaaS, if SMTP is configured new users must verify their email before logging in; if not configured, accounts are activated immediately. Replaces the previous Resend API key approach.
 
 ### Fixed
 - **NA results counted as failures in policy report view** — when saving a report, any NA result incorrectly flipped the system verdict to Non-Compliant. Only explicit FAIL results now affect the verdict.
