@@ -1023,7 +1023,7 @@ pub async fn policies_report_download(
         doc.push(elements::Break::new(0.5));
 
         let compliant_count = system.results.iter().filter(|r| r.status == "PASS").count();
-        let violation_count = system.results.len() - compliant_count;
+        let violation_count = system.results.iter().filter(|r| r.status == "FAIL").count();
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
@@ -1054,8 +1054,11 @@ pub async fn policies_report_download(
         ]) { error!("Failed to add rules table header to PDF: {}", e); }
 
         for res in &system.results {
-            let is_pass = res.status == "PASS";
-            let (status_text, status_color) = if is_pass { ("PASS", style::Color::Rgb(0, 128, 0)) } else { ("FAIL", style::Color::Rgb(200, 0, 0)) };
+            let (status_text, status_color) = match res.status.as_str() {
+                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
+                "NA"   => ("N/A",  style::Color::Rgb(120, 120, 120)),
+                _      => ("FAIL", style::Color::Rgb(200, 0, 0)),
+            };
             if let Err(e) = rules_table.push_row(vec![
                 cell(elements::Paragraph::new(&res.test_name)),
                 cell(elements::Text::new(status_text).styled(style::Style::new().with_color(status_color).bold())),
