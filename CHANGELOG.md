@@ -4,6 +4,20 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Superuser role** — new role level above Admin that grants access to platform-level tenant management. The initial admin user is automatically promoted to Superuser on first EE/SaaS startup. Superuser can be assigned to other users via the Users page.
+- **Tenant management (EE/SaaS)** — Superusers can list, create, view, suspend, activate, and delete tenants via the new Platform Admin section in the sidebar. The `default` and `platform` tenants are protected from suspension or deletion.
+- **Organization field on EE login page** — multi-tenant users can now specify their organization at login. Leaving the field blank logs in as a platform-level (Superuser) account.
+
+### Fixed
+- **NA results counted as failures in policy report view** — when saving a report, any NA result incorrectly flipped the system verdict to Non-Compliant. Only explicit FAIL results now affect the verdict.
+- **NA results counted as violations in policy PDF report** — the violation count in the PDF summary used `total − PASS`, which included NA. It now counts only FAIL results. NA tests also now render as grey "N/A" in the per-rule breakdown instead of red "FAIL".
+- **ARM7 deb packages missing from releases** — the CI build workflow used `ARCH=arm7` which is not a valid dpkg architecture. Fixed to `ARCH=armhf` so `.deb` packages are correctly built and published for ARMv7.
+
+---
+
 ## [0.2.5] - 2026-05-05
 
 ### Added
