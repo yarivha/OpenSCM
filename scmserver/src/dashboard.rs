@@ -57,7 +57,11 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
         .await
         .unwrap_or_else(|e| { error!("Failed to fetch policies count: {}", e); 0 });
 
-    let reports_count: i64 = sqlx::query_scalar("SELECT COUNT(*) FROM reports  WHERE tenant_id=?")
+    let reports_count: i64 = sqlx::query_scalar(
+        "SELECT (SELECT COUNT(*) FROM reports WHERE tenant_id = ?) +
+                (SELECT COUNT(*) FROM system_reports WHERE tenant_id = ?)"
+    )
+        .bind(&auth.tenant_id)
         .bind(&auth.tenant_id)
         .fetch_one(&*pool)
         .await
