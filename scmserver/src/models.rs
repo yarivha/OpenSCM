@@ -320,6 +320,17 @@ pub struct IndividualResult {
 
 
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct SavedSystemReport {
+    pub id: i32,
+    pub tenant_id: String,
+    pub submission_date: String,
+    pub system_id: i32,
+    pub system_name: String,
+    pub submitter_name: Option<String>,
+    pub report_data: Option<String>, // JSON-serialised SystemReportData
+}
+
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Report {
     pub id: i32,
     pub tenant_id: String,

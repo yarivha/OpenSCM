@@ -11,7 +11,19 @@
     border-color: #4b545c;
     background: rgba(255,255,255,0.05);
   }
-  .status-icon { width: 20px; text-align: center; }
+  .snapshot-badge {
+    background: #e8f4fd;
+    border: 1px solid #bee3f8;
+    border-radius: 6px;
+    padding: 6px 12px;
+    font-size: 0.82rem;
+    color: #2c6fad;
+  }
+  .dark-mode .snapshot-badge {
+    background: rgba(44,111,173,0.15);
+    border-color: rgba(44,111,173,0.4);
+    color: #7ec8e3;
+  }
   @media print {
     .btn, .main-footer, .breadcrumb { display: none !important; }
     .content-wrapper { margin-left: 0 !important; }
@@ -25,13 +37,16 @@
     <div class="container-fluid">
       <div class="row mb-2">
         <div class="col-sm-6">
-          <h1 class="m-0"><i class="fas fa-server mr-2 text-primary"></i>System Compliance Report</h1>
+          <h1 class="m-0">
+            <i class="fas fa-server mr-2 text-primary"></i>System Compliance Report
+            <small class="text-muted ml-2" style="font-size:0.6em;">Archived Snapshot</small>
+          </h1>
         </div>
         <div class="col-sm-6">
           <ol class="breadcrumb float-sm-right">
             <li class="breadcrumb-item"><a href="/">Home</a></li>
-            <li class="breadcrumb-item"><a href="/systems">Systems</a></li>
-            <li class="breadcrumb-item active">Live Report</li>
+            <li class="breadcrumb-item"><a href="/reports#system-reports">Reports</a></li>
+            <li class="breadcrumb-item active">System Report</li>
           </ol>
         </div>
       </div>
@@ -41,9 +56,15 @@
   <section class="content">
     <div class="container-fluid">
 
-      {% if error_message %}<div class="alert alert-danger">{{ error_message }}</div>{% endif %}
+      {# Snapshot notice #}
+      <div class="snapshot-badge mb-3 d-inline-flex align-items-center">
+        <i class="fas fa-history mr-2"></i>
+        Snapshot saved on
+        <strong class="mx-1 datetime" data-utc="{{ meta.submission_date }}">{{ meta.submission_date }}</strong>
+        by <strong class="ml-1">{{ meta.submitter_name | default(value="Unknown") }}</strong>
+      </div>
 
-      <!-- System header card -->
+      {# System header card #}
       <div class="row">
         <div class="col-md-12">
           <div class="card card-outline card-dark shadow-sm">
@@ -58,7 +79,7 @@
                   </p>
                   {% if report.last_seen %}
                   <p class="text-sm text-muted mb-0">
-                    <i class="fas fa-clock mr-1"></i><strong>Last Seen:</strong> {{ report.last_seen }}
+                    <i class="fas fa-clock mr-1"></i><strong>Last Seen at Snapshot:</strong> {{ report.last_seen }}
                   </p>
                   {% endif %}
                 </div>
@@ -80,7 +101,6 @@
                       <small class="text-uppercase text-muted text-xs">NA</small>
                     </div>
                   </div>
-
                   <div class="mt-2">
                     {% if report.compliance_score < 0 %}
                       <span class="badge badge-secondary px-2 py-1">Not Scanned</span>
@@ -102,11 +122,11 @@
       {% if report.policy_groups | length == 0 %}
       <div class="alert alert-info">
         <i class="fas fa-info-circle mr-1"></i>
-        This system is not assigned to any policy group, or no scan results are available yet.
+        No policy data was captured in this snapshot.
       </div>
       {% endif %}
 
-      <!-- One card per policy -->
+      {# One card per policy #}
       {% for policy in report.policy_groups %}
       {% set exempt = policy.pass_count == 0 and policy.fail_count == 0 %}
       <div class="card card-outline {% if exempt %}card-secondary{% elif policy.is_passed %}card-success{% else %}card-danger{% endif %} shadow-sm">
@@ -128,14 +148,14 @@
           <table class="table table-valign-middle mb-0">
             <thead>
               <tr class="text-xs text-muted text-uppercase">
-                <th style="padding-left: 20px;">Security Requirement</th>
-                <th class="text-center" style="width: 150px;">Status</th>
+                <th style="padding-left:20px;">Security Requirement</th>
+                <th class="text-center" style="width:150px;">Status</th>
               </tr>
             </thead>
             <tbody>
               {% for res in policy.results %}
               <tr>
-                <td style="padding-left: 20px;">{{ res.test_name }}</td>
+                <td style="padding-left:20px;">{{ res.test_name }}</td>
                 <td class="text-center">
                   {% if res.status == "PASS" %}
                     <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
@@ -157,11 +177,8 @@
               <div class="col-sm-8">
                 <h6 class="mb-0 font-weight-bold">Policy Verdict</h6>
                 <small class="text-muted">
-                  {% if exempt %}
-                    No applicable tests ran on this system
-                  {% else %}
-                    {{ policy.pass_count }} passed &nbsp;·&nbsp; {{ policy.fail_count }} failed
-                  {% endif %}
+                  {% if exempt %}No applicable tests ran on this system
+                  {% else %}{{ policy.pass_count }} passed &nbsp;·&nbsp; {{ policy.fail_count }} failed{% endif %}
                 </small>
               </div>
               <div class="col-sm-4 text-right">
@@ -182,14 +199,17 @@
       <div class="row pb-4">
         <div class="col-12 text-right">
           <hr>
-          <a class="btn btn-secondary btn-sm" href="/systems">
-            <i class="fas fa-arrow-left mr-1"></i> Back to Systems
+          <a class="btn btn-secondary btn-sm" href="/reports#system-reports">
+            <i class="fas fa-arrow-left mr-1"></i> Back to Reports
           </a>
+          {% if is_viewer %}
+          <a class="btn btn-outline-secondary btn-sm ml-2" href="/reports/system/download/{{ meta.id }}">
+            <i class="fas fa-download mr-1"></i> Download PDF
+          </a>
+          {% endif %}
           {% if is_runner %}
-          <a class="btn btn-success btn-sm ml-2"
-             href="/systems/report/{{ report.system_id }}/save"
-             onclick="return confirm('Save a compliance snapshot for {{ report.system_name }}?');">
-            <i class="fas fa-save mr-1"></i> Save Report
+          <a class="btn btn-outline-primary btn-sm ml-2" href="/systems/report/{{ meta.system_id }}">
+            <i class="fas fa-sync-alt mr-1"></i> View Live Report
           </a>
           {% endif %}
         </div>
@@ -198,4 +218,24 @@
     </div>
   </section>
 </div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $(function() {
+    // Convert snapshot date to local time
+    $('.datetime').each(function() {
+      const utcStr = $(this).data('utc');
+      if (utcStr) {
+        const d = new Date(utcStr);
+        if (!isNaN(d.getTime())) {
+          $(this).text(d.toLocaleString(undefined, {
+            year:'numeric', month:'2-digit', day:'2-digit',
+            hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
+          }));
+        }
+      }
+    });
+  });
+</script>
 {% endblock %}

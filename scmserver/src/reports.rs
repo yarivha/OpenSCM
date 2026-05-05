@@ -16,8 +16,9 @@ use crate::auth::{self};
 use crate::handlers::{render_template, normalize_status, parse_form_data};
 use crate::models::{
     UserRole, TestMeta, SystemReport, IndividualResult,
-    Report, ErrorQuery, AuthSession,
+    Report, SavedSystemReport, ErrorQuery, AuthSession, SystemReportData,
 };
+use crate::systems::fetch_system_report_data;
 
 
 // ============================================================
@@ -27,25 +28,25 @@ use crate::models::{
 pub async fn reports(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<SqlitePool>,
-    tera: Extension<Arc<Tera>>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
         return redir;
     }
 
-    let rows_result = sqlx::query(
+    // Fetch policy reports
+    let policy_reports: Vec<Report> = match sqlx::query(
         "SELECT id, submission_date, policy_name, policy_version, submitter_name
          FROM reports
          WHERE tenant_id = ?
          ORDER BY submission_date DESC",
     )
     .bind(&auth.tenant_id)
-    .fetch_all(&*pool)
-    .await;
-
-    let reports: Vec<Report> = match rows_result {
+    .fetch_all(&pool)
+    .await
+    {
         Ok(rows) => rows
             .into_iter()
             .map(|row| Report {
@@ -61,13 +62,26 @@ pub async fn reports(
             })
             .collect(),
         Err(e) => {
-            error!("Failed to fetch reports: {}", e);
-            let mut context = Context::new();
-            context.insert("error_message", "Failed to load reports.");
-            context.insert("reports", &Vec::<Report>::new());
-            return render_template(&tera, Some(&pool), "reports.html", context, Some(auth))
-                .await
-                .into_response();
+            error!("Failed to fetch policy reports: {}", e);
+            vec![]
+        }
+    };
+
+    // Fetch system reports
+    let system_reports: Vec<SavedSystemReport> = match sqlx::query_as::<_, SavedSystemReport>(
+        "SELECT id, tenant_id, submission_date, system_id, system_name, submitter_name, NULL as report_data
+         FROM system_reports
+         WHERE tenant_id = ?
+         ORDER BY submission_date DESC",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("Failed to fetch system reports: {}", e);
+            vec![]
         }
     };
 
@@ -78,7 +92,8 @@ pub async fn reports(
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
     }
-    context.insert("reports", &reports);
+    context.insert("reports", &policy_reports);
+    context.insert("system_reports", &system_reports);
     render_template(&tera, Some(&pool), "reports.html", context, Some(auth))
         .await
         .into_response()
@@ -223,8 +238,8 @@ pub async fn reports_save(
 pub async fn reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
-    tera: Extension<Arc<Tera>>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
@@ -240,7 +255,7 @@ pub async fn reports_view(
     )
     .bind(id)
     .bind(&auth.tenant_id)
-    .fetch_optional(&*pool)
+    .fetch_optional(&pool)
     .await
     {
         Ok(Some(r)) => r,
@@ -288,7 +303,7 @@ pub async fn reports_view(
 pub async fn reports_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -298,7 +313,7 @@ pub async fn reports_delete(
     if let Err(e) = sqlx::query("DELETE FROM reports WHERE id = ? AND tenant_id = ?")
         .bind(id)
         .bind(&auth.tenant_id)
-        .execute(&*pool)
+        .execute(&pool)
         .await
     {
         error!("Failed to delete report {}: {}", id, e);
@@ -632,4 +647,392 @@ pub async fn reports_bulk_delete(
     info!("Bulk deleted {} reports by '{}'.", deleted, auth.username);
     let msg = urlencoding::encode(&format!("{} report(s) deleted.", deleted)).to_string();
     Redirect::to(&format!("/reports?success_message={}", msg)).into_response()
+}
+
+
+// ============================================================
+// SYSTEM REPORT HANDLERS
+// ============================================================
+
+/// Save a snapshot of the live system compliance report.
+pub async fn system_report_save(
+    auth: AuthSession,
+    Path(system_id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
+        return redir;
+    }
+
+    let data = match fetch_system_report_data(system_id, &auth.tenant_id, &pool).await {
+        Ok(d) => d,
+        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
+            return Redirect::to("/systems?error_message=System+not+found").into_response();
+        }
+        Err(e) => {
+            error!(error = ?e, system_id = %system_id, "Failed to fetch system data for snapshot");
+            return Redirect::to("/reports?error_message=Failed+to+save+report").into_response();
+        }
+    };
+
+    let report_json = match serde_json::to_string(&data) {
+        Ok(j) => j,
+        Err(e) => {
+            error!("Failed to serialize system report data: {}", e);
+            return Redirect::to("/reports?error_message=Failed+to+save+report").into_response();
+        }
+    };
+
+    match sqlx::query(
+        "INSERT INTO system_reports (tenant_id, system_id, system_name, submitter_name, report_data)
+         VALUES (?, ?, ?, ?, ?)",
+    )
+    .bind(&auth.tenant_id)
+    .bind(system_id)
+    .bind(&data.system_name)
+    .bind(&auth.username)
+    .bind(&report_json)
+    .execute(&pool)
+    .await
+    {
+        Ok(_) => {
+            info!("System report snapshot saved for system '{}' by '{}'.", data.system_name, auth.username);
+            let msg = urlencoding::encode(&format!("Report saved for {}.", data.system_name)).to_string();
+            Redirect::to(&format!("/reports?success_message={}", msg)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to insert system report snapshot: {}", e);
+            Redirect::to("/reports?error_message=Failed+to+save+report").into_response()
+        }
+    }
+}
+
+
+/// View a saved system compliance report snapshot.
+pub async fn system_reports_view(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(tera): Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    let row = match sqlx::query_as::<_, SavedSystemReport>(
+        "SELECT id, tenant_id, submission_date, system_id, system_name, submitter_name, report_data
+         FROM system_reports
+         WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .fetch_optional(&pool)
+    .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            error!(error = ?e, report_id = %id, "Failed to fetch system report");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let report_data: SystemReportData = match serde_json::from_str(
+        row.report_data.as_deref().unwrap_or("{}"),
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            error!("Failed to deserialize system report data: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let compliance_sat: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_sat'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(80);
+
+    let compliance_marginal: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_marginal'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(60);
+
+    let mut context = Context::new();
+    context.insert("meta", &row);
+    context.insert("report", &report_data);
+    context.insert("compliance_sat", &compliance_sat);
+    context.insert("compliance_marginal", &compliance_marginal);
+    render_template(&tera, Some(&pool), "system_report_view.html", context, Some(auth))
+        .await
+        .into_response()
+}
+
+
+/// Delete a saved system compliance report.
+pub async fn system_reports_delete(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    match sqlx::query("DELETE FROM system_reports WHERE id = ? AND tenant_id = ?")
+        .bind(id)
+        .bind(&auth.tenant_id)
+        .execute(&pool)
+        .await
+    {
+        Ok(_) => Redirect::to("/reports?success_message=System+report+deleted.").into_response(),
+        Err(e) => {
+            error!("Failed to delete system report {}: {}", id, e);
+            Redirect::to("/reports?error_message=Failed+to+delete+report.").into_response()
+        }
+    }
+}
+
+
+/// Bulk delete saved system compliance reports.
+pub async fn system_reports_bulk_delete(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let body = match std::str::from_utf8(&raw_form.0) {
+        Ok(s) => s.to_string(),
+        Err(_) => return Redirect::to("/reports?error_message=Invalid+form+data.").into_response(),
+    };
+
+    let form_data = parse_form_data(&body);
+    let ids: Vec<i64> = form_data
+        .get("ids")
+        .map(|v| v.iter().filter_map(|s| s.parse::<i64>().ok()).collect())
+        .unwrap_or_default();
+
+    if ids.is_empty() {
+        return Redirect::to("/reports?error_message=No+reports+selected.").into_response();
+    }
+
+    let mut deleted = 0usize;
+    for id in &ids {
+        if sqlx::query("DELETE FROM system_reports WHERE id = ? AND tenant_id = ?")
+            .bind(id)
+            .bind(&auth.tenant_id)
+            .execute(&pool)
+            .await
+            .is_ok()
+        {
+            deleted += 1;
+        }
+    }
+
+    info!("Bulk deleted {} system reports by '{}'.", deleted, auth.username);
+    let msg = urlencoding::encode(&format!("{} system report(s) deleted.", deleted)).to_string();
+    Redirect::to(&format!("/reports?success_message={}", msg)).into_response()
+}
+
+
+/// Download a saved system compliance report as PDF.
+pub async fn system_reports_download(
+    auth: AuthSession,
+    Path(id): Path<i64>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    let row = match sqlx::query_as::<_, SavedSystemReport>(
+        "SELECT id, tenant_id, submission_date, system_id, system_name, submitter_name, report_data
+         FROM system_reports
+         WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .fetch_optional(&pool)
+    .await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            error!(error = ?e, report_id = %id, "Failed to fetch system report for download");
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    let data: SystemReportData = match serde_json::from_str(
+        row.report_data.as_deref().unwrap_or("{}"),
+    ) {
+        Ok(d) => d,
+        Err(e) => {
+            error!("Failed to deserialize system report data for PDF: {}", e);
+            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // PDF generation
+    const FONT_REGULAR:     &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
+    const FONT_BOLD:        &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
+    const FONT_ITALIC:      &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
+    const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
+    const LOGO_BYTES:       &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
+
+    let font_family = match (
+        fonts::FontData::new(FONT_REGULAR.to_vec(), None),
+        fonts::FontData::new(FONT_BOLD.to_vec(), None),
+        fonts::FontData::new(FONT_ITALIC.to_vec(), None),
+        fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None),
+    ) {
+        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) => fonts::FontFamily { regular, bold, italic, bold_italic },
+        _ => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
+
+    let mut doc = genpdf::Document::new(font_family);
+    doc.set_title(format!("OpenSCM System Report - {}", data.system_name));
+    let mut decorator = genpdf::SimplePageDecorator::new();
+    decorator.set_margins(15);
+    doc.set_page_decorator(decorator);
+
+    // Title
+    let mut title = elements::Paragraph::new("OpenSCM System Compliance Report");
+    title.set_alignment(genpdf::Alignment::Center);
+    doc.push(title.styled(style::Style::new().with_font_size(28).bold()
+        .with_color(style::Color::Rgb(0, 0, 128))));
+    doc.push(elements::Break::new(1.0));
+
+    let mut subtitle = elements::Paragraph::new(format!(
+        "Generated on {}  ·  Saved by {}",
+        row.submission_date,
+        row.submitter_name.as_deref().unwrap_or("Unknown"),
+    ));
+    subtitle.set_alignment(genpdf::Alignment::Center);
+    doc.push(subtitle.styled(style::Style::new().with_font_size(10)
+        .with_color(style::Color::Rgb(100, 100, 100))));
+    doc.push(elements::Break::new(0.5));
+
+    let cursor = std::io::Cursor::new(LOGO_BYTES);
+    if let Ok(mut logo) = elements::Image::from_reader(cursor) {
+        logo.set_dpi(40.0);
+        logo.set_alignment(genpdf::Alignment::Center);
+        doc.push(logo);
+    }
+    doc.push(elements::Break::new(1.0));
+
+    // System details table
+    doc.push(elements::Text::new("System Details")
+        .styled(style::Style::new().bold().with_font_size(13)));
+    doc.push(elements::Break::new(0.5));
+
+    let mut details = elements::TableLayout::new(vec![1, 3]);
+    details.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+    for (label, value) in &[
+        ("System Name", data.system_name.as_str()),
+        ("OS",          data.os.as_str()),
+        ("Architecture", data.arch.as_deref().unwrap_or("—")),
+        ("IP Address",  data.ip.as_deref().unwrap_or("—")),
+        ("Last Seen",   data.last_seen.as_deref().unwrap_or("—")),
+    ] {
+        let _ = details.push_row(vec![
+            Box::new(elements::Text::new(*label).styled(style::Style::new().bold())),
+            Box::new(elements::Paragraph::new(format!(" {}", value))),
+        ]);
+    }
+
+    // Compliance summary row
+    let score_text = if data.compliance_score < 0.0 {
+        "Not Scanned".to_string()
+    } else {
+        format!("{:.0}%  ({} pass / {} fail / {} na)",
+            data.compliance_score, data.total_pass, data.total_fail, data.total_na)
+    };
+    let _ = details.push_row(vec![
+        Box::new(elements::Text::new("Compliance Score").styled(style::Style::new().bold())),
+        Box::new(elements::Paragraph::new(format!(" {}", score_text))),
+    ]);
+    doc.push(details);
+    doc.push(elements::PageBreak::new());
+
+    // Per-policy sections
+    for policy in &data.policy_groups {
+        let exempt = policy.pass_count == 0 && policy.fail_count == 0;
+        let verdict = if exempt { "NOT APPLICABLE" } else if policy.is_passed { "COMPLIANT" } else { "NON-COMPLIANT" };
+        let verdict_color = if exempt {
+            style::Color::Rgb(100, 100, 100)
+        } else if policy.is_passed {
+            style::Color::Rgb(0, 128, 0)
+        } else {
+            style::Color::Rgb(200, 0, 0)
+        };
+
+        doc.push(elements::Text::new(format!("{} — v{}", policy.policy_name, policy.policy_version))
+            .styled(style::Style::new().bold().with_font_size(13)));
+        doc.push(elements::Break::new(0.3));
+        doc.push(elements::Text::new(format!("Verdict: {}", verdict))
+            .styled(style::Style::new().bold().with_color(verdict_color)));
+        doc.push(elements::Break::new(0.5));
+
+        let mut rules_table = elements::TableLayout::new(vec![5, 1]);
+        rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+        let _ = rules_table.push_row(vec![
+            Box::new(elements::Text::new("Security Requirement").styled(style::Style::new().bold())),
+            Box::new(elements::Text::new("Status").styled(style::Style::new().bold())),
+        ]);
+
+        for res in &policy.results {
+            let (status_text, color) = match res.status.as_str() {
+                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
+                "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
+                "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
+                _      => ("—",    style::Color::Rgb(150, 150, 150)),
+            };
+            let _ = rules_table.push_row(vec![
+                Box::new(elements::Paragraph::new(&res.test_name)),
+                Box::new(elements::Text::new(status_text)
+                    .styled(style::Style::new().with_color(color).bold())),
+            ]);
+        }
+
+        doc.push(rules_table);
+        doc.push(elements::Break::new(1.5));
+    }
+
+    doc.push(elements::Break::new(1.0));
+    doc.push(elements::Paragraph::new(
+        "This report contains confidential information about your infrastructure \
+         and should be treated as such. Unauthorized distribution is strictly prohibited.",
+    ).styled(style::Style::new().with_font_size(9).with_color(style::Color::Rgb(120, 120, 120))));
+
+    let mut buffer = Vec::new();
+    if let Err(e) = doc.render(&mut buffer) {
+        error!("Failed to render system report PDF {}: {}", id, e);
+        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    }
+
+    Response::builder()
+        .status(StatusCode::OK)
+        .header(header::CONTENT_TYPE, "application/pdf")
+        .header(
+            header::CONTENT_DISPOSITION,
+            format!("attachment; filename=\"OpenSCM_SystemReport_{}_{}.pdf\"",
+                data.system_name.replace(' ', "_"), id),
+        )
+        .body(axum::body::Body::from(buffer))
+        .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
 }

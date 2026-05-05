@@ -20,8 +20,7 @@
 
   <section class="content">
     <div class="container-fluid">
-      
-      {# Alerts Section #}
+
       {% if error_message %}
       <div class="alert alert-danger alert-dismissible">
         <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
@@ -41,91 +40,154 @@
       <div class="row">
         <div class="col-12">
           <div class="card card-outline card-primary">
-            <div class="card-header">
-              <h3 class="card-title">Historical Scan Results</h3>
-              <div class="card-tools">
-                <button type="button" class="btn btn-tool" onclick="window.location.reload();" title="Refresh">
-                  <i class="fas fa-sync-alt"></i>
-                </button>
-              </div>
+            <div class="card-header p-0 border-bottom-0">
+              <ul class="nav nav-tabs" id="reportTabs" role="tablist">
+                <li class="nav-item">
+                  <a class="nav-link active" id="policy-tab" data-toggle="tab" href="#policy-reports" role="tab">
+                    <i class="fas fa-shield-alt mr-1"></i> Policy Reports
+                    <span class="badge badge-secondary ml-1">{{ reports | length }}</span>
+                  </a>
+                </li>
+                <li class="nav-item">
+                  <a class="nav-link" id="system-tab" data-toggle="tab" href="#system-reports" role="tab">
+                    <i class="fas fa-server mr-1"></i> System Reports
+                    <span class="badge badge-secondary ml-1">{{ system_reports | length }}</span>
+                  </a>
+                </li>
+              </ul>
             </div>
 
-            {# Bulk action toolbar — hidden until checkboxes are selected #}
-            <div id="bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
-              <span id="bulk-count" class="mr-3 font-weight-bold text-primary"></span>
-              {% if is_editor %}
-              <button type="button" class="btn btn-danger btn-sm" id="bulk-delete-btn" title="Delete Selected">
-                <i class="fas fa-trash mr-1"></i> Delete
-              </button>
-              {% endif %}
-            </div>
+            <div class="tab-content" id="reportTabsContent">
 
-            <div class="card-body">
-              <table id="reports_table" class="table table-bordered table-striped table-hover">
-                <thead>
-                  <tr>
-                    <th style="width: 10px">ID</th>
-                    <th style="width: 20px; text-align:center;">
-                      <input type="checkbox" id="select-all" title="Select All">
-                    </th>
-                    <th>Policy Name</th>
-                    <th>Version</th>
-                    <th>Publisher</th>
-                    <th>Date Generated</th>
-                    <th class="text-center" style="width: 220px">Actions</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {% for report in reports %}
-                  <tr>
-                    <td>{{ report.id }}</td>
-                    <td class="text-center">
-                      <input type="checkbox" class="row-checkbox" value="{{ report.id }}" title="Select">
-                    </td>
-                    <td><strong>{{ report.policy_name }}</strong></td>
-                    <td><span class="badge badge-light">v{{ report.policy_version }}</span></td>
-                    <td>{{ report.submitter_name }}</td>
-                    <td class="datetime" data-utc="{{ report.submission_date }}">{{ report.submission_date }}</td>
-                    <td class="text-right">
-                      
-                      {# 1. View Report #}
-                      <a class="btn btn-primary btn-sm {% if not is_viewer %}disabled{% endif %}" 
-                         href="{% if is_viewer %}/reports/view/{{ report.id }}{% else %}#{% endif %}"
-                         {% if not is_viewer %}title="Viewer Permission Required"{% endif %}>
-                        <i class="fas fa-eye"></i> View
-                      </a>
+              {# ── Policy Reports Tab ─────────────────────────────────────── #}
+              <div class="tab-pane fade show active" id="policy-reports" role="tabpanel">
 
-                      {# 2. Download PDF/CSV #}
-                      <a class="btn btn-secondary btn-sm ml-1 {% if not is_viewer %}disabled{% endif %}" 
-                         href="{% if is_viewer %}/reports/download/{{ report.id }}{% else %}#{% endif %}"
-                         {% if not is_viewer %}style="opacity: 0.5; cursor: not-allowed;"{% endif %}>
-                        <i class="fas {% if is_viewer %}fa-download{% else %}fa-lock{% endif %}"></i>
-                      </a>
+                <div id="policy-bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
+                  <span id="policy-bulk-count" class="mr-3 font-weight-bold text-primary"></span>
+                  {% if is_editor %}
+                  <button type="button" class="btn btn-danger btn-sm" id="policy-bulk-delete-btn" title="Delete Selected">
+                    <i class="fas fa-trash mr-1"></i> Delete
+                  </button>
+                  {% endif %}
+                </div>
 
-                      {# 3. Delete Report (Editor only) #}
-                      <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
-                         onclick="{% if is_editor %}return confirm('Delete this compliance record? This action is permanent.');{% else %}return false;{% endif %}" 
-                         href="{% if is_editor %}/reports/delete/{{ report.id }}{% else %}#{% endif %}"
-                         {% if not is_editor %}style="opacity: 0.5; cursor: not-allowed; filter: grayscale(100%);"{% endif %}>
-                        <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
-                      </a>
-                      
-                    </td>
-                  </tr>
-                  {% endfor %}
-                </tbody>
-              </table>
-            </div>
+                <div class="card-body">
+                  <table id="policy_reports_table" class="table table-bordered table-striped table-hover">
+                    <thead>
+                      <tr>
+                        <th style="width:10px">ID</th>
+                        <th style="width:20px; text-align:center;"><input type="checkbox" id="policy-select-all" title="Select All"></th>
+                        <th>Policy Name</th>
+                        <th>Version</th>
+                        <th>Publisher</th>
+                        <th>Date Generated</th>
+                        <th class="text-center" style="width:220px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for report in reports %}
+                      <tr>
+                        <td>{{ report.id }}</td>
+                        <td class="text-center"><input type="checkbox" class="policy-row-checkbox" value="{{ report.id }}" title="Select"></td>
+                        <td><strong>{{ report.policy_name }}</strong></td>
+                        <td><span class="badge badge-light">v{{ report.policy_version }}</span></td>
+                        <td>{{ report.submitter_name }}</td>
+                        <td class="datetime" data-utc="{{ report.submission_date }}">{{ report.submission_date }}</td>
+                        <td class="text-right">
+                          <a class="btn btn-primary btn-sm {% if not is_viewer %}disabled{% endif %}"
+                             href="{% if is_viewer %}/reports/view/{{ report.id }}{% else %}#{% endif %}">
+                            <i class="fas fa-eye"></i> View
+                          </a>
+                          <a class="btn btn-secondary btn-sm ml-1 {% if not is_viewer %}disabled{% endif %}"
+                             href="{% if is_viewer %}/reports/download/{{ report.id }}{% else %}#{% endif %}"
+                             {% if not is_viewer %}style="opacity:0.5;cursor:not-allowed"{% endif %}>
+                            <i class="fas {% if is_viewer %}fa-download{% else %}fa-lock{% endif %}"></i>
+                          </a>
+                          <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
+                             onclick="{% if is_editor %}return confirm('Delete this compliance record? This action is permanent.');{% else %}return false;{% endif %}"
+                             href="{% if is_editor %}/reports/delete/{{ report.id }}{% else %}#{% endif %}"
+                             {% if not is_editor %}style="opacity:0.5;cursor:not-allowed;filter:grayscale(100%)"{% endif %}>
+                            <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                          </a>
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>{# end policy tab #}
+
+              {# ── System Reports Tab ─────────────────────────────────────── #}
+              <div class="tab-pane fade" id="system-reports" role="tabpanel">
+
+                <div id="system-bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
+                  <span id="system-bulk-count" class="mr-3 font-weight-bold text-primary"></span>
+                  {% if is_editor %}
+                  <button type="button" class="btn btn-danger btn-sm" id="system-bulk-delete-btn" title="Delete Selected">
+                    <i class="fas fa-trash mr-1"></i> Delete
+                  </button>
+                  {% endif %}
+                </div>
+
+                <div class="card-body">
+                  <table id="system_reports_table" class="table table-bordered table-striped table-hover">
+                    <thead>
+                      <tr>
+                        <th style="width:10px">ID</th>
+                        <th style="width:20px; text-align:center;"><input type="checkbox" id="system-select-all" title="Select All"></th>
+                        <th>System Name</th>
+                        <th>Publisher</th>
+                        <th>Date Generated</th>
+                        <th class="text-center" style="width:220px">Actions</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {% for report in system_reports %}
+                      <tr>
+                        <td>{{ report.id }}</td>
+                        <td class="text-center"><input type="checkbox" class="system-row-checkbox" value="{{ report.id }}" title="Select"></td>
+                        <td><strong><i class="fas fa-server mr-1 text-muted"></i>{{ report.system_name }}</strong></td>
+                        <td>{{ report.submitter_name }}</td>
+                        <td class="datetime" data-utc="{{ report.submission_date }}">{{ report.submission_date }}</td>
+                        <td class="text-right">
+                          <a class="btn btn-primary btn-sm {% if not is_viewer %}disabled{% endif %}"
+                             href="{% if is_viewer %}/reports/system/view/{{ report.id }}{% else %}#{% endif %}">
+                            <i class="fas fa-eye"></i> View
+                          </a>
+                          <a class="btn btn-secondary btn-sm ml-1 {% if not is_viewer %}disabled{% endif %}"
+                             href="{% if is_viewer %}/reports/system/download/{{ report.id }}{% else %}#{% endif %}"
+                             {% if not is_viewer %}style="opacity:0.5;cursor:not-allowed"{% endif %}>
+                            <i class="fas {% if is_viewer %}fa-download{% else %}fa-lock{% endif %}"></i>
+                          </a>
+                          <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
+                             onclick="{% if is_editor %}return confirm('Delete this system report? This action is permanent.');{% else %}return false;{% endif %}"
+                             href="{% if is_editor %}/reports/system/delete/{{ report.id }}{% else %}#{% endif %}"
+                             {% if not is_editor %}style="opacity:0.5;cursor:not-allowed;filter:grayscale(100%)"{% endif %}>
+                            <i class="fas {% if is_editor %}fa-trash{% else %}fa-lock{% endif %}"></i>
+                          </a>
+                        </td>
+                      </tr>
+                      {% endfor %}
+                    </tbody>
+                  </table>
+                </div>
+              </div>{# end system tab #}
+
+            </div>{# end tab-content #}
           </div>
         </div>
       </div>
+
     </div>
   </section>
 </div>
 
-{# Hidden bulk form #}
-<form id="bulk-delete-form" method="POST" action="/reports/bulk/delete" style="display:none;">
-  <div id="bulk-delete-ids"></div>
+{# Hidden bulk forms #}
+<form id="policy-bulk-delete-form" method="POST" action="/reports/bulk/delete" style="display:none;">
+  <div id="policy-bulk-delete-ids"></div>
+</form>
+<form id="system-bulk-delete-form" method="POST" action="/reports/system/bulk/delete" style="display:none;">
+  <div id="system-bulk-delete-ids"></div>
 </form>
 
 {% endblock %}
@@ -133,74 +195,88 @@
 {% block scripts %}
 <script>
   $(function () {
-    // 1. Timezone Conversion
+
+    // ── Timezone conversion ──────────────────────────────────────────────────
     $('.datetime').each(function() {
-      const utcDateStr = $(this).data('utc');
-      if (utcDateStr) {
-        const date = new Date(utcDateStr);
-        if (!isNaN(date.getTime())) {
-          $(this).text(date.toLocaleString(undefined, {
-            year: 'numeric', month: '2-digit', day: '2-digit',
-            hour: '2-digit', minute: '2-digit', second: '2-digit',
-            hour12: false
+      const utcStr = $(this).data('utc');
+      if (utcStr) {
+        const d = new Date(utcStr);
+        if (!isNaN(d.getTime())) {
+          $(this).text(d.toLocaleString(undefined, {
+            year:'numeric', month:'2-digit', day:'2-digit',
+            hour:'2-digit', minute:'2-digit', second:'2-digit', hour12:false
           }));
         }
       }
     });
 
-    // 2. DataTables Initialization
-    const table = $("#reports_table").DataTable({
-      "responsive": true,
-      "lengthChange": true,
-      "autoWidth": false,
-      "order": [[0, "desc"]],
-      "columnDefs": [
-        { "targets": 0, "visible": false },
-        { "targets": 1, "orderable": false, "searchable": false, "className": "text-center" }
+    // ── Restore active tab from URL hash ────────────────────────────────────
+    if (window.location.hash === '#system-reports') {
+      $('#system-tab').tab('show');
+    }
+    $('a[data-toggle="tab"]').on('shown.bs.tab', function(e) {
+      history.replaceState(null, null, e.target.getAttribute('href'));
+    });
+
+    // ── Policy Reports DataTable ─────────────────────────────────────────────
+    const policyTable = $("#policy_reports_table").DataTable({
+      responsive: true, lengthChange: true, autoWidth: false,
+      order: [[0, "desc"]],
+      columnDefs: [
+        { targets: 0, visible: false },
+        { targets: 1, orderable: false, searchable: false, className: "text-center" }
       ],
-      "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
+      buttons: ["copy", "csv", "excel", "pdf", "print", "colvis"]
     });
+    policyTable.buttons().container().appendTo('#policy_reports_table_wrapper .col-md-6:eq(0)');
 
-    table.buttons().container().appendTo('#reports_table_wrapper .col-md-6:eq(0)');
+    // ── System Reports DataTable ─────────────────────────────────────────────
+    const systemTable = $("#system_reports_table").DataTable({
+      responsive: true, lengthChange: true, autoWidth: false,
+      order: [[0, "desc"]],
+      columnDefs: [
+        { targets: 0, visible: false },
+        { targets: 1, orderable: false, searchable: false, className: "text-center" }
+      ],
+      buttons: ["copy", "csv", "excel", "pdf", "print", "colvis"]
+    });
+    systemTable.buttons().container().appendTo('#system_reports_table_wrapper .col-md-6:eq(0)');
 
-    // 3. Checkbox / bulk toolbar logic
-    function getSelectedIds() {
-      return $('.row-checkbox:checked').map(function() { return $(this).val(); }).get();
-    }
-
-    function updateBulkToolbar() {
-      const ids = getSelectedIds();
-      if (ids.length > 0) {
-        $('#bulk-count').text(ids.length + ' selected');
-        $('#bulk-toolbar').show();
-      } else {
-        $('#bulk-toolbar').hide();
+    // ── Bulk selection helpers ───────────────────────────────────────────────
+    function makeBulk(tableObj, checkboxClass, selectAllId, countId, toolbarId, deleteBtnId, idsContainerId, formId) {
+      function getIds() {
+        return $('.' + checkboxClass + ':checked').map(function() { return $(this).val(); }).get();
       }
+      function update() {
+        const ids = getIds();
+        if (ids.length > 0) { $('#' + countId).text(ids.length + ' selected'); $('#' + toolbarId).show(); }
+        else { $('#' + toolbarId).hide(); }
+      }
+      $('#' + selectAllId).on('change', function() {
+        const checked = $(this).prop('checked');
+        tableObj.rows({ search: 'applied' }).nodes().each(function(node) {
+          $('input.' + checkboxClass, node).prop('checked', checked);
+        });
+        update();
+      });
+      $(document).on('change', '.' + checkboxClass, function() {
+        if (!$(this).prop('checked')) $('#' + selectAllId).prop('checked', false);
+        update();
+      });
+      $('#' + deleteBtnId).on('click', function() {
+        const ids = getIds();
+        if (!ids.length) return;
+        if (!confirm('Delete ' + ids.length + ' report(s)? This action is permanent.')) return;
+        const c = $('#' + idsContainerId).empty();
+        ids.forEach(function(id) { c.append('<input type="hidden" name="ids" value="' + id + '">'); });
+        $('#' + formId).submit();
+      });
     }
 
-    $('#select-all').on('change', function() {
-      const checked = $(this).prop('checked');
-      table.rows({ search: 'applied' }).nodes().each(function(node) {
-        $('input.row-checkbox', node).prop('checked', checked);
-      });
-      updateBulkToolbar();
-    });
-
-    $(document).on('change', '.row-checkbox', function() {
-      if (!$(this).prop('checked')) $('#select-all').prop('checked', false);
-      updateBulkToolbar();
-    });
-
-    $('#bulk-delete-btn').on('click', function() {
-      const ids = getSelectedIds();
-      if (!ids.length) return;
-      if (!confirm('Delete ' + ids.length + ' report(s)? This action is permanent.')) return;
-      const container = $('#bulk-delete-ids').empty();
-      ids.forEach(function(id) {
-        container.append('<input type="hidden" name="ids" value="' + id + '">');
-      });
-      $('#bulk-delete-form').submit();
-    });
+    makeBulk(policyTable, 'policy-row-checkbox', 'policy-select-all', 'policy-bulk-count',
+             'policy-bulk-toolbar', 'policy-bulk-delete-btn', 'policy-bulk-delete-ids', 'policy-bulk-delete-form');
+    makeBulk(systemTable, 'system-row-checkbox', 'system-select-all', 'system-bulk-count',
+             'system-bulk-toolbar', 'system-bulk-delete-btn', 'system-bulk-delete-ids', 'system-bulk-delete-form');
   });
 </script>
 {% endblock %}

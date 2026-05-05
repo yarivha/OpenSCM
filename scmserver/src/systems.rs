@@ -1232,37 +1232,23 @@ pub async fn systems_bulk_add_group(
 // SYSTEM LIVE REPORT
 // ============================================================
 
-pub async fn system_report(
-    auth: AuthSession,
-    Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
-    tera: Extension<Arc<Tera>>,
-) -> impl IntoResponse {
-
-    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
-        return redir;
-    }
-
-    // 1. Fetch system header
-    let sys_row = match sqlx::query(
+/// Fetch all compliance data for a single system into a `SystemReportData`.
+/// Shared by the live report handler and the save-snapshot handler.
+pub async fn fetch_system_report_data(
+    system_id: i32,
+    tenant_id: &str,
+    pool: &SqlitePool,
+) -> Result<SystemReportData, sqlx::Error> {
+    let sys_row = sqlx::query(
         "SELECT id, name, os, arch, ip, compliance_score, last_seen
          FROM systems WHERE id = ? AND tenant_id = ?",
     )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_optional(&*pool)
-    .await
-    {
-        Ok(Some(row)) => row,
-        Ok(None) => return axum::http::StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            error!(error = ?e, system_id = %id, "Failed to fetch system for report");
-            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    .bind(system_id)
+    .bind(tenant_id)
+    .fetch_one(pool)
+    .await?;
 
-    // 2. One query: all policies → tests → results for this system
-    let raw = match sqlx::query(r#"
+    let raw = sqlx::query(r#"
         SELECT
             p.id        AS policy_id,
             p.name      AS policy_name,
@@ -1283,28 +1269,20 @@ pub async fn system_report(
         WHERE sig.system_id = ? AND sig.tenant_id = ?
         ORDER BY p.name, t.name
     "#)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_all(&*pool)
-    .await
-    {
-        Ok(rows) => rows,
-        Err(e) => {
-            error!(error = ?e, system_id = %id, "Failed to fetch policy results for system report");
-            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    .bind(system_id)
+    .bind(tenant_id)
+    .bind(system_id)
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await?;
 
-    // 3. Group by policy (preserve insertion order with BTreeMap keyed on policy_id)
     let mut policy_map: BTreeMap<i32, PolicyResultGroup> = BTreeMap::new();
     for row in &raw {
-        let policy_id: i32    = row.get("policy_id");
-        let policy_name: String  = row.get("policy_name");
+        let policy_id: i32         = row.get("policy_id");
+        let policy_name: String    = row.get("policy_name");
         let policy_version: String = row.get("policy_version");
-        let test_name: String  = row.get("test_name");
-        let status_raw: String = row.get("status");
+        let test_name: String      = row.get("test_name");
+        let status_raw: String     = row.get("status");
         let status = normalize_status(&status_raw).to_string();
 
         let entry = policy_map.entry(policy_id).or_insert_with(|| PolicyResultGroup {
@@ -1320,20 +1298,18 @@ pub async fn system_report(
         match status.as_str() {
             "PASS" => entry.pass_count += 1,
             "FAIL" => entry.fail_count += 1,
-            _      => {} // NA / NOT_SCANNED don't affect counts
+            _ => {}
         }
         entry.results.push(IndividualResult { test_name, status });
     }
 
-    // is_passed requires at least one PASS and zero FAILs.
-    // pass=0 + fail=0 means all-NA (not applicable) — handled separately in the template.
     let mut policy_groups: Vec<PolicyResultGroup> = policy_map.into_values().collect();
     for p in &mut policy_groups {
         p.is_passed = p.pass_count > 0 && p.fail_count == 0;
     }
 
-    let total_pass = policy_groups.iter().map(|p| p.pass_count).sum();
-    let total_fail = policy_groups.iter().map(|p| p.fail_count).sum();
+    let total_pass: usize = policy_groups.iter().map(|p| p.pass_count).sum();
+    let total_fail: usize = policy_groups.iter().map(|p| p.fail_count).sum();
     let total_na: usize = policy_groups.iter()
         .flat_map(|p| p.results.iter())
         .filter(|r| r.status == "NA" || r.status == "NOT_SCANNED")
@@ -1343,7 +1319,7 @@ pub async fn system_report(
         .get::<Option<DateTime<Utc>>, _>("last_seen")
         .map(|dt| dt.format("%Y-%m-%d %H:%M UTC").to_string());
 
-    let report = SystemReportData {
+    Ok(SystemReportData {
         system_id:        sys_row.get("id"),
         system_name:      sys_row.get("name"),
         os:               sys_row.get::<Option<String>, _>("os").unwrap_or_default(),
@@ -1355,6 +1331,29 @@ pub async fn system_report(
         total_pass,
         total_fail,
         total_na,
+    })
+}
+
+pub async fn system_report(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    let report = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
+        Ok(r) => r,
+        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
+            return axum::http::StatusCode::NOT_FOUND.into_response();
+        }
+        Err(e) => {
+            error!(error = ?e, system_id = %id, "Failed to fetch system report data");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
     };
 
     let compliance_sat: i64 = sqlx::query_scalar(
