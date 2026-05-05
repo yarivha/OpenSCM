@@ -6,6 +6,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **System compliance report snapshots** — save and download (PDF) archived compliance reports per system. The Reports page now has two tabs: Policy Reports and System Reports.
+
+### Fixed
+- **Database indexes not applied on existing installs** — the 11 composite indexes added in v0.2.3 were only created by the first-run installer, so upgraded installs never received them. They are now applied via the v6→v7 migration on the next server startup.
+
 ---
 
 ## [0.2.4] - 2026-05-04
