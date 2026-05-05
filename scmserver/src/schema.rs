@@ -547,9 +547,25 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
          info!("Default keys generated and secured in database.");
     }
 
+    // Stamp the schema version to the current maximum so run_migrations()
+    // skips all migration steps on a fresh install — the tables already exist.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS schema_info (
+            id INTEGER PRIMARY KEY CHECK (id = 1),
+            version INTEGER NOT NULL
+        )"
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 7)")
+        .execute(pool)
+        .await?;
+
+    info!("Schema version stamped at 7 (fresh install).");
 
     Ok(())
-} 
+}
 
 
 // DB Migration 
