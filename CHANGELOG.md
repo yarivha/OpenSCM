@@ -4,7 +4,7 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
-## [Unreleased]
+## [0.2.5] - 2026-05-05
 
 ### Added
 - **System compliance report snapshots** — save and download (PDF) archived compliance reports per system. The Reports page now has two tabs: Policy Reports and System Reports.
