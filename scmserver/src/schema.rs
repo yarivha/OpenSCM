@@ -462,7 +462,14 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "INSERT OR IGNORE INTO settings (tenant_id, key, value, description) VALUES
         ('default', 'offline_threshold', '3600', 'Seconds without activity before system is marked offline'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
-        ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status')"
+        ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status'),
+        ('default', 'smtp_host', '', 'SMTP relay hostname'),
+        ('default', 'smtp_port', '587', 'SMTP relay port'),
+        ('default', 'smtp_username', '', 'SMTP relay username'),
+        ('default', 'smtp_password', '', 'SMTP relay password'),
+        ('default', 'smtp_from', '', 'From address for outgoing emails'),
+        ('default', 'smtp_tls', 'starttls', 'TLS mode: starttls, tls, or none'),
+        ('default', 'app_url', '', 'Public URL of this installation (used in email links)')"
         )
         .execute(pool)
         .await?;
@@ -558,11 +565,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 7)")
+    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 8)")
         .execute(pool)
         .await?;
 
-    info!("Schema version stamped at 7 (fresh install).");
+    info!("Schema version stamped at 8 (fresh install).");
 
     Ok(())
 }
@@ -910,6 +917,36 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
 
         info!("Schema migration v6 → v7 complete.");
+    }
+
+    // v7 → v8: add SMTP settings and app_url for all existing tenants
+    if version < 8 {
+        info!("Running schema migration v7 → v8 (SMTP settings)...");
+
+        for sql in &[
+            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+             SELECT t.id, 'smtp_host', '', 'SMTP relay hostname' FROM tenants t",
+            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+             SELECT t.id, 'smtp_port', '587', 'SMTP relay port' FROM tenants t",
+            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+             SELECT t.id, 'smtp_username', '', 'SMTP relay username' FROM tenants t",
+            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+             SELECT t.id, 'smtp_password', '', 'SMTP relay password' FROM tenants t",
+            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+             SELECT t.id, 'smtp_from', '', 'From address for outgoing emails' FROM tenants t",
+            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+             SELECT t.id, 'smtp_tls', 'starttls', 'TLS mode: starttls, tls, or none' FROM tenants t",
+            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+             SELECT t.id, 'app_url', '', 'Public URL of this installation (used in email links)' FROM tenants t",
+        ] {
+            sqlx::query(sql).execute(pool).await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 8")
+            .execute(pool)
+            .await?;
+
+        info!("Schema migration v7 → v8 complete.");
     }
 
     Ok(())
