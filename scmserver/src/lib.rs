@@ -74,11 +74,19 @@ pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
 /// Pass `&[("login.html", "<html>...")]` to substitute individual templates.
 pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<dyn Error>> {
     let mut tera = Tera::default();
+
+    // Overrides must be registered FIRST: Tera 1.20 validates the parent template
+    // at add_raw_template time, so base templates (like base.html) must already
+    // exist before any child template that extends them is added.
+    for (name, content) in overrides {
+        tera.add_raw_template(name, content)?;
+    }
+
     for file in TEMPLATES_DIR.files() {
         let path = file.path().to_str()
             .ok_or_else(|| format!("Template path is not valid UTF-8: {:?}", file.path()))?;
 
-        // Skip CE template if the caller supplies an override for this name
+        // Skip CE template if the caller supplied an override for this name
         if overrides.iter().any(|(name, _)| *name == path) {
             continue;
         }
@@ -89,9 +97,7 @@ pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<
 
         tera.add_raw_template(path, &content)?;
     }
-    for (name, content) in overrides {
-        tera.add_raw_template(name, content)?;
-    }
+
     tera.build_inheritance_chains()?;
     tera.check_macro_files()?;
     Ok(tera)
