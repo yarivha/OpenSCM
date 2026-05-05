@@ -850,9 +850,10 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v5 → v6 complete.");
     }
 
-    // v6 → v7: add system_reports table for saved system compliance snapshots
+    // v6 → v7: system_reports table + all composite indexes (indexes were
+    // previously only in initialize_database so existing installs missed them)
     if version < 7 {
-        info!("Running schema migration v6 → v7 (system_reports)...");
+        info!("Running schema migration v6 → v7 (system_reports + indexes)...");
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS system_reports (
@@ -869,12 +870,24 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
-        sqlx::query(
-            "CREATE INDEX IF NOT EXISTS idx_system_reports_tenant_date
-             ON system_reports (tenant_id, submission_date)"
-        )
-        .execute(pool)
-        .await?;
+        // Composite indexes — idempotent, safe to re-run on fresh installs too
+        for idx in &[
+            "CREATE INDEX IF NOT EXISTS idx_next_run ON policy_schedules (enabled, next_run)",
+            "CREATE INDEX IF NOT EXISTS idx_results_tenant_test ON results (tenant_id, test_id)",
+            "CREATE INDEX IF NOT EXISTS idx_test_conditions_tenant_test ON test_conditions (tenant_id, test_id)",
+            "CREATE INDEX IF NOT EXISTS idx_systems_tenant_status ON systems (tenant_id, status)",
+            "CREATE INDEX IF NOT EXISTS idx_systems_tenant_score ON systems (tenant_id, compliance_score)",
+            "CREATE INDEX IF NOT EXISTS idx_sig_tenant_group ON systems_in_groups (tenant_id, group_id)",
+            "CREATE INDEX IF NOT EXISTS idx_sip_tenant_group ON systems_in_policy (tenant_id, group_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tip_tenant_test ON tests_in_policy (tenant_id, test_id)",
+            "CREATE INDEX IF NOT EXISTS idx_compliance_history_tenant_date ON compliance_history (tenant_id, check_date)",
+            "CREATE INDEX IF NOT EXISTS idx_notify_tenant_owner ON notify (tenant_id, owner_id)",
+            "CREATE INDEX IF NOT EXISTS idx_tenant_keys_tenant_active ON tenant_keys (tenant_id, is_active)",
+            "CREATE INDEX IF NOT EXISTS idx_reports_tenant_date ON reports (tenant_id, submission_date)",
+            "CREATE INDEX IF NOT EXISTS idx_system_reports_tenant_date ON system_reports (tenant_id, submission_date)",
+        ] {
+            sqlx::query(idx).execute(pool).await?;
+        }
 
         sqlx::query("UPDATE schema_info SET version = 7")
             .execute(pool)
