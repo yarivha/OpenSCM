@@ -57,7 +57,7 @@ jobs:
           case "${{ matrix.target }}" in
             x86_64-*)       ARCH=amd64   ;;
             aarch64-*)      ARCH=arm64   ;;
-            armv7-*)        ARCH=arm7    ;;
+            armv7-*)        ARCH=armhf   ;;
             riscv64gc-*)    ARCH=riscv64 ;;
             powerpc64le-*)  ARCH=ppc64le ;;
           esac
