@@ -135,7 +135,7 @@ pub async fn users_add_save(
     };
     // Validate against known roles to prevent arbitrary strings being stored
     let role = match role_raw.to_lowercase().as_str() {
-        "admin" | "editor" | "runner" | "viewer" => role_raw,
+        "superuser" | "admin" | "editor" | "runner" | "viewer" => role_raw,
         _ => return Redirect::to("/users/add?error_message=Invalid+role+selected").into_response(),
     };
 
