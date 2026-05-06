@@ -12,12 +12,19 @@ All notable changes to OpenSCM are documented here.
 - **Organization field on EE login page** — multi-tenant users can now specify their organization at login. Leaving the field blank logs in as a platform-level (Superuser) account.
 - **Tenant user management (EE/SaaS)** — Superusers can add new users to a tenant, edit their name/email/role, reset their password, and delete them — all from the tenant detail page via inline modals. No separate pages required.
 - **SMTP email relay (CE/EE/SaaS)** — Admin Settings now has an Email tab for configuring an SMTP relay (host, port, TLS mode, credentials, from address, app URL). In SaaS, if SMTP is configured new users must verify their email before logging in; if not configured, accounts are activated immediately. Replaces the previous Resend API key approach.
+- **Bootstrap admin protection** — the initial admin account (id=1, default tenant) is now protected from role changes at three layers: the edit UI shows a disabled lock icon, the server always preserves the DB role regardless of submitted form data, and a SQLite trigger (`protect_bootstrap_admin_role`) raises an abort if any code path attempts a direct update. Schema migration v8→v9 adds the trigger to existing installations.
+- **Clean Database action** — Superusers can permanently delete all operational data (systems, groups, tests, policies, reports, scan results, users) while preserving the admin account, settings, SMTP configuration, and signing keys. Requires typing `RESET` to confirm. Located in the new **Danger Zone** tab in Admin Settings.
+- **Danger Zone tab in Settings** — Superuser-only tab that consolidates destructive actions, replacing the previous card appended at the bottom of the page.
+- **Plan field on tenants (EE/SaaS)** — tenants now have a `plan` field (`free`, `starter`, `pro`, `enterprise`) used by EE/SaaS to enforce per-plan resource limits. CE is unaffected.
+- **Platform Admin → Plans page (EE/SaaS)** — Superusers can configure the maximum number of systems, groups, policies, and reports per plan. Zero means unlimited. Accessible from the Platform Admin sidebar section.
 
 ### Fixed
 - **Account locked out if verification email fails (SaaS)** — if SMTP is configured but the verification email cannot be delivered, the account is immediately activated so the user can still log in. A clear message is shown on the login page explaining what happened.
 - **NA results counted as failures in policy report view** — when saving a report, any NA result incorrectly flipped the system verdict to Non-Compliant. Only explicit FAIL results now affect the verdict.
 - **NA results counted as violations in policy PDF report** — the violation count in the PDF summary used `total − PASS`, which included NA. It now counts only FAIL results. NA tests also now render as grey "N/A" in the per-rule breakdown instead of red "FAIL".
 - **ARM7 deb packages missing from releases** — the CI build workflow used `ARCH=arm7` which is not a valid dpkg architecture. Fixed to `ARCH=armhf` so `.deb` packages are correctly built and published for ARMv7.
+- **Superuser role rejected when adding a new user** — the server-side role allowlist was missing `superuser`, causing the form submission to return "Invalid role selected" even for a legitimate value.
+- **Role descriptions missing in user edit form** — the role dropdown in the edit form now shows the same human-readable labels as the add form (e.g. "Administrator (Full System Access)"). Role select width also increased to 340 px so full descriptions are visible.
 
 ---
 
