@@ -565,11 +565,23 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 8)")
+    // Trigger: protect the bootstrap admin's role at the DB level
+    sqlx::query(
+        "CREATE TRIGGER IF NOT EXISTS protect_bootstrap_admin_role
+         BEFORE UPDATE OF role ON users
+         WHEN OLD.id = 1 AND OLD.tenant_id = 'default'
+         BEGIN
+             SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
+         END",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query("INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 9)")
         .execute(pool)
         .await?;
 
-    info!("Schema version stamped at 8 (fresh install).");
+    info!("Schema version stamped at 9 (fresh install).");
 
     Ok(())
 }
@@ -947,6 +959,28 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .await?;
 
         info!("Schema migration v7 → v8 complete.");
+    }
+
+    // v8 → v9: database-level trigger to protect the bootstrap admin's role
+    if version < 9 {
+        info!("Running schema migration v8 → v9 (protect bootstrap admin role)...");
+
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS protect_bootstrap_admin_role
+             BEFORE UPDATE OF role ON users
+             WHEN OLD.id = 1 AND OLD.tenant_id = 'default'
+             BEGIN
+                 SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
+             END",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 9")
+            .execute(pool)
+            .await?;
+
+        info!("Schema migration v8 → v9 complete.");
     }
 
     Ok(())
