@@ -115,10 +115,8 @@
                       <option value="runner" {% if user.role | trim | lower == "runner" %}selected{% endif %}>Runner</option>
                       <option value="viewer" {% if user.role | trim | lower == "viewer" %}selected{% endif %}>Viewer</option>
                     </select>
-                    {% if is_superuser %}
-                      <small class="text-info ml-3"><i class="fas fa-crown mr-1"></i> Superuser permissions active.</small>
-                    {% elif is_admin %}
-                      <small class="text-info ml-3"><i class="fas fa-shield-alt mr-1"></i> Admin permissions active.</small>
+                    {% if is_admin %}
+                      <small class="text-muted ml-3"><i class="fas fa-info-circle mr-1"></i> Defines what the user can see and do in OpenSCM.</small>
                     {% else %}
                       <small class="text-muted ml-3"><i class="fas fa-lock mr-1"></i> Only admins can change roles.</small>
                       <input type="hidden" name="role" value="{{ user.role | trim | lower }}">
