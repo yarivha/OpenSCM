@@ -335,6 +335,72 @@
         </div>
 
       </form>
+
+      {% if is_superuser %}
+      <!-- Danger Zone -->
+      <div class="row mt-4">
+        <div class="col-12">
+          <div class="card card-outline shadow-sm" style="border-color: #dc3545;">
+            <div class="card-header" style="border-bottom-color: #dc3545;">
+              <h3 class="card-title text-danger"><i class="fas fa-exclamation-triangle mr-2"></i>Danger Zone</h3>
+            </div>
+            <div class="card-body">
+              <div class="d-flex align-items-center justify-content-between">
+                <div>
+                  <strong>Clean Database</strong>
+                  <p class="text-muted mb-0" style="font-size:0.88rem;">
+                    Permanently deletes all systems, groups, tests, policies, reports, results, and users —
+                    except the primary admin account and its credentials. Settings and SMTP configuration are preserved.
+                    <strong>This cannot be undone.</strong>
+                  </p>
+                </div>
+                <button type="button" class="btn btn-outline-danger btn-sm ml-4 flex-shrink-0"
+                        data-toggle="modal" data-target="#resetModal">
+                  <i class="fas fa-trash-alt mr-1"></i> Clean Database
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <!-- Reset confirmation modal -->
+      <div class="modal fade" id="resetModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+          <div class="modal-content border-danger">
+            <div class="modal-header bg-danger text-white">
+              <h5 class="modal-title"><i class="fas fa-exclamation-triangle mr-2"></i>Confirm Database Reset</h5>
+              <button type="button" class="close text-white" data-dismiss="modal"><span>&times;</span></button>
+            </div>
+            <form method="post" action="/settings/reset">
+              <div class="modal-body">
+                <p>This will permanently delete:</p>
+                <ul style="font-size:0.9rem;">
+                  <li>All systems and scan results</li>
+                  <li>All groups, tests, and policies</li>
+                  <li>All compliance reports and history</li>
+                  <li>All users except the primary admin</li>
+                </ul>
+                <p class="mb-1"><strong>Settings and SMTP configuration will be preserved.</strong></p>
+                <hr>
+                <div class="form-group mb-0">
+                  <label for="resetConfirm">Type <code>RESET</code> to confirm:</label>
+                  <input type="text" id="resetConfirm" name="confirm" class="form-control"
+                         placeholder="RESET" autocomplete="off">
+                </div>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary" data-dismiss="modal">Cancel</button>
+                <button type="submit" id="resetSubmitBtn" class="btn btn-danger" disabled>
+                  <i class="fas fa-trash-alt mr-1"></i> Clean Database
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
     </div>
   </section>
 </div>
@@ -402,6 +468,16 @@
         btn.prop('disabled', false).html('<i class="fas fa-paper-plane mr-1"></i> Send Test Email');
       }
     });
+  });
+
+  // Enable reset button only when user types exactly "RESET"
+  $('#resetConfirm').on('input', function () {
+    $('#resetSubmitBtn').prop('disabled', $(this).val() !== 'RESET');
+  });
+  // Clear the field every time the modal opens
+  $('#resetModal').on('show.bs.modal', function () {
+    $('#resetConfirm').val('');
+    $('#resetSubmitBtn').prop('disabled', true);
   });
 </script>
 {% endblock %}

@@ -1,7 +1,7 @@
 //////////////////// Settings /////////////////////////
 
 use axum::response::{IntoResponse, Redirect};
-use axum::extract::{Extension, Query};
+use axum::extract::{Extension, Query, Form};
 use axum::extract::RawForm;
 use axum::http::StatusCode;
 use axum::Json;
@@ -332,6 +332,96 @@ pub async fn settings_test_email(
                 ok: false,
                 message: format!("SMTP error: {}", e),
             }))
+        }
+    }
+}
+
+// ── Database reset ────────────────────────────────────────────────────────────
+
+#[derive(serde::Deserialize)]
+pub struct ResetForm {
+    confirm: String,
+}
+
+pub async fn settings_reset(
+    auth: AuthSession,
+    pool: Extension<SqlitePool>,
+    Form(form): Form<ResetForm>,
+) -> impl IntoResponse {
+    // Superuser only
+    if auth::authorize(&auth.role, UserRole::Superuser).is_some() {
+        return Redirect::to("/settings?error_message=Access+denied").into_response();
+    }
+
+    // Require exact confirmation token
+    if form.confirm.trim() != "RESET" {
+        return Redirect::to("/settings?error_message=Confirmation+text+did+not+match").into_response();
+    }
+
+    let tenant = &auth.tenant_id;
+
+    let result: Result<(), sqlx::Error> = async {
+        let mut tx = pool.begin().await?;
+
+        // Delete all operational data for this tenant, preserving:
+        //   - users WHERE id = 1 AND tenant_id = 'default'  (bootstrap admin)
+        //   - settings                                       (SMTP config, thresholds)
+        //   - tenant_keys                                    (signing keys)
+        //   - schema_info                                    (migration state)
+
+        // Dependent tables first (foreign keys with ON DELETE CASCADE handle most,
+        // but we delete explicitly to be safe with all SQLite pragma states).
+        for sql in &[
+            // Results & history
+            format!("DELETE FROM results            WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM compliance_history WHERE tenant_id = '{tenant}'"),
+            // Reports
+            format!("DELETE FROM system_reports     WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM reports            WHERE tenant_id = '{tenant}'"),
+            // Scheduler
+            format!("DELETE FROM policy_schedules   WHERE tenant_id = '{tenant}'"),
+            // Policy / test relations
+            format!("DELETE FROM tests_in_policy    WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM test_conditions    WHERE tenant_id = '{tenant}'"),
+            // System relations
+            format!("DELETE FROM systems_in_policy  WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM systems_in_groups  WHERE tenant_id = '{tenant}'"),
+            // Top-level entities
+            format!("DELETE FROM policies           WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM tests              WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM groups             WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM systems            WHERE tenant_id = '{tenant}'"),
+            // Notifications
+            format!("DELETE FROM notify             WHERE tenant_id = '{tenant}'"),
+            // Users — keep bootstrap admin (id=1, default tenant)
+            format!("DELETE FROM users WHERE tenant_id = '{tenant}' AND NOT (id = 1 AND tenant_id = 'default')"),
+        ] {
+            sqlx::query(sql).execute(&mut *tx).await?;
+        }
+
+        // SaaS-only tables — ignore "no such table" errors gracefully
+        for sql in &[
+            format!("DELETE FROM email_verifications   WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM password_reset_tokens WHERE tenant_id = '{tenant}'"),
+        ] {
+            let _ = sqlx::query(sql).execute(&mut *tx).await;
+        }
+
+        tx.commit().await
+    }.await;
+
+    match result {
+        Ok(_) => {
+            info!(
+                "Database reset performed by superuser '{}' (tenant: {})",
+                auth.username, auth.tenant_id
+            );
+            Redirect::to("/settings?success_message=Database+cleaned+successfully").into_response()
+        }
+        Err(e) => {
+            error!("Database reset failed for '{}': {}", auth.username, e);
+            let msg = urlencoding::encode(&format!("Reset failed: {}", e)).to_string();
+            Redirect::to(&format!("/settings?error_message={}", msg)).into_response()
         }
     }
 }
