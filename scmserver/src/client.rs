@@ -9,6 +9,18 @@ use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
 use serde_json::value::RawValue;
 use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions};
 
+/// Returns the maximum number of systems allowed for a given plan.
+/// Returns None for unlimited plans or unknown plan names.
+fn plan_system_limit(plan: &str) -> Option<i64> {
+    match plan {
+        "free"       => Some(5),
+        "starter"    => Some(25),
+        "pro"        => Some(100),
+        "enterprise" => None,
+        _            => None,
+    }
+}
+
 
 #[derive(sqlx::FromRow)]
 struct AuthCheck {
@@ -203,6 +215,43 @@ pub async fn send(
             "New agent registration: '{}' (Tenant: {})",
             payload.hostname, tenant_id
         );
+
+        // Check plan system limit (EE/SaaS only — CE tenants have no plan column,
+        // so the query returns an error which we treat as unlimited).
+        if let Ok(Some(plan)) = sqlx::query_scalar::<_, String>(
+            "SELECT plan FROM tenants WHERE id = ?",
+        )
+        .bind(tenant_id)
+        .fetch_optional(&pool)
+        .await
+        {
+            if let Some(limit) = plan_system_limit(&plan) {
+                let count: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM systems WHERE tenant_id = ? AND status != 'denied'",
+                )
+                .bind(tenant_id)
+                .fetch_one(&pool)
+                .await
+                .unwrap_or(0);
+
+                if count >= limit {
+                    warn!(
+                        "Registration rejected for '{}' (Tenant: {}): plan '{}' limit of {} reached ({} systems)",
+                        payload.hostname, tenant_id, plan, limit, count
+                    );
+                    return (
+                        StatusCode::PAYMENT_REQUIRED,
+                        Json(serde_json::json!({
+                            "error": "System limit reached for your subscription plan",
+                            "plan": plan,
+                            "limit": limit,
+                            "current": count
+                        })),
+                    )
+                        .into_response();
+                }
+            }
+        }
 
         let res = sqlx::query(
             r#"INSERT INTO systems (tenant_id, key, name, ver, os, ip, arch, status)
