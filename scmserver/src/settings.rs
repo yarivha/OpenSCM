@@ -366,7 +366,7 @@ pub async fn settings_reset(
         // Delete all operational data for this tenant, preserving:
         //   - users WHERE id = 1 AND tenant_id = 'default'  (bootstrap admin)
         //   - settings                                       (SMTP config, thresholds)
-        //   - tenant_keys                                    (signing keys)
+        //   - tenant_keys WHERE tenant_id = 'default'        (default tenant signing keys only)
         //   - schema_info                                    (migration state)
 
         // Dependent tables first (foreign keys with ON DELETE CASCADE handle most,
@@ -395,6 +395,8 @@ pub async fn settings_reset(
             format!("DELETE FROM notify             WHERE tenant_id = '{tenant}'"),
             // Users — keep bootstrap admin (id=1, default tenant)
             format!("DELETE FROM users WHERE tenant_id = '{tenant}' AND NOT (id = 1 AND tenant_id = 'default')"),
+            // Tenant keys — keep only default tenant keys
+            "DELETE FROM tenant_keys WHERE tenant_id != 'default'".to_string(),
         ] {
             sqlx::query(sql).execute(&mut *tx).await?;
         }
