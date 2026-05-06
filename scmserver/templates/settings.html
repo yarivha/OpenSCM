@@ -55,6 +55,11 @@
               <i class="fas fa-envelope mr-1"></i> Email
             </a>
           </li>
+          <li class="nav-item">
+            <a class="nav-link text-danger" id="danger-tab" data-toggle="tab" href="#danger" role="tab">
+              <i class="fas fa-exclamation-triangle mr-1"></i> Danger Zone
+            </a>
+          </li>
           {% endif %}
         </ul>
 
@@ -321,6 +326,37 @@
           </div>
           {% endif %}
 
+          <!-- Danger Zone Tab (Superuser only) -->
+          {% if is_superuser %}
+          <div class="tab-pane fade" id="danger" role="tabpanel">
+            <div class="row">
+              <div class="col-12">
+                <div class="card card-outline mb-0" style="border-color: #dc3545;">
+                  <div class="card-header" style="border-bottom-color: #dc3545;">
+                    <h3 class="card-title text-danger"><i class="fas fa-exclamation-triangle mr-2"></i>Danger Zone</h3>
+                  </div>
+                  <div class="card-body">
+                    <div class="d-flex align-items-center justify-content-between">
+                      <div>
+                        <strong>Clean Database</strong>
+                        <p class="text-muted mb-0" style="font-size:0.88rem;">
+                          Permanently deletes all systems, groups, tests, policies, reports, results, and users —
+                          except the primary admin account and its credentials. Settings, SMTP configuration, and the default tenant signing keys are preserved.
+                          <strong>This cannot be undone.</strong>
+                        </p>
+                      </div>
+                      <button type="button" class="btn btn-outline-danger btn-sm ml-4 flex-shrink-0"
+                              data-toggle="modal" data-target="#resetModal">
+                        <i class="fas fa-trash-alt mr-1"></i> Clean Database
+                      </button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+          {% endif %}
+
         </div>
 
         <div class="row mt-3">
@@ -337,34 +373,7 @@
       </form>
 
       {% if is_superuser %}
-      <!-- Danger Zone -->
-      <div class="row mt-4">
-        <div class="col-12">
-          <div class="card card-outline shadow-sm" style="border-color: #dc3545;">
-            <div class="card-header" style="border-bottom-color: #dc3545;">
-              <h3 class="card-title text-danger"><i class="fas fa-exclamation-triangle mr-2"></i>Danger Zone</h3>
-            </div>
-            <div class="card-body">
-              <div class="d-flex align-items-center justify-content-between">
-                <div>
-                  <strong>Clean Database</strong>
-                  <p class="text-muted mb-0" style="font-size:0.88rem;">
-                    Permanently deletes all systems, groups, tests, policies, reports, results, and users —
-                    except the primary admin account and its credentials. Settings, SMTP configuration, and the default tenant signing keys are preserved.
-                    <strong>This cannot be undone.</strong>
-                  </p>
-                </div>
-                <button type="button" class="btn btn-outline-danger btn-sm ml-4 flex-shrink-0"
-                        data-toggle="modal" data-target="#resetModal">
-                  <i class="fas fa-trash-alt mr-1"></i> Clean Database
-                </button>
-              </div>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      <!-- Reset confirmation modal -->
+      <!-- Reset confirmation modal (kept outside main form to avoid nesting) -->
       <div class="modal fade" id="resetModal" tabindex="-1" role="dialog">
         <div class="modal-dialog modal-dialog-centered" role="document">
           <div class="modal-content border-danger">

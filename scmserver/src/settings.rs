@@ -87,6 +87,7 @@ pub async fn settings(
     if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
     context.insert("settings", &settings);
     context.insert("offline_minutes", &offline_minutes);
+
     render_template(&tera, Some(&pool), "settings.html", context, Some(auth))
         .await
         .into_response()

@@ -165,7 +165,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
     context.insert("range", &range);
     context.insert("systems_count", &systems_count);
-    context.insert("pending_count", &pending_count); // Added for the red/green box
+    context.insert("pending_count", &pending_count);
     context.insert("policies_count", &policies_count);
     context.insert("reports_count", &reports_count);
     context.insert("top_failed_systems", &top_failed_systems); 

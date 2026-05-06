@@ -678,7 +678,7 @@ pub async fn system_groups_add_save(
     )
     .bind(&auth.tenant_id)
     .bind(&name)
-    .bind(&description) 
+    .bind(&description)
     .execute(&mut *tx)
     .await;
 
