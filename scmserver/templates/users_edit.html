@@ -99,6 +99,13 @@
                 <div class="form-group">
                   <label for="role">Assigned Access Role</label>
                   <div class="d-flex align-items-center">
+                    {% if is_bootstrap %}
+                      <select name="role" id="role" class="form-control" style="max-width: 250px;" disabled>
+                        <option value="superuser" selected>Superuser (Platform Management)</option>
+                      </select>
+                      <input type="hidden" name="role" value="{{ user.role | trim | lower }}">
+                      <small class="text-muted ml-3"><i class="fas fa-lock mr-1"></i> The primary admin role is protected and cannot be changed.</small>
+                    {% else %}
                     <select name="role" id="role" class="form-control" style="max-width: 250px;" {% if not is_admin %} disabled {% endif %}>
                       {% if is_superuser %}
                       <option value="superuser" {% if user.role | trim | lower == "superuser" %}selected{% endif %}>Superuser (Platform Management)</option>
@@ -115,6 +122,7 @@
                     {% else %}
                       <small class="text-muted ml-3"><i class="fas fa-lock mr-1"></i> Only admins can change roles.</small>
                       <input type="hidden" name="role" value="{{ user.role | trim | lower }}">
+                    {% endif %}
                     {% endif %}
                   </div>
                 </div>

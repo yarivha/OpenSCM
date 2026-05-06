@@ -306,6 +306,10 @@ pub async fn users_edit(
         context.insert("success_message", msg);
     }
     context.insert("user", &user);
+    // Bootstrap admin (id=1 in the default tenant) has a protected role — no one
+    // can change it to prevent accidental lock-out of the primary account.
+    let is_bootstrap = user.id == 1 && auth.tenant_id == "default";
+    context.insert("is_bootstrap", &is_bootstrap);
     render_template(&tera, Some(&pool), "users_edit.html", context, Some(auth))
         .await
         .into_response()
@@ -365,17 +369,12 @@ pub async fn users_edit_save(
         .map(|s| s.trim().to_string())
         .filter(|s| !s.is_empty());
 
-    // Only admins can change roles
-    let role = if is_admin {
-        match form_data.get("role").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
-            Some(r) => r.to_string(),
-            None => {
-                tx.rollback().await.ok();
-                return Redirect::to("/users?error_message=Role+is+required").into_response();
-            }
-        }
-    } else {
-        // Non-admins cannot change their own role — fetch current role from DB
+    // Bootstrap admin (id=1, default tenant) has a permanently locked role.
+    let is_bootstrap = id == 1 && auth.tenant_id == "default";
+
+    // Only admins can change roles, and the bootstrap admin's role is never changed.
+    let role = if is_bootstrap || !is_admin {
+        // Fetch the current role from DB and keep it unchanged.
         match sqlx::query_scalar::<_, String>(
             "SELECT role FROM users WHERE id = ? AND tenant_id = ?",
         )
@@ -388,6 +387,14 @@ pub async fn users_edit_save(
             _ => {
                 tx.rollback().await.ok();
                 return Redirect::to("/users?error_message=User+not+found").into_response();
+            }
+        }
+    } else {
+        match form_data.get("role").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
+            Some(r) => r.to_string(),
+            None => {
+                tx.rollback().await.ok();
+                return Redirect::to("/users?error_message=Role+is+required").into_response();
             }
         }
     };
