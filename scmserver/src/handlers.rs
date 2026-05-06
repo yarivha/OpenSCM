@@ -91,6 +91,22 @@ pub async fn render_template(
         context.insert("tenant_id", &session.tenant_id);
         context.insert("role", &session.role);
 
+        // Tenant display name — used by SaaS to show the org name in the navbar
+        if let Some(db_pool) = pool {
+            let tenant_name: String = sqlx::query_scalar(
+                "SELECT name FROM tenants WHERE id = ?",
+            )
+            .bind(&session.tenant_id)
+            .fetch_optional(db_pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| session.tenant_id.clone());
+            context.insert("tenant_name", &tenant_name);
+        } else {
+            context.insert("tenant_name", &session.tenant_id);
+        }
+
         context.insert("is_superuser", &(role_enum >= UserRole::Superuser));
         context.insert("is_admin",  &(role_enum >= UserRole::Admin));
         context.insert("is_editor", &(role_enum >= UserRole::Editor));
