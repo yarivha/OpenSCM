@@ -139,6 +139,13 @@ pub async fn users_add_save(
         _ => return Redirect::to("/users/add?error_message=Invalid+role+selected").into_response(),
     };
 
+    // Only a superuser may create another superuser
+    if role.to_lowercase() == "superuser"
+        && UserRole::from(auth.role.as_str()) < UserRole::Superuser
+    {
+        return Redirect::to("/users/add?error_message=Only+a+Superuser+can+assign+the+Superuser+role").into_response();
+    }
+
     let mut tx = match pool.begin().await {
         Ok(tx) => tx,
         Err(e) => {
@@ -398,6 +405,18 @@ pub async fn users_edit_save(
             }
         }
     };
+
+    // Only a superuser may assign or change a role to superuser.
+    if role.to_lowercase() == "superuser"
+        && UserRole::from(auth.role.as_str()) < UserRole::Superuser
+    {
+        tx.rollback().await.ok();
+        return Redirect::to(&format!(
+            "/users/edit/{}?error_message=Only+a+Superuser+can+assign+the+Superuser+role",
+            id
+        ))
+        .into_response();
+    }
 
     if let Err(e) = sqlx::query(
         "UPDATE users SET name = ?, email = ?, role = ? WHERE id = ? AND tenant_id = ?",
