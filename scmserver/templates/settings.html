@@ -49,11 +49,13 @@
               <i class="fas fa-shield-alt mr-1"></i> Compliance
             </a>
           </li>
+          {% if is_superuser %}
           <li class="nav-item">
             <a class="nav-link" id="email-tab" data-toggle="tab" href="#email" role="tab">
               <i class="fas fa-envelope mr-1"></i> Email
             </a>
           </li>
+          {% endif %}
         </ul>
 
         <div class="tab-content border border-top-0 rounded-bottom p-4 bg-white shadow-sm">
@@ -201,7 +203,8 @@
 
           </div>
 
-          <!-- Email Tab -->
+          <!-- Email Tab (Superuser only) -->
+          {% if is_superuser %}
           <div class="tab-pane fade" id="email" role="tabpanel">
             <div class="row mb-3">
               <div class="col-12">
@@ -316,6 +319,7 @@
               </div>
             </div>
           </div>
+          {% endif %}
 
         </div>
 

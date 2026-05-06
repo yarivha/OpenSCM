@@ -128,36 +128,39 @@ pub async fn settings_save(
         return Redirect::to("/settings?error_message=Marginal+threshold+must+be+less+than+Satisfied+threshold").into_response();
     }
 
-    // SMTP plain string fields
-    let smtp_host     = form_data.get("smtp_host").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let smtp_port_raw = form_data.get("smtp_port").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let smtp_username = form_data.get("smtp_username").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let smtp_password = form_data.get("smtp_password").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let smtp_from     = form_data.get("smtp_from").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let smtp_tls      = form_data.get("smtp_tls").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let app_url       = form_data.get("app_url").and_then(|v| v.first()).cloned().unwrap_or_default();
-
-    // Validate smtp_port — fall back to 587 if not a valid port number
-    let smtp_port: String = match smtp_port_raw.parse::<u16>() {
-        Ok(p) if p >= 1 => p.to_string(),
-        _ => "587".to_string(),
-    };
-
     let mut updates: Vec<(&str, String)> = vec![
         ("offline_threshold",   threshold.to_string()),
         ("compliance_sat",      sat.to_string()),
         ("compliance_marginal", marginal.to_string()),
-        ("smtp_host",     smtp_host),
-        ("smtp_port",     smtp_port),
-        ("smtp_username", smtp_username),
-        ("smtp_from",     smtp_from),
-        ("smtp_tls",      smtp_tls),
-        ("app_url",       app_url),
     ];
 
-    // Only update smtp_password if the form field is non-empty
-    if !smtp_password.is_empty() {
-        updates.push(("smtp_password", smtp_password));
+    // Email settings — superuser only
+    if UserRole::from(auth.role.as_str()) >= UserRole::Superuser {
+        let smtp_host     = form_data.get("smtp_host").and_then(|v| v.first()).cloned().unwrap_or_default();
+        let smtp_port_raw = form_data.get("smtp_port").and_then(|v| v.first()).cloned().unwrap_or_default();
+        let smtp_username = form_data.get("smtp_username").and_then(|v| v.first()).cloned().unwrap_or_default();
+        let smtp_password = form_data.get("smtp_password").and_then(|v| v.first()).cloned().unwrap_or_default();
+        let smtp_from     = form_data.get("smtp_from").and_then(|v| v.first()).cloned().unwrap_or_default();
+        let smtp_tls      = form_data.get("smtp_tls").and_then(|v| v.first()).cloned().unwrap_or_default();
+        let app_url       = form_data.get("app_url").and_then(|v| v.first()).cloned().unwrap_or_default();
+
+        let smtp_port: String = match smtp_port_raw.parse::<u16>() {
+            Ok(p) if p >= 1 => p.to_string(),
+            _ => "587".to_string(),
+        };
+
+        updates.extend([
+            ("smtp_host",     smtp_host),
+            ("smtp_port",     smtp_port),
+            ("smtp_username", smtp_username),
+            ("smtp_from",     smtp_from),
+            ("smtp_tls",      smtp_tls),
+            ("app_url",       app_url),
+        ]);
+
+        if !smtp_password.is_empty() {
+            updates.push(("smtp_password", smtp_password));
+        }
     }
 
     for (key, value) in updates {
@@ -193,7 +196,7 @@ pub async fn settings_test_email(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
 ) -> (StatusCode, Json<TestEmailResponse>) {
-    if auth::authorize(&auth.role, UserRole::Admin).is_some() {
+    if auth::authorize(&auth.role, UserRole::Superuser).is_some() {
         return (StatusCode::FORBIDDEN, Json(TestEmailResponse {
             ok: false,
             message: "Access denied.".into(),
