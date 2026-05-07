@@ -4,7 +4,7 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
-## [Unreleased]
+## [0.2.6] - 2026-5-07
 
 ### Added
 - **Superuser role** — new role level above Admin that grants access to platform-level tenant management. The initial admin user is automatically promoted to Superuser on first EE/SaaS startup. Superuser can be assigned to other users via the Users page.
