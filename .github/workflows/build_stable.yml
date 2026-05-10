@@ -45,6 +45,8 @@ jobs:
           rustup target add ${{ matrix.target }}
 
       - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
 
       - name: Build Binary
         run: |
@@ -98,6 +100,8 @@ jobs:
           rustup target add x86_64-pc-windows-gnu
 
       - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
 
       - name: Build and Package
         run: |
@@ -261,6 +265,8 @@ jobs:
           rustup target add ${{ matrix.target }}
 
       - uses: goto-bus-stop/setup-zig@v2
+        with:
+          version: 0.13.0
 
       - name: Build Server Binary
         run: |
