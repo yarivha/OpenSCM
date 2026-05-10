@@ -26,6 +26,7 @@ jobs:
           - armv7-unknown-linux-musleabihf
           - riscv64gc-unknown-linux-musl
           - powerpc64le-unknown-linux-musl
+          - s390x-unknown-linux-musl
         exclude:
           - app: server
             target: armv7-unknown-linux-musleabihf
@@ -33,6 +34,8 @@ jobs:
             target: riscv64gc-unknown-linux-musl
           - app: server
             target: powerpc64le-unknown-linux-musl
+          - app: server
+            target: s390x-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
 
@@ -62,12 +65,15 @@ jobs:
             armv7-*)        ARCH=armhf   ;;
             riscv64gc-*)    ARCH=riscv64 ;;
             powerpc64le-*)  ARCH=ppc64le ;;
+            s390x-*)        ARCH=s390x   ;;
           esac
           export ARCH
           export VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           export RELEASE=1
-          # Server: deb + rpm only. Client: deb + rpm + archlinux
+          # Server: deb + rpm only. Client: deb + rpm + archlinux (archlinux skipped for s390x)
           if [[ "${{ matrix.app }}" == "server" ]]; then
+            PACKAGERS="deb rpm"
+          elif [[ "${{ matrix.target }}" == s390x-* ]]; then
             PACKAGERS="deb rpm"
           else
             PACKAGERS="deb rpm archlinux"
