@@ -58,7 +58,7 @@
         </div>
         <div class="col-lg-3 col-6">
           <div class="small-box {% if pending_count > 0 %}bg-danger{% else %}bg-success{% endif %} shadow-sm">
-            <div class="inner"><h3>{{ pending_count }}</h3><p>Pending Enrollment</p></div>
+            <div class="inner"><h3>{{ pending_count }}</h3><p>Pending Enrollment</p>{% if systems_limit_text %}<small style="opacity:0;font-size:0.72rem;">&nbsp;</small>{% endif %}</div>
             <div class="icon"><i class="fas fa-user-plus"></i></div>
             <a href="/systems?filter=pending" class="small-box-footer">Review Queue <i class="fas fa-arrow-circle-right"></i></a>
           </div>
