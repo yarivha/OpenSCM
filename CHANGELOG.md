@@ -10,6 +10,7 @@ All notable changes to OpenSCM are documented here.
 - **NA results rendered as FAIL in PDF reports** — the per-rule breakdown in PDF exports showed NA results in red with "FAIL" text. They now render in grey with "NA" text, matching the on-screen report view.
 - **`is_passed` verdict incorrect for saved reports** — when saving a report, the system pass/fail verdict is now consistent with the live policy report view: a system is compliant only when it has no FAIL results **and** at least one PASS. Systems where every test returned NA are correctly marked as non-compliant.
 - **Admin Settings save silently discarded for tenants without pre-seeded rows** — the settings save handler used `UPDATE`, which affects 0 rows when no settings exist yet (e.g. new SaaS tenants). Changed to `INSERT … ON CONFLICT DO UPDATE` so settings are always written regardless of whether rows pre-exist.
+- **Windows installer missing Organization field** — the custom installer page only asked for Server URL and hardcoded `Organization = default`. SaaS users had to manually edit the registry after installation. The installer now asks for both Server URL and Organization, pre-filled from the existing registry values on upgrade.
 
 ---
 
