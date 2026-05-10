@@ -179,7 +179,57 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     context.insert("trend_policies_scores", &policies_scores); 
 
 
-    // 5. Fill Context
+    // 5. Optional plan limits — only present when the plan_limits table exists (SaaS).
+    //    Silently returns None in CE where the table is absent.
+    let plan_limits_exist: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='plan_limits'"
+    )
+    .fetch_one(&*pool)
+    .await
+    .unwrap_or(0);
+
+    let (systems_limit_text, policies_limit_text, reports_limit_text): (Option<String>, Option<String>, Option<String>) =
+        if plan_limits_exist > 0 {
+            let plan: String = sqlx::query_scalar(
+                "SELECT COALESCE(plan, 'free') FROM tenants WHERE id = ?"
+            )
+            .bind(&auth.tenant_id)
+            .fetch_optional(&*pool)
+            .await
+            .ok()
+            .flatten()
+            .unwrap_or_else(|| "free".to_string());
+
+            fn fmt_limit(v: Option<i64>) -> Option<String> {
+                match v {
+                    Some(0) => Some("Unlimited".to_string()),
+                    Some(n) => Some(n.to_string()),
+                    None    => None,
+                }
+            }
+
+            let sl: Option<i64> = sqlx::query_scalar(
+                "SELECT max_count FROM plan_limits WHERE plan = ? AND resource = 'systems'"
+            ).bind(&plan).fetch_optional(&*pool).await.ok().flatten();
+
+            let pl: Option<i64> = sqlx::query_scalar(
+                "SELECT max_count FROM plan_limits WHERE plan = ? AND resource = 'policies'"
+            ).bind(&plan).fetch_optional(&*pool).await.ok().flatten();
+
+            let rl: Option<i64> = sqlx::query_scalar(
+                "SELECT max_count FROM plan_limits WHERE plan = ? AND resource = 'reports'"
+            ).bind(&plan).fetch_optional(&*pool).await.ok().flatten();
+
+            (fmt_limit(sl), fmt_limit(pl), fmt_limit(rl))
+        } else {
+            (None, None, None)
+        };
+
+    context.insert("systems_limit_text",  &systems_limit_text);
+    context.insert("policies_limit_text", &policies_limit_text);
+    context.insert("reports_limit_text",  &reports_limit_text);
+
+    // 6. Fill Context
     if let Some(msg) = &params.error_message {
         context.insert("error_message", msg);
     }
