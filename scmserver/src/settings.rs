@@ -190,11 +190,13 @@ pub async fn settings_save(
         // SMTP settings are global — always stored under the default tenant
         let tenant = if SMTP_KEYS.contains(&key) { "default" } else { &auth.tenant_id };
         if let Err(e) = sqlx::query(
-            "UPDATE settings SET value = ? WHERE tenant_id = ? AND key = ?",
+            "INSERT INTO settings (tenant_id, key, value)
+             VALUES (?, ?, ?)
+             ON CONFLICT (tenant_id, key) DO UPDATE SET value = excluded.value",
         )
-        .bind(&value)
         .bind(tenant)
         .bind(key)
+        .bind(&value)
         .execute(&pool)
         .await
         {
