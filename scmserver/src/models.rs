@@ -38,6 +38,9 @@ pub struct System {
     pub trust_proof: Option<String>,
     pub created_date: Option<DateTime<Utc>>,
     pub last_seen: Option<DateTime<Utc>>,
+    /// Computed server-side: true when last_seen is older than offline_threshold.
+    #[serde(default)]
+    pub is_offline: bool,
 }
 
 #[derive(Serialize, Deserialize, Default)]

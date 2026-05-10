@@ -90,7 +90,7 @@
                   {% for system in systems %}
                   {% set os_lower = system.os | lower %}
 
-                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}">
+                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}" data-offline="{{ system.is_offline }}">
                     <td style="display:none;">{{ system.status }}</td>
                     <td class="text-center">
                       <input type="checkbox" class="row-checkbox" value="{{ system.id }}" title="Select">
@@ -389,25 +389,9 @@
   });
 
   $(document).ready(function() {
-    var offlineThreshold = {{ offline_threshold }};
-
-    $('#systems_table tbody tr').each(function() {
-        var lastSeenCell = $(this).find('td.datetime');
-        var lastSeenUtc = lastSeenCell.data('utc');
-
-        if (!lastSeenUtc) return;
-
-        var lastSeenTime = new Date(lastSeenUtc).getTime();
-        var now = new Date().getTime();
-        var diffSeconds = (now - lastSeenTime) / 1000;
-
-        if (diffSeconds > offlineThreshold) {
-            $(this).find('td:not(:last-child)').addClass('text-muted').css('opacity', '0.5');
-            lastSeenCell.html(
-                lastSeenCell.text() +
-                ' <span class="badge badge-secondary ml-1">Offline</span>'
-            );
-        }
+    $('#systems_table tbody tr[data-offline="true"]').each(function() {
+        $(this).find('td:not(:last-child)').addClass('text-muted').css('opacity', '0.5');
+        $(this).find('td.datetime').append(' <span class="badge badge-secondary ml-1">Offline</span>');
     });
   });
 </script>

@@ -38,6 +38,15 @@ pub async fn systems(
 
     let filter = params.get("filter").map(|s| s.to_lowercase());
 
+    // Fetch threshold first so we can compute is_offline server-side in SQL.
+    let offline_threshold: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'offline_threshold'"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(3600);
+
     let rows_result = match filter.as_deref() {
         Some("active") | Some("pending") => {
             sqlx::query(
@@ -52,7 +61,13 @@ pub async fn systems(
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
                     COALESCE(s.created_date, '') AS created_date,
-                    COALESCE(s.last_seen, '') AS last_seen
+                    COALESCE(s.last_seen, '') AS last_seen,
+                    CASE
+                        WHEN s.status != 'active' THEN 0
+                        WHEN s.last_seen IS NULL THEN 0
+                        WHEN (CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', s.last_seen) AS INTEGER)) > ? THEN 1
+                        ELSE 0
+                    END AS is_offline
                 FROM systems AS s
                 LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
                 LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
@@ -61,6 +76,7 @@ pub async fn systems(
                 ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC
                 "#,
             )
+            .bind(offline_threshold)
             .bind(filter.as_deref().unwrap_or("active"))
             .bind(&auth.tenant_id)
             .fetch_all(&pool)
@@ -79,7 +95,13 @@ pub async fn systems(
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
                     COALESCE(s.created_date, '') AS created_date,
-                    COALESCE(s.last_seen, '') AS last_seen
+                    COALESCE(s.last_seen, '') AS last_seen,
+                    CASE
+                        WHEN s.status != 'active' THEN 0
+                        WHEN s.last_seen IS NULL THEN 0
+                        WHEN (CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', s.last_seen) AS INTEGER)) > ? THEN 1
+                        ELSE 0
+                    END AS is_offline
                 FROM systems AS s
                 LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
                 LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
@@ -88,6 +110,7 @@ pub async fn systems(
                 ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC
                 "#,
             )
+            .bind(offline_threshold)
             .bind(&auth.tenant_id)
             .fetch_all(&pool)
             .await
@@ -125,17 +148,9 @@ pub async fn systems(
             // Use .ok() so a NULL/unparseable timestamp becomes None instead of Utc::now()
             created_date: row.try_get::<DateTime<Utc>, _>("created_date").ok(),
             last_seen: row.try_get::<DateTime<Utc>, _>("last_seen").ok(),
+            is_offline: row.try_get::<bool, _>("is_offline").unwrap_or(false),
         })
         .collect();
-
-
-    let offline_threshold: i64 = sqlx::query_scalar(
-        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'offline_threshold'"
-    )
-    .bind(&auth.tenant_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(600);
 
 
     let groups_result = sqlx::query("SELECT id, name FROM system_groups WHERE tenant_id = ? ORDER BY name ASC")
@@ -149,7 +164,6 @@ pub async fn systems(
     };
 
     let mut context = Context::new();
-    context.insert("offline_threshold", &offline_threshold);
     context.insert("groups", &groups);
 
     if let Some(error_message) = params.get("error_message") {
@@ -269,6 +283,7 @@ pub async fn systems_edit(
         trust_proof: None,
         created_date: None,
         last_seen: None,
+            is_offline: false,
     };
 
     let groups_result = sqlx::query(
@@ -492,6 +507,7 @@ pub async fn systems_pending(
             trust_proof: None,
             created_date: row.try_get::<DateTime<Utc>, _>("created_date").ok(),
             last_seen: row.try_get::<DateTime<Utc>, _>("last_seen").ok(),
+            is_offline: false,
         })
         .collect();
 
@@ -606,6 +622,7 @@ pub async fn system_groups_add(
                 trust_proof: None,
                 created_date: None,
                 last_seen: None,
+            is_offline: false,
             })
             .collect(),
         Err(e) => {
@@ -855,6 +872,7 @@ pub async fn system_groups_edit(
                 trust_proof: None,
                 created_date: None,
                 last_seen: None,
+            is_offline: false,
             })
             .collect(),
         Err(e) => {
