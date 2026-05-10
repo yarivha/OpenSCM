@@ -31,10 +31,14 @@ RequestExecutionLevel admin
 
 # --- Variables ---
 Var ServerURL
+Var Organization
 Var Dialog
 Var Label1
 Var Text1
+Var Label2
+Var Text2
 Var ExistingURL
+Var ExistingOrg
 Var ProgramData
 
 # --- Pages ---
@@ -53,22 +57,33 @@ Page custom SetCustom GetCustom
 Function SetCustom
     SetRegView 64
     ReadRegStr $ExistingURL HKLM "SOFTWARE\OpenSCM\Client" "ServerURL"
+    ReadRegStr $ExistingOrg HKLM "SOFTWARE\OpenSCM\Client" "Organization"
 
-    # If no existing URL use placeholder
+    # Defaults if not already set
     StrCmp $ExistingURL "" 0 +2
         StrCpy $ExistingURL "https://your-openscm-server.com"
+    StrCmp $ExistingOrg "" 0 +2
+        StrCpy $ExistingOrg "default"
 
     nsDialogs::Create 1018
     Pop $Dialog
-    ${NSD_CreateLabel} 0 0u 100% 10u "Enter OpenSCM Server URL (include https:// and port if not 443):"
+
+    ${NSD_CreateLabel} 0 0u 100% 10u "Server URL (include https:// and port if not 443):"
     Pop $Label1
     ${NSD_CreateText} 0 12u 100% 12u "$ExistingURL"
     Pop $Text1
+
+    ${NSD_CreateLabel} 0 32u 100% 10u "Organization (leave as 'default' for self-hosted; enter your org slug for Cloud):"
+    Pop $Label2
+    ${NSD_CreateText} 0 44u 100% 12u "$ExistingOrg"
+    Pop $Text2
+
     nsDialogs::Show
 FunctionEnd
 
 Function GetCustom
     ${NSD_GetText} $Text1 $ServerURL
+    ${NSD_GetText} $Text2 $Organization
 FunctionEnd
 
 # =========================================================
@@ -114,7 +129,7 @@ Section "Install"
     # --- 4. REGISTRY UPDATE ---
     # Write all keys that match CURRENT_REGISTRY_KEYS in config.rs
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "ServerURL"    "$ServerURL"
-    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Organization" "default"
+    WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Organization" "$Organization"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "Heartbeat"    "300"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "LogLevel"     "info"
     WriteRegStr HKLM "SOFTWARE\OpenSCM\Client" "CmdEnabled"   "false"
