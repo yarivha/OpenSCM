@@ -20,6 +20,7 @@ All notable changes to OpenSCM are documented here.
 - **Plan limit display on dashboard (SaaS)** — the Active Inventory, Active Policies, and Scan Reports info boxes now show the current count alongside the plan limit (e.g. "5 of 25"). Displays "Unlimited" when the plan limit is set to 0. Invisible in CE where the `plan_limits` table is absent.
 
 ### Fixed
+- **SMTP settings are now global** — SMTP configuration (`smtp_*` keys and `app_url`) is always read from and written to the `default` tenant, regardless of which tenant the logged-in user belongs to. This fixes support ticket and verification emails in SaaS where the platform admin (in the `platform` tenant) previously saved settings that `Mailer` could not find.
 - **Account locked out if verification email fails (SaaS)** — if SMTP is configured but the verification email cannot be delivered, the account is immediately activated so the user can still log in. A clear message is shown on the login page explaining what happened.
 - **NA results counted as failures in policy report view** — when saving a report, any NA result incorrectly flipped the system verdict to Non-Compliant. Only explicit FAIL results now affect the verdict.
 - **NA results counted as violations in policy PDF report** — the violation count in the PDF summary used `total − PASS`, which included NA. It now counts only FAIL results. NA tests also now render as grey "N/A" in the per-rule breakdown instead of red "FAIL".
