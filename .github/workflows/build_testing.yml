@@ -21,6 +21,9 @@ jobs:
           - riscv64gc-unknown-linux-musl
           - powerpc64le-unknown-linux-musl
           - s390x-unknown-linux-musl
+          - loongarch64-unknown-linux-musl
+          - i686-unknown-linux-musl
+          - arm-unknown-linux-musleabi
           - x86_64-pc-windows-gnu
           - universal2-apple-darwin
         include:
@@ -36,6 +39,12 @@ jobs:
             target: powerpc64le-unknown-linux-musl
           - app: server
             target: s390x-unknown-linux-musl
+          - app: server
+            target: loongarch64-unknown-linux-musl
+          - app: server
+            target: i686-unknown-linux-musl
+          - app: server
+            target: arm-unknown-linux-musleabi
           - app: server
             target: universal2-apple-darwin
 
@@ -82,20 +91,28 @@ jobs:
         if: contains(matrix.target, 'linux')
         run: |
           case "${{ matrix.target }}" in
-            x86_64-*)       ARCH=amd64   ;;
-            aarch64-*)      ARCH=arm64   ;;
-            armv7-*)        ARCH=armhf   ;;
-            riscv64gc-*)    ARCH=riscv64 ;;
-            powerpc64le-*)  ARCH=ppc64le ;;
-            s390x-*)        ARCH=s390x   ;;
+            x86_64-*)        ARCH=amd64      ;;
+            aarch64-*)       ARCH=arm64      ;;
+            armv7-*)         ARCH=armhf      ;;
+            arm-*)           ARCH=armel      ;;
+            riscv64gc-*)     ARCH=riscv64    ;;
+            powerpc64le-*)   ARCH=ppc64le    ;;
+            s390x-*)         ARCH=s390x      ;;
+            loongarch64-*)   ARCH=loong64    ;;
+            i686-*)          ARCH=386        ;;
           esac
           export ARCH
           export VERSION=$(grep -m1 '^version =' scm${{ matrix.app }}/Cargo.toml | sed 's/.*"\(.*\)".*/\1/')
           export RELEASE=${{ github.run_number }}
-          # Server: deb + rpm only. Client: deb + rpm + archlinux (archlinux skipped for s390x)
+          # Server: deb + rpm only.
+          # Client: deb + rpm + archlinux — except targets with no Arch Linux support:
+          #   s390x, loongarch64 (no mainstream port), i686 (Arch dropped 32-bit), armel (outside Arch ARM scope)
           if [[ "${{ matrix.app }}" == "server" ]]; then
             PACKAGERS="deb rpm"
-          elif [[ "${{ matrix.target }}" == s390x-* ]]; then
+          elif [[ "${{ matrix.target }}" == s390x-* ]] || \
+               [[ "${{ matrix.target }}" == loongarch64-* ]] || \
+               [[ "${{ matrix.target }}" == i686-* ]] || \
+               [[ "${{ matrix.target }}" == arm-* ]]; then
             PACKAGERS="deb rpm"
           else
             PACKAGERS="deb rpm archlinux"
