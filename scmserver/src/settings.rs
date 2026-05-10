@@ -42,8 +42,10 @@ pub async fn settings(
         return redir;
     }
 
+    // Per-tenant settings (compliance thresholds, offline threshold)
     let rows = sqlx::query(
-        "SELECT key, value FROM settings WHERE tenant_id = ?",
+        "SELECT key, value FROM settings WHERE tenant_id = ?
+         AND key NOT IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')",
     )
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
@@ -52,6 +54,21 @@ pub async fn settings(
 
     let mut map = std::collections::HashMap::new();
     for row in rows {
+        let key: String = row.get("key");
+        let value: String = row.get("value");
+        map.insert(key, value);
+    }
+
+    // SMTP settings are global — always read from the default tenant
+    let smtp_rows = sqlx::query(
+        "SELECT key, value FROM settings WHERE tenant_id = 'default'
+         AND key IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')",
+    )
+    .fetch_all(&*pool)
+    .await
+    .unwrap_or_default();
+
+    for row in smtp_rows {
         let key: String = row.get("key");
         let value: String = row.get("value");
         map.insert(key, value);
@@ -164,12 +181,19 @@ pub async fn settings_save(
         }
     }
 
+    const SMTP_KEYS: &[&str] = &[
+        "smtp_host", "smtp_port", "smtp_username", "smtp_password",
+        "smtp_from", "smtp_tls", "app_url",
+    ];
+
     for (key, value) in updates {
+        // SMTP settings are global — always stored under the default tenant
+        let tenant = if SMTP_KEYS.contains(&key) { "default" } else { &auth.tenant_id };
         if let Err(e) = sqlx::query(
             "UPDATE settings SET value = ? WHERE tenant_id = ? AND key = ?",
         )
         .bind(&value)
-        .bind(&auth.tenant_id)
+        .bind(tenant)
         .bind(key)
         .execute(&pool)
         .await
@@ -222,12 +246,11 @@ pub async fn settings_test_email(
         })),
     };
 
-    // Load SMTP settings for this tenant
+    // SMTP settings are global — always read from the default tenant
     let rows = sqlx::query(
-        "SELECT key, value FROM settings WHERE tenant_id = ?
+        "SELECT key, value FROM settings WHERE tenant_id = 'default'
          AND key IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')"
     )
-    .bind(&auth.tenant_id)
     .fetch_all(&pool)
     .await
     .unwrap_or_default();
