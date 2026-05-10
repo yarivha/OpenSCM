@@ -4,7 +4,15 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
-## [0.2.6] - 2026-5-07
+## [0.2.7] - 2026-05-10
+
+### Fixed
+- **NA results rendered as FAIL in PDF reports** — the per-rule breakdown in PDF exports showed NA results in red with "FAIL" text. They now render in grey with "NA" text, matching the on-screen report view.
+- **`is_passed` verdict incorrect for saved reports** — when saving a report, the system pass/fail verdict is now consistent with the live policy report view: a system is compliant only when it has no FAIL results **and** at least one PASS. Systems where every test returned NA are correctly marked as non-compliant.
+
+---
+
+## [0.2.6] - 2026-05-07
 
 ### Added
 - **Superuser role** — new role level above Admin that grants access to platform-level tenant management. The initial admin user is automatically promoted to Superuser on first EE/SaaS startup. Superuser can be assigned to other users via the Users page.

@@ -172,12 +172,18 @@ pub async fn save_policy_report_logic(
         let entry = reports_map.entry(s_name.clone()).or_insert(SystemReport {
             system_name: s_name,
             results: Vec::new(),
-            is_passed: true,
+            is_passed: false,
         });
 
         entry.results.push(IndividualResult { test_name: t_name, status: status.clone() });
-        // Only FAIL flips the verdict — NA results are ignored
-        if status == "FAIL" { entry.is_passed = false; }
+    }
+
+    // Recalculate is_passed after all results are collected:
+    // A system passes only when it has no FAILs AND at least one PASS.
+    // All-NA systems are considered non-passing (consistent with live view).
+    for entry in reports_map.values_mut() {
+        entry.is_passed = entry.results.iter().all(|r| r.status == "PASS" || r.status == "NA")
+            && entry.results.iter().any(|r| r.status == "PASS");
     }
 
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();
@@ -550,11 +556,11 @@ pub async fn reports_download(
         }
 
         for res in &system.results {
-            let is_pass = res.status == "PASS";
-            let (status_text, status_color) = if is_pass {
-                ("PASS", style::Color::Rgb(0, 128, 0))
-            } else {
-                ("FAIL", style::Color::Rgb(200, 0, 0))
+            let (status_text, status_color) = match res.status.as_str() {
+                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
+                "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
+                "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
+                _      => ("—",    style::Color::Rgb(150, 150, 150)),
             };
 
             if let Err(e) = rules_table.push_row(vec![
