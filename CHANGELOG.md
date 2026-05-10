@@ -17,6 +17,7 @@ All notable changes to OpenSCM are documented here.
 - **Danger Zone tab in Settings** — Superuser-only tab that consolidates destructive actions, replacing the previous card appended at the bottom of the page.
 - **Plan field on tenants (EE/SaaS)** — tenants now have a `plan` field (`free`, `starter`, `pro`, `enterprise`) used by EE/SaaS to enforce per-plan resource limits. CE is unaffected.
 - **Platform Admin → Plans page (EE/SaaS)** — Superusers can configure the maximum number of systems, groups, policies, and reports per plan. Zero means unlimited. Accessible from the Platform Admin sidebar section.
+- **Plan limit display on dashboard (SaaS)** — the Active Inventory, Active Policies, and Scan Reports info boxes now show the current count alongside the plan limit (e.g. "5 of 25"). Displays "Unlimited" when the plan limit is set to 0. Invisible in CE where the `plan_limits` table is absent.
 
 ### Fixed
 - **Account locked out if verification email fails (SaaS)** — if SMTP is configured but the verification email cannot be delivered, the account is immediately activated so the user can still log in. A clear message is shown on the login page explaining what happened.
