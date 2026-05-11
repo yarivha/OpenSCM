@@ -1,3 +1,11 @@
+// =============================================================================
+// dashboard.rs — main dashboard handler
+//
+// Aggregates system counts, top-failing policies/systems, compliance trend
+// history, and optional plan-limit data for the dashboard landing page.
+// Role: Viewer (minimum — any authenticated user may view).
+// =============================================================================
+
 use axum::response::IntoResponse;
 use axum::http::StatusCode;
 use axum::extract::{Extension, Query};
@@ -22,11 +30,11 @@ pub struct DashboardParams {
 }
 
 
-// dashboard
-// Role: Viewer (minimum). No explicit authorize() call is needed here because
-// AuthSession already guarantees the user is authenticated, and every authenticated
-// user has at least the Viewer role — the user creation form restricts roles to
-// admin/editor/runner/viewer, and UserRole::from() defaults unknown values to Viewer.
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /
+// Render the main dashboard: stats, top failures, compliance trend chart.
+// Role: Viewer (any authenticated user; no explicit authorize() call needed)
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
     -> impl IntoResponse {
 

@@ -1,3 +1,10 @@
+// =============================================================================
+// auth.rs — login, logout, session cookie management, AuthSession extractor
+//
+// All routes are public (no prior auth required). Session cookies are signed
+// with the server's Ed25519-derived cookie key; tampering is rejected by Axum.
+// =============================================================================
+
 use axum::response::{Html, Redirect, IntoResponse, Response};
 use axum::extract::{FromRef, FromRequestParts, Query, Extension, Form};
 use axum_extra::extract::cookie::{Cookie, SameSite, SignedCookieJar, Key};
@@ -16,9 +23,11 @@ use tracing::{info, warn, error};
 use crate::handlers::{render_template, add_notification};
 use crate::models::{UserRole, ErrorQuery, AuthSession};
 
-
-/// Checks if the current role meets the required level.
-/// Returns None if authorized, or a Redirect if unauthorized.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: authorize
+// Checks if the current role meets the required level.
+// Returns None if authorized, or a Redirect to / if unauthorized.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn authorize(current_role: &str, required: UserRole) -> Option<Response> {
     let user_level = UserRole::from(current_role);
     
@@ -33,6 +42,11 @@ pub fn authorize(current_role: &str, required: UserRole) -> Option<Response> {
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: AuthSession — FromRequestParts extractor
+// Reads and validates the signed session cookie; rejects with a /login
+// redirect if the cookie is absent, tampered, or missing required fields.
+// ─────────────────────────────────────────────────────────────────────────────
 impl<S> FromRequestParts<S> for AuthSession
 where
     S: Send + Sync + 'static,
@@ -91,7 +105,11 @@ pub struct LoginForm {
     organization: Option<String>,
 }
 
-// login
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /login
+// Render the login page, forwarding any error/success query params.
+// Role: Public
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) -> Result<Html<String>, StatusCode> {
     let mut context = Context::new();
     if let Some(error_message) = query.error_message {
@@ -105,7 +123,12 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
 
 
 
-// login_submit
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /login
+// Validate credentials, create a signed session cookie, and redirect to /.
+// Uses a constant-time bcrypt path to resist timing attacks on unknown users.
+// Role: Public
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn login_submit(
     jar: SignedCookieJar,
     Extension(pool): Extension<SqlitePool>,
@@ -248,7 +271,11 @@ pub async fn login_submit(
 
 
 
-// logout
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /logout
+// Remove the session cookie and redirect to /login.
+// Role: Viewer (any authenticated user)
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn logout(jar: SignedCookieJar) -> (SignedCookieJar, Redirect) {
     (jar.remove(Cookie::from("session")), Redirect::to("/login"))
 }

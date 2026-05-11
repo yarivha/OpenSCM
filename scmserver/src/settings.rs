@@ -1,4 +1,9 @@
-//////////////////// Settings /////////////////////////
+// =============================================================================
+// settings.rs — admin settings: thresholds, SMTP, email test, DB reset
+//
+// All routes require Admin role or higher. SMTP settings are global (stored
+// under the default tenant); compliance thresholds are per-tenant.
+// =============================================================================
 
 use axum::response::{IntoResponse, Redirect};
 use axum::extract::{Extension, Query, Form};
@@ -32,6 +37,11 @@ pub struct Settings {
     pub app_url:       String,
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /settings
+// Render the admin settings page with current thresholds and SMTP config.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn settings(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
@@ -110,6 +120,11 @@ pub async fn settings(
         .into_response()
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /settings/save
+// Persist updated compliance thresholds and (if Superuser) SMTP settings.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn settings_save(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -209,9 +224,11 @@ pub async fn settings_save(
     Redirect::to("/settings?success_message=Settings+saved+successfully").into_response()
 }
 
-// ============================================================
-// TEST EMAIL
-// ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /settings/test-email
+// Send a test email to the logged-in user's address via the configured SMTP.
+// Role: Superuser
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(Serialize)]
 pub struct TestEmailResponse {
@@ -362,7 +379,11 @@ pub async fn settings_test_email(
     }
 }
 
-// ── Database reset ────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /settings/reset
+// Wipe all tenant operational data; requires the literal "RESET" confirmation.
+// Role: Superuser
+// ─────────────────────────────────────────────────────────────────────────────
 
 #[derive(serde::Deserialize)]
 pub struct ResetForm {

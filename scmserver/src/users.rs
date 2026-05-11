@@ -1,3 +1,10 @@
+// =============================================================================
+// users.rs — user CRUD, role management, password change
+//
+// All routes are tenant-scoped. Admin role required for user management;
+// users may edit their own profile (name, email, password) at any role.
+// =============================================================================
+
 use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path, Form};
 use tera::{Tera, Context};
@@ -15,10 +22,11 @@ use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data};
 
 
-// ============================================================
-// USERS
-// ============================================================
-
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /users
+// List all users for the current tenant.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn users(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
@@ -73,6 +81,11 @@ pub async fn users(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /users/add
+// Render the add-user form.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn users_add(
     Query(query): Query<ErrorQuery>,
     auth: AuthSession,
@@ -98,6 +111,11 @@ pub async fn users_add(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /users/add
+// Validate, hash password, and persist a new user for the current tenant.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn users_add_save(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
@@ -220,6 +238,11 @@ pub async fn users_add_save(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /users/delete/{id}
+// Delete a user account; self-deletion is blocked.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn users_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -259,6 +282,11 @@ pub struct UserEditParams {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /users/edit/{id}
+// Render the edit form for a user; Admin can edit any user, others only self.
+// Role: Viewer (self) / Admin (any)
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn users_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -323,6 +351,12 @@ pub async fn users_edit(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /users/edit/{id}
+// Persist name, email, and (if Admin) role changes; bootstrap admin's role is
+// immutable.
+// Role: Viewer (self) / Admin (any)
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn users_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -453,6 +487,11 @@ pub struct ChangePasswordForm {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /users/password/{id}
+// Validate, bcrypt-hash, and update a user's password; Admin or self only.
+// Role: Viewer (self) / Admin (any)
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn change_password(
     auth: AuthSession,
     pool: Extension<SqlitePool>,

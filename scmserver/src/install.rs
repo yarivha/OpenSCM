@@ -1,4 +1,10 @@
-// src/install.rs — First-run setup screen
+// =============================================================================
+// install.rs — first-run setup wizard
+//
+// Reachable only when is_initialized = false (enforced by init_guard middleware).
+// GET shows the setup form; POST validates the admin password, initialises the
+// database, creates the admin user, and marks the installation as complete.
+// =============================================================================
 use std::sync::{Arc, atomic::{AtomicBool, Ordering}};
 use std::collections::HashMap;
 use axum::{Extension, response::{IntoResponse, Html, Redirect}};
@@ -9,7 +15,11 @@ use tracing::error;
 use crate::schema::{initialize_database, run_migrations};
 use crate::scheduler::start_background_scheduler;
 
-/// GET /install — show the setup form (only reachable when not yet initialised)
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /install
+// Show the first-run setup form (only reachable before initialisation).
+// Role: Public
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn install_get(
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
@@ -23,7 +33,12 @@ pub async fn install_get(
     }
 }
 
-/// POST /install — initialise the database and set the admin password
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /install
+// Validate the chosen admin password, initialise the DB schema, create the
+// admin user, run migrations, and flip is_initialized to true.
+// Role: Public
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn install_post(
     Extension(pool): Extension<sqlx::SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,

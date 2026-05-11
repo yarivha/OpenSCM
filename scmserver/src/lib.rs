@@ -1,3 +1,11 @@
+// =============================================================================
+// lib.rs — AppState, Tera initialisation, router construction, public API
+//
+// This crate is both the CE binary (via main.rs) and a library consumed by the
+// Enterprise Edition.  create_core_router() builds the full Axum Router with
+// all CE routes; EE merges additional routes on top before serving.
+// =============================================================================
+
 // 1. Module Declarations (Now public so the SaaS repo can access them)
 pub mod models;
 pub mod handlers;
@@ -21,12 +29,19 @@ use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, 
 // Version registry — set once at binary startup so EE/SaaS show their own version.
 static APP_VERSION: OnceLock<String> = OnceLock::new();
 
-/// Call this from each binary's main() before starting the server.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: set_app_version / app_version
+// Version registry — set once at binary startup so EE/SaaS show their own
+// version string instead of the CE crate version.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn set_app_version(version: &str) {
     let _ = APP_VERSION.set(version.to_string());
 }
 
-/// Returns the version set by set_app_version(), or CE's version as fallback.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: app_version
+// Returns the version set by set_app_version, or CE crate version as fallback.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn app_version() -> &'static str {
     APP_VERSION.get().map(|s| s.as_str()).unwrap_or(env!("CARGO_PKG_VERSION"))
 }
@@ -34,12 +49,18 @@ pub fn app_version() -> &'static str {
 // Edition registry — "Community Edition", "Enterprise Edition", "SaaS Edition"
 static APP_EDITION: OnceLock<String> = OnceLock::new();
 
-/// Call this from each binary's main() to set the edition label shown in the UI.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: set_app_edition / app_edition
+// Edition registry — "Community Edition", "Enterprise Edition", etc.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn set_app_edition(edition: &str) {
     let _ = APP_EDITION.set(edition.to_string());
 }
 
-/// Returns the edition set by set_app_edition(), or "Community Edition" as fallback.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: app_edition
+// Returns the edition set by set_app_edition, or "Community Edition" as fallback.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn app_edition() -> &'static str {
     APP_EDITION.get().map(|s| s.as_str()).unwrap_or("Community Edition")
 }
@@ -66,12 +87,20 @@ pub struct AppState {
 }
 
 // 5. Utility functions moved from main.rs
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: init_tera
+// Loads all embedded CE templates into a Tera instance. Calls
+// init_tera_with_overrides with an empty override list.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
     init_tera_with_overrides(&[])
 }
 
-/// Like `init_tera`, but lets callers replace specific CE templates by name.
-/// Pass `&[("login.html", "<html>...")]` to substitute individual templates.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: init_tera_with_overrides
+// Like init_tera, but lets callers (EE/SaaS) substitute specific templates by
+// name before the CE templates are loaded, preserving inheritance chains.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<dyn Error>> {
     let mut tera = Tera::default();
 
@@ -103,6 +132,10 @@ pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<
     Ok(tera)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check_required_directories
+// Ensures config, DB, and key parent directories exist; creates them if not.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn check_required_directories() -> Result<(), Box<dyn Error>> {
     use crate::config::{config_path, private_key_path, db_path};
     let targets = [config_path(), db_path(), private_key_path()];
@@ -124,6 +157,11 @@ pub fn check_required_directories() -> Result<(), Box<dyn Error>> {
     Ok(())
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: serve_embedded_static_file
+// Serves a static asset from the embedded STATIC_FILES_DIR directory.
+// Returns 404 if the path is not found in the bundle.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
     let path_str = path.to_str().unwrap_or("");
     match STATIC_FILES_DIR.get_file(path_str) {
@@ -147,6 +185,12 @@ pub async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
 // NOTE: called via closure in create_core_router so the Arc is captured
 // directly rather than extracted from an Extension (which would not be
 // available at the outermost middleware layer).
+// ─────────────────────────────────────────────────────────────────────────────
+// Middleware: init_guard
+// Redirects every request to /install when the DB has not been set up yet,
+// and redirects /install to /login once setup is complete.
+// Static assets are always let through so the install page renders correctly.
+// ─────────────────────────────────────────────────────────────────────────────
 async fn init_guard(
     is_initialized: Arc<AtomicBool>,
     request: axum::extract::Request,
@@ -176,7 +220,11 @@ async fn init_guard(
     next.run(request).await
 }
 
-// 7. The pluggable Core Router
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: create_core_router
+// Builds and returns the full CE Axum Router with all routes, extensions, and
+// the init_guard middleware. EE/SaaS merge additional routes on top.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
     Router::new()
         .route("/install", get(install::install_get).post(install::install_post))

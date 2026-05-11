@@ -1,3 +1,11 @@
+// =============================================================================
+// reports.rs — saved report CRUD, PDF download, and bulk actions
+//
+// Handles both policy reports (snapshots of policy compliance results) and
+// system reports (snapshots of per-system compliance data). All routes are
+// tenant-scoped. Viewer for reads; Runner to save; Editor for deletes.
+// =============================================================================
+
 use axum::response::{Response, IntoResponse, Redirect};
 use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
@@ -25,6 +33,11 @@ use crate::systems::fetch_system_report_data;
 // HANDLERS
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports
+// List all saved policy reports and system reports for the current tenant.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
@@ -101,7 +114,11 @@ pub async fn reports(
 
 
 
-/// Core logic for saving a policy report — called by both the HTTP handler and the scheduler.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: save_policy_report_logic
+// Snapshots current policy compliance results to the reports table.
+// Called by the HTTP handler and the background scheduler.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn save_policy_report_logic(
     id: i64,
     pool: &SqlitePool,
@@ -216,7 +233,11 @@ pub async fn save_policy_report_logic(
 }
 
 
-/// HTTP handler — saves a compliance report snapshot for a policy.
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/save/{id}
+// Save a snapshot of the current policy compliance results.
+// Role: Runner
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports_save(
     auth: AuthSession,
     Path(id): Path<i64>,
@@ -241,6 +262,11 @@ pub async fn reports_save(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/view/{id}
+// View a saved policy compliance report snapshot.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -318,6 +344,11 @@ pub async fn reports_view(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/delete/{id}
+// Delete a saved policy compliance report.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -344,13 +375,20 @@ pub async fn reports_delete(
 }
 
 
-/// Wrap a PDF table cell element with uniform vertical + horizontal padding
-/// so text never touches the cell border lines.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: cell
+// Wraps a PDF element with uniform cell padding for table layout.
+// ─────────────────────────────────────────────────────────────────────────────
 fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
     Box::new(elements::PaddedElement::new(e, Margins::trbl(1.5, 2.0, 1.5, 2.0)))
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/download/{id}
+// Generate and stream a PDF of a saved policy compliance report.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports_download(
     auth: AuthSession,
     Path(id): Path<i64>,
@@ -615,6 +653,11 @@ pub async fn reports_download(
 // BULK ACTIONS
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /reports/bulk/delete
+// Bulk delete selected saved policy compliance reports.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports_bulk_delete(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -668,7 +711,11 @@ pub async fn reports_bulk_delete(
 // SYSTEM REPORT HANDLERS
 // ============================================================
 
-/// Save a snapshot of the live system compliance report.
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/report/{id}/save
+// Save a snapshot of the live system compliance report to system_reports.
+// Role: Runner
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_report_save(
     auth: AuthSession,
     Path(system_id): Path<i32>,
@@ -723,7 +770,11 @@ pub async fn system_report_save(
 }
 
 
-/// View a saved system compliance report snapshot.
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/system/view/{id}
+// View a saved system compliance report snapshot.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -800,7 +851,11 @@ pub async fn system_reports_view(
 }
 
 
-/// Delete a saved system compliance report.
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/system/delete/{id}
+// Delete a saved system compliance report.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_reports_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -826,7 +881,11 @@ pub async fn system_reports_delete(
 }
 
 
-/// Bulk delete saved system compliance reports.
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /reports/system/bulk/delete
+// Bulk delete selected saved system compliance reports.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_reports_bulk_delete(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -871,8 +930,11 @@ pub async fn system_reports_bulk_delete(
 }
 
 
-/// Shared PDF builder for system compliance reports.
-/// `subtitle` is the second line under the title (e.g. "Live Report — 2026-05-05" or "Saved on … by …").
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: build_system_report_pdf
+// Builds a PDF byte buffer for a system compliance report.
+// Used by both the live-download and saved-snapshot download handlers.
+// ─────────────────────────────────────────────────────────────────────────────
 fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Vec<u8>, ()> {
     const FONT_REGULAR:     &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
     const FONT_BOLD:        &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
@@ -1012,7 +1074,11 @@ fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Ve
 }
 
 
-/// Download a saved system compliance report as PDF.
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/system/download/{id}
+// Download a saved system compliance report as a PDF file.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_reports_download(
     auth: AuthSession,
     Path(id): Path<i64>,
@@ -1076,7 +1142,11 @@ pub async fn system_reports_download(
 }
 
 
-/// Download the live system compliance report as PDF.
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/report/{id}/download
+// Generate and stream a PDF of the live (current) system compliance report.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_report_live_download(
     auth: AuthSession,
     Path(id): Path<i32>,

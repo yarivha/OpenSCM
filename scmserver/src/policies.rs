@@ -1,3 +1,10 @@
+// =============================================================================
+// policies.rs — policy CRUD, run, live report, and PDF download
+//
+// All routes are tenant-scoped. Viewer role required for reads;
+// Editor role required for writes; Runner role required to trigger a scan.
+// =============================================================================
+
 use axum::response::{Response, IntoResponse, Redirect};
 use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
@@ -27,6 +34,11 @@ use crate::handlers::{render_template, parse_form_data, normalize_status};
 // HANDLERS
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /policies
+// List all policies with live compliance scores for the current tenant.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
@@ -140,6 +152,11 @@ pub async fn policies(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /policies/add
+// Render the add-policy form with available tests and system groups.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_add(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
@@ -204,6 +221,11 @@ pub async fn policies_add(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /policies/add
+// Save a new policy with tests, system groups, and optional schedules.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_add_save(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -377,6 +399,11 @@ pub async fn policies_add_save(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /policies/edit/{id}
+// Render the edit-policy form pre-populated with existing data.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -498,6 +525,11 @@ pub async fn policies_edit(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /policies/edit/{id}
+// Save changes to policy metadata, tests, system groups, and schedules.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -688,6 +720,11 @@ pub async fn policies_edit_save(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /policies/delete/{id}
+// Delete a policy and clean up associated results and schedules.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -734,6 +771,11 @@ pub async fn policies_delete(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /policies/run/{id}
+// Queue scan commands for all systems linked to the policy.
+// Role: Runner
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_run(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -758,6 +800,11 @@ pub async fn policies_run(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /policies/report/{id}
+// Render the live compliance report for a policy (current results).
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_report(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -869,10 +916,19 @@ pub async fn policies_report(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: cell
+// Wraps a PDF element with uniform cell padding for table layout.
+// ─────────────────────────────────────────────────────────────────────────────
 fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
     Box::new(elements::PaddedElement::new(e, Margins::trbl(1.5, 2.0, 1.5, 2.0)))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /policies/download/{id}
+// Generate and stream a PDF version of the live policy compliance report.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_report_download(
     auth: AuthSession,
     Path(id): Path<i64>,
@@ -1093,6 +1149,11 @@ pub async fn policies_report_download(
 // INTERNAL LOGIC
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: execute_policy_run_logic
+// Inserts commands into the commands table for all systems in a policy.
+// Called by both the HTTP handler and the background scheduler.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn execute_policy_run_logic(
     id: i32,
     pool: &SqlitePool,

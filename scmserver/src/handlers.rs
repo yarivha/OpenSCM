@@ -1,3 +1,10 @@
+// =============================================================================
+// handlers.rs — shared utilities: template rendering, form parsing,
+//               notifications, status normalization, and 404 fallback
+//
+// These are internal helpers used across all route modules.
+// =============================================================================
+
 use axum::response::{Html, Redirect, Response, IntoResponse};
 use axum::http::{StatusCode, header};
 use axum::body::Body;
@@ -15,6 +22,11 @@ use crate::models::{Notification, UserRole, AuthSession};
 // TEMPLATE RENDERING
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: render_template
+// Populates global context (version, edition, pending count, notifications,
+// session info) then renders the named Tera template to HTML.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn render_template(
     tera: &Tera,
     pool: Option<&SqlitePool>,
@@ -136,8 +148,11 @@ pub async fn render_template(
 // FORM PARSING
 // ============================================================
 
-/// Parse URL-encoded form data into a map of key -> list of values.
-/// Handles `+` as space and percent-encoded characters.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: parse_form_data
+// Parses URL-encoded form data into a map of key → list of values.
+// Handles + as space and percent-encoded characters.
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn parse_form_data(raw_string: &str) -> HashMap<String, Vec<String>> {
     let mut form_data: HashMap<String, Vec<String>> = HashMap::new();
 
@@ -169,7 +184,10 @@ pub fn parse_form_data(raw_string: &str) -> HashMap<String, Vec<String>> {
 // ============================================================
 
 
-/// Insert a notification for a specific user.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: add_notification
+// Inserts a notification row for a specific user in the notify table.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn add_notification(
     pool: &SqlitePool,
     tenant_id: &str,
@@ -198,8 +216,13 @@ pub async fn add_notification(
 // ============================================================
 // CLEAR NOTIFICATIONS
 // ============================================================
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /notifications/clear
+// Deletes all notifications for the current user, then redirects to /.
+// Role: Viewer (any authenticated user)
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn clear_notifications(
-    auth: AuthSession, // Extractor ensures only logged-in users get here
+    auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
 ) -> Redirect {
     let result = sqlx::query("DELETE FROM notify WHERE owner_id = ? AND tenant_id = ?")
@@ -223,7 +246,10 @@ pub async fn clear_notifications(
 // STATUS NORMALIZATION
 // ============================================================
 
-/// Normalize result status strings to a consistent "PASS" ,"FAIL" or "NA"
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: normalize_status
+// Maps raw result strings (true/1/pass → PASS, na/n/a → NA, else → FAIL).
+// ─────────────────────────────────────────────────────────────────────────────
 pub fn normalize_status(raw: &str) -> &'static str {
     match raw.to_lowercase().as_str() {
         "pass" | "true" | "1" => "PASS",
@@ -237,6 +263,10 @@ pub fn normalize_status(raw: &str) -> &'static str {
 // FALLBACK HANDLERS
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Fallback: not_found
+// Returns a plain-text 404 response for all unmatched routes.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn not_found() -> impl IntoResponse {
     Response::builder()
         .status(StatusCode::NOT_FOUND)

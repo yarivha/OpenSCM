@@ -1,3 +1,11 @@
+// =============================================================================
+// systems.rs — managed system CRUD, group management, bulk actions,
+//              live compliance report
+//
+// All routes are tenant-scoped. Viewer role required for reads;
+// Editor role required for writes.
+// =============================================================================
+
 use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path};
 use tokio::sync::mpsc;
@@ -21,10 +29,12 @@ use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data};
 
 
-// ============================================================
-// SYSTEMS
-// ============================================================
-
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems
+// List all systems (active + pending) for the current tenant, with optional
+// ?filter=active|pending query param.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems(
     auth: AuthSession,
     Query(params): Query<HashMap<String, String>>,
@@ -179,6 +189,11 @@ pub async fn systems(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/approve/{id}
+// Approve a pending system (set status → active).
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_approve(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -207,6 +222,11 @@ pub async fn systems_approve(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/delete/{id}
+// Delete a system and cascade-remove its results; signals compliance refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -236,6 +256,11 @@ pub async fn systems_delete(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/edit/{id}
+// Render the system edit form (group assignment).
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -343,6 +368,11 @@ pub async fn systems_edit(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/edit/{id}
+// Persist group-membership changes for a system; signals compliance refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -442,6 +472,11 @@ pub async fn systems_edit_save(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/pending
+// List all systems with status = 'pending' awaiting approval.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_pending(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
@@ -522,10 +557,11 @@ pub async fn systems_pending(
 }
 
 
-// ============================================================
-// SYSTEM GROUPS
-// ============================================================
-
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /system_groups
+// List all system groups and their member systems for the current tenant.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
@@ -587,6 +623,11 @@ pub async fn system_groups(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /system_groups/add
+// Render the add-group form with available active systems.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups_add(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
@@ -640,6 +681,11 @@ pub async fn system_groups_add(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /system_groups/add
+// Create a new system group and associate the selected systems.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups_add_save(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
@@ -747,6 +793,12 @@ pub async fn system_groups_add_save(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /system_groups/delete/{id}
+// Delete a system group and clean up dangling results; signals compliance
+// refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -807,6 +859,11 @@ pub async fn system_groups_delete(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /system_groups/edit/{id}
+// Render the edit form for a system group with current membership.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -914,6 +971,12 @@ pub async fn system_groups_edit(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /system_groups/edit/{id}
+// Persist name, description, and membership changes; signals compliance
+// refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -1064,10 +1127,11 @@ pub async fn system_groups_edit_save(
 
 
 
-// ============================================================
-// BULK ACTIONS
-// ============================================================
-
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/bulk/approve
+// Approve multiple pending systems in one operation.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_bulk_approve(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -1119,6 +1183,11 @@ pub async fn systems_bulk_approve(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/bulk/delete
+// Delete multiple systems and signal a compliance refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_bulk_delete(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -1170,6 +1239,11 @@ pub async fn systems_bulk_delete(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/bulk/add-group
+// Add multiple systems to a selected group in one operation.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_bulk_add_group(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -1246,12 +1320,11 @@ pub async fn systems_bulk_add_group(
 }
 
 
-// ============================================================
-// SYSTEM LIVE REPORT
-// ============================================================
-
-/// Fetch all compliance data for a single system into a `SystemReportData`.
-/// Shared by the live report handler and the save-snapshot handler.
+// ─────────────────────────────────────────────────────────────────────────────
+// fetch_system_report_data
+// Gather all policy/test compliance results for one system into
+// SystemReportData. Shared by the live report handler and the save handler.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn fetch_system_report_data(
     system_id: i32,
     tenant_id: &str,
@@ -1355,6 +1428,11 @@ pub async fn fetch_system_report_data(
     })
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/report/{id}
+// Render the live compliance report for a single system.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_report(
     auth: AuthSession,
     Path(id): Path<i32>,

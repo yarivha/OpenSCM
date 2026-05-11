@@ -1,3 +1,12 @@
+// =============================================================================
+// scheduler.rs — background compliance aggregation and policy scheduler
+//
+// Spawned once at startup. Main loop ticks every 60 seconds:
+//   Task A — fires any policy scan/report schedules that are due.
+//   Task B — records hourly compliance history snapshots.
+//   Task C — checks GitHub for new releases once per hour.
+// =============================================================================
+
 use sqlx::{SqlitePool, Row};
 use tokio::time::{self, Duration};
 use chrono::{Utc, Timelike};
@@ -9,7 +18,10 @@ use crate::policies::execute_policy_run_logic;
 use crate::handlers::add_notification;
 use crate::reports::save_policy_report_logic;
 
-/// Internal helper for date math
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: calculate_next_run
+// Adds the schedule frequency interval to a planned run time string.
+// ─────────────────────────────────────────────────────────────────────────────
 fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
     let current = chrono::NaiveDateTime::parse_from_str(last_planned_run, "%Y-%m-%dT%H:%M")
         .unwrap_or_else(|_| Utc::now().naive_utc());
@@ -26,7 +38,10 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
 }
 
 
-/// Fetch all admin user IDs for a given tenant to notify on scheduled events.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: get_policy_owners
+// Returns all admin user IDs for a tenant (used to send schedule notifications).
+// ─────────────────────────────────────────────────────────────────────────────
 async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
     sqlx::query(
         "SELECT id FROM users WHERE tenant_id = ? AND role = 'admin'",
@@ -41,6 +56,11 @@ async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: recalculate_current_compliance
+// Purges ghost results, then recalculates compliance scores for all tests,
+// systems, and policies across all tenants in a single transaction.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation (Active Systems Only)...");
 
@@ -240,6 +260,10 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: record_compliance_history
+// Inserts one compliance_history row per tenant with current avg scores.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     // Get all active tenants
@@ -321,6 +345,10 @@ pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Er
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: start_background_scheduler
+// Spawns startup compliance sync and the 60-second main heartbeat loop.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn start_background_scheduler(pool: SqlitePool) {
     // Startup compliance sync
     let startup_pool = pool.clone();
@@ -448,6 +476,10 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 // VERSION UPDATE CHECK
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: check_for_updates
+// Queries GitHub releases API; notifies admins if a newer version is available.
+// ─────────────────────────────────────────────────────────────────────────────
 async fn check_for_updates(pool: &SqlitePool) {
     let current = env!("CARGO_PKG_VERSION");
 
@@ -522,7 +554,10 @@ async fn check_for_updates(pool: &SqlitePool) {
     }
 }
 
-/// Returns true if `latest` is a higher semver than `current`.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: is_newer
+// Returns true if latest semver string is higher than current.
+// ─────────────────────────────────────────────────────────────────────────────
 fn is_newer(latest: &str, current: &str) -> bool {
     fn parse(v: &str) -> (u32, u32, u32) {
         let parts: Vec<u32> = v.split('.').filter_map(|p| p.parse().ok()).collect();

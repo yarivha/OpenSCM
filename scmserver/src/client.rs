@@ -1,3 +1,11 @@
+// =============================================================================
+// client.rs — agent API endpoints: register, heartbeat, and compliance results
+//
+// All routes are unauthenticated (no session cookie). Requests are validated
+// by Ed25519 signature over the raw JSON payload bytes. A tenant must exist
+// before any agent can register or submit results for it.
+// =============================================================================
+
 use axum::{extract::Extension, http::StatusCode, response::IntoResponse, Json};
 use tokio::sync::mpsc;
 use sqlx::{SqlitePool, QueryBuilder};
@@ -22,7 +30,10 @@ struct AuthCheck {
 // HELPERS
 // ============================================================
 
-/// Sign a JSON payload using the tenant's active Ed25519 private key.
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: sign_response
+// Signs a JSON payload with the tenant's active Ed25519 private key.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn sign_response(
     pool: &SqlitePool,
     tenant_id: &str,
@@ -54,6 +65,10 @@ pub async fn sign_response(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: decode_public_key
+// Decodes a base64-encoded Ed25519 verifying key.
+// ─────────────────────────────────────────────────────────────────────────────
 fn decode_public_key(base64_key: &str) -> Result<VerifyingKey, String> {
     let bytes = general_purpose::STANDARD
         .decode(base64_key)
@@ -68,6 +83,10 @@ fn decode_public_key(base64_key: &str) -> Result<VerifyingKey, String> {
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: decode_signature
+// Decodes a base64-encoded Ed25519 signature into a Signature value.
+// ─────────────────────────────────────────────────────────────────────────────
 fn decode_signature(base64_sig: &str) -> Result<Signature, String> {
     let bytes = general_purpose::STANDARD
         .decode(base64_sig)
@@ -81,14 +100,13 @@ fn decode_signature(base64_sig: &str) -> Result<Signature, String> {
 }
 
 
-/// Verify a signature against the verbatim JSON bytes of the payload.
-///
-/// `raw_payload` is a `RawValue` — it stores the exact bytes that arrived
-/// over the wire without any parsing or re-serialisation.  This means
-/// key order is always preserved and the bytes fed to the verifier are
-/// identical to the bytes the client originally signed, regardless of
-/// whether the client used `tenant_id` (≤v0.2.2) or `organization`
-/// (≥v0.2.3).
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: verify_signature
+// Verifies an Ed25519 signature against the raw, unmodified payload bytes.
+// raw_payload is a RawValue so key order is preserved exactly as received,
+// matching what the client signed regardless of field-name version (tenant_id
+// vs organization).
+// ─────────────────────────────────────────────────────────────────────────────
 fn verify_signature(
     raw_payload: &RawValue,
     signature_b64: &str,
@@ -108,7 +126,11 @@ fn verify_signature(
 // HANDLERS
 // ============================================================
 
-/// Handle agent registration and heartbeat (POST /send)
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /send  [Agent API — no session auth, Ed25519 signed]
+// Handles agent registration (id=0) and heartbeat (id>0).
+// Returns pending test commands for approved agents.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn send(
     Extension(pool): Extension<SqlitePool>,
     Json(signed_req): Json<SignedRequest>,
@@ -521,7 +543,10 @@ pub async fn send(
 }
 
 
-/// Handle incoming compliance results (POST /result)
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /result  [Agent API — no session auth, Ed25519 signed]
+// Stores a single PASS/FAIL/NA compliance result from an approved agent.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn receive_result(
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,

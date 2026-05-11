@@ -1,4 +1,10 @@
-// src/schema.rs
+// =============================================================================
+// schema.rs — database initialisation and incremental migrations
+//
+// initialize_database creates all tables and seeds default data on a fresh
+// install. run_migrations applies version-gated ALTER TABLE / data fixes to
+// existing databases without re-running the full schema.
+// =============================================================================
 use sqlx::SqlitePool;
 use sqlx::Row;
 use tracing::info;
@@ -6,7 +12,11 @@ use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use base64::{engine::general_purpose, Engine as _};
 
-/// Initialize the database schema
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: initialize_database
+// Creates all tables, indexes, triggers, and seed data for a fresh install.
+// Stamps schema_info.version = 9 so run_migrations skips all steps.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     info!("Init Database......");
@@ -587,7 +597,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 }
 
 
-// DB Migration 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: run_migrations
+// Applies incremental schema migrations (v0→v9) to existing installations.
+// Each step is guarded by a version check so it runs exactly once.
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Create schema_info if it doesn't exist
     sqlx::query(

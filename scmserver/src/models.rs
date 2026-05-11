@@ -1,10 +1,17 @@
+// =============================================================================
+// models.rs — all data model structs and enums
+//
+// These are pure data types shared across all route modules. No business logic
+// lives here — only field definitions and standard trait derivations.
+// =============================================================================
+
 use serde::{Deserialize, Serialize};
 use serde_json::value::RawValue;
 use sqlx::FromRow;
 use chrono::{DateTime, Utc};
 
 
-
+// Query parameters used on pages that show flash messages.
 #[derive(Deserialize)]
 pub struct ErrorQuery {
     pub error_message: Option<String>,
@@ -12,6 +19,7 @@ pub struct ErrorQuery {
 }
 
 
+// A portal user account (id, username, role, display name, email).
 #[derive(Deserialize, Serialize)]
 pub struct User {
     pub id: i32,
@@ -22,6 +30,7 @@ pub struct User {
 }
 
 
+// A managed agent system as stored in the systems table.
 #[derive(Debug, Serialize, Deserialize, FromRow)]
 pub struct System {
     pub id: Option<i32>,
@@ -43,6 +52,7 @@ pub struct System {
     pub is_offline: bool,
 }
 
+// A named group of systems used to link systems to policies.
 #[derive(Serialize, Deserialize, Default)]
 pub struct SystemGroup {
     pub id: Option<i32>,
@@ -52,12 +62,14 @@ pub struct SystemGroup {
 }
 
 
+// Many-to-many join row: a system assigned to a group.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInsideGroup {
     pub system_id: i32,
     pub group_id:  i32,
 }
 
+// A compliance test definition (name, severity, filter, remediation, etc.).
 #[derive(Debug, Serialize, Deserialize, FromRow, Default, Clone)]
 pub struct Test {
     pub id: Option<i32>,
@@ -71,6 +83,7 @@ pub struct Test {
 }
 
 
+// One condition (or applicability rule) row in the test_conditions table.
 #[derive(Debug, sqlx::FromRow, Serialize, Deserialize, Clone)]
 pub struct TestCondition {
     pub id: i64,
@@ -85,6 +98,7 @@ pub struct TestCondition {
 }
 
 
+// A test bundled with its conditions and applicability rules (sent to agents).
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct TestWithConditions {
     #[serde(flatten)]
@@ -94,6 +108,7 @@ pub struct TestWithConditions {
 }
 
 
+// A security policy (name, version, description).
 #[derive(Serialize, Deserialize)]
 pub struct Policy {
     pub id: Option<i32>,
@@ -102,6 +117,7 @@ pub struct Policy {
     pub description: Option<String>,
 }
 
+// An automated scan or report schedule for a policy.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PolicySchedule {
     pub id: i32,
@@ -117,6 +133,7 @@ pub struct PolicySchedule {
 
 
 
+// One row from the compliance_history table used by dashboard trend charts.
 #[derive(sqlx::FromRow, serde::Serialize, Clone)]
 pub struct ComplianceHistoryRow {
     pub check_date: String,
@@ -125,18 +142,21 @@ pub struct ComplianceHistoryRow {
 }
 
 
+// Many-to-many join row: a test assigned to a policy.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct TestInsidePolicy {
     pub policy_id: i32,
     pub test_id:  i32,
 }
 
+// Many-to-many join row: a system group assigned to a policy.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemInsidePolicy {
     pub policy_id: i32,
     pub group_id:  i32,
 }
 
+// A user notification row from the notify table.
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Notification {
     pub id: i64,
@@ -148,6 +168,7 @@ pub struct Notification {
 }
 
 
+// The deserialized body of an agent's heartbeat or registration request.
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct UnsignedPayload {
     pub id: String,
@@ -163,30 +184,30 @@ pub struct UnsignedPayload {
 }
 
 
+// An agent heartbeat/registration request with a raw JSON payload and signature.
+// payload is stored as RawValue to preserve byte order for signature verification.
 #[derive(Debug, Deserialize)]
 pub struct SignedRequest {
-    /// Raw JSON bytes exactly as received — used for signature verification
-    /// without re-serialization so key order is preserved across all client
-    /// versions (e.g. `tenant_id` from ≤v0.2.2 vs `organization` from ≥v0.2.3).
     pub payload: Box<RawValue>,
     pub signature: String,
 }
 
 
+// An agent compliance result submission with a raw JSON payload and signature.
 #[derive(Deserialize)]
 pub struct SignedResult {
-    /// Raw JSON bytes exactly as received — same byte-preservation guarantee
-    /// as SignedRequest.payload.
     pub payload: Box<RawValue>,
     pub signature: String,
 }
 
+// The server's signed response sent back to the agent.
 #[derive(Serialize, Deserialize)]
 pub struct SignedResponse {
     pub payload: serde_json::Value,
     pub signature: String,
 }
 
+// The deserialized body of an agent compliance result (POST /result).
 #[derive(Serialize, Deserialize)]
 pub struct ComplianceResult {
     pub client_id: i64,
@@ -197,6 +218,7 @@ pub struct ComplianceResult {
 }
 
 
+// Aggregated compliance data for a single policy (used by the policies list page).
 #[derive(FromRow, Serialize, Deserialize)]
 pub struct PolicyCompliance {
     pub policy_id: i64,
@@ -211,6 +233,7 @@ pub struct PolicyCompliance {
 }
 
 
+// A row in the "highest risk assets" dashboard query result.
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct SystemFailRow {
     pub system_id: i32,
@@ -222,7 +245,7 @@ pub struct SystemFailRow {
     pub tests_na: i64,
 }
 
-/// One policy's worth of results for a single system
+// One policy's worth of compliance results for a single system.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PolicyResultGroup {
     pub policy_id: i32,
@@ -235,7 +258,7 @@ pub struct PolicyResultGroup {
     pub fail_count: usize,
 }
 
-/// All data needed by the system live-report page
+// All data needed to render the system live-report page or a saved snapshot.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemReportData {
     pub system_id: i32,
@@ -251,6 +274,7 @@ pub struct SystemReportData {
     pub total_na: usize,
 }
 
+// A row in the "critical policy failures" dashboard query result.
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct PolicyFailRow {
     pub policy_id: i32,
@@ -263,6 +287,7 @@ pub struct PolicyFailRow {
 
 
 
+// A test condition element (e.g. FILE, REGISTRY, CMD) from the elements table.
 #[derive(Serialize, Deserialize)]
 pub struct Element {
     pub id: i32,
@@ -271,6 +296,7 @@ pub struct Element {
 }
 
 
+// A secondary element modifier (e.g. EXISTS, CONTENT) from the selements table.
 #[derive(Serialize, Deserialize)]
 pub struct SElement {
     pub id: i32,
@@ -278,6 +304,7 @@ pub struct SElement {
     pub description: Option<String>,
 }
 
+// A comparison operator (e.g. EQUALS, CONTAINS) from the conditions table.
 #[derive(Serialize, Deserialize)]
 pub struct Condition {
     pub id: i32,
@@ -286,6 +313,7 @@ pub struct Condition {
 }
 
 
+// Full policy compliance report data (used for both HTML view and PDF export).
 #[derive(Serialize, Deserialize)]
 pub struct ReportData {
     pub policy_id: i32,
@@ -300,7 +328,7 @@ pub struct ReportData {
 
 
 
-/// Details for the "Policy Specification" page
+// Metadata for a single test as stored in a saved report (name, description, etc.).
 #[derive(Serialize, Deserialize)]
 pub struct TestMeta {
     pub name: String,
@@ -309,6 +337,7 @@ pub struct TestMeta {
     pub remediation: String,
 }
 
+// One system's compliance results grouped into a report.
 #[derive(Serialize, Deserialize)]
 pub struct SystemReport {
     pub system_name: String,
@@ -316,6 +345,7 @@ pub struct SystemReport {
     pub is_passed: bool,
 }
 
+// A single test result (test name + PASS/FAIL/NA status) inside a report.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct IndividualResult {
     pub test_name: String,
@@ -323,6 +353,7 @@ pub struct IndividualResult {
 }
 
 
+// A saved system compliance report snapshot row from the system_reports table.
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct SavedSystemReport {
     pub id: i32,
@@ -334,6 +365,7 @@ pub struct SavedSystemReport {
     pub report_data: Option<String>, // JSON-serialised SystemReportData
 }
 
+// A saved policy compliance report row from the reports table.
 #[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
 pub struct Report {
     pub id: i32,
@@ -350,6 +382,7 @@ pub struct Report {
 
 
 
+// The authenticated session extracted from the signed cookie on every request.
 #[derive(Debug, Clone)]
 pub struct AuthSession {
     pub username: String,
@@ -359,6 +392,7 @@ pub struct AuthSession {
 }
 
 
+// Role hierarchy used for authorization checks (Viewer < Runner < Editor < Admin < Superuser).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]
 pub enum UserRole {
     Viewer = 0,

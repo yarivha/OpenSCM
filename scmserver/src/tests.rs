@@ -1,3 +1,10 @@
+// =============================================================================
+// tests.rs — compliance test CRUD, bulk actions
+//
+// All routes are tenant-scoped. Viewer role required for reads;
+// Editor role required for writes.
+// =============================================================================
+
 use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path};
 use tokio::sync::mpsc;
@@ -15,11 +22,11 @@ use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data};
 
 
-// ============================================================
-// HELPERS
-// ============================================================
-
-/// Fetch global elements, selements, and conditions lookup tables.
+// ─────────────────────────────────────────────────────────────────────────────
+// fetch_lookup_tables
+// Load the elements, selements, and conditions reference tables used to
+// populate test-condition form dropdowns.
+// ─────────────────────────────────────────────────────────────────────────────
 async fn fetch_lookup_tables(
     pool: &SqlitePool,
 ) -> Result<(Vec<Element>, Vec<SElement>, Vec<Condition>), sqlx::Error> {
@@ -45,7 +52,12 @@ async fn fetch_lookup_tables(
 }
 
 
-/// Extract basic test metadata fields from parsed form data.
+// ─────────────────────────────────────────────────────────────────────────────
+// extract_test_metadata
+// Pull name, description, severity, rational, remediation, filter, and
+// app_filter from parsed form data; returns Err with a human-readable message
+// if the required name field is missing.
+// ─────────────────────────────────────────────────────────────────────────────
 fn extract_test_metadata(
     form_data: &HashMap<String, Vec<String>>,
 ) -> Result<(String, String, String, String, String, String, String), String> {
@@ -72,8 +84,11 @@ fn extract_test_metadata(
 }
 
 
-/// Extract up to `max` test conditions from parsed form data.
-/// Skips rows where element is empty or placeholder.
+// ─────────────────────────────────────────────────────────────────────────────
+// extract_conditions_from_form
+// Parse up to `max` test-condition rows from form data; skips rows whose
+// element field is blank or the placeholder "-- Select --".
+// ─────────────────────────────────────────────────────────────────────────────
 fn extract_conditions_from_form(
     form_data: &HashMap<String, Vec<String>>,
     max: usize,
@@ -111,7 +126,11 @@ fn extract_conditions_from_form(
 }
 
 
-/// Build a TestWithConditions list from tests + a pre-fetched flat conditions list.
+// ─────────────────────────────────────────────────────────────────────────────
+// build_tests_with_conditions
+// Zip a flat test list with a pre-fetched flat conditions list into a
+// TestWithConditions vec, separating condition vs. applicability rows.
+// ─────────────────────────────────────────────────────────────────────────────
 fn build_tests_with_conditions(
     tests: Vec<Test>,
     all_conditions: Vec<TestCondition>,
@@ -136,10 +155,11 @@ fn build_tests_with_conditions(
 }
 
 
-// ============================================================
-// HANDLERS
-// ============================================================
-
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /tests
+// List all compliance tests with their conditions for the current tenant.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
@@ -205,6 +225,11 @@ pub async fn tests(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /tests/add
+// Render the add-test form with element/selement/condition dropdowns.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_add(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
@@ -234,6 +259,11 @@ pub async fn tests_add(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /tests/add
+// Persist a new test with its conditions and optional applicability rows.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_add_save(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
@@ -356,6 +386,11 @@ pub async fn tests_add_save(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /tests/delete/{id}
+// Delete a test (cascades to its conditions); signals compliance refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -383,6 +418,11 @@ pub async fn tests_delete(
 
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /tests/edit/{id}
+// Render the edit form for an existing test with its current conditions.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -450,6 +490,11 @@ pub async fn tests_edit(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /tests/edit/{id}
+// Persist updated test metadata and conditions; signals compliance refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
@@ -582,10 +627,11 @@ pub async fn tests_edit_save(
 
 
 
-// ============================================================
-// BULK ACTIONS
-// ============================================================
-
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /tests/bulk/delete
+// Delete multiple tests and signal a compliance refresh.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_bulk_delete(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
@@ -630,6 +676,11 @@ pub async fn tests_bulk_delete(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /tests/bulk/add-policy
+// Link multiple tests to a selected policy in one operation.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_bulk_add_policy(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
