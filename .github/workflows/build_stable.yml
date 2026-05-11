@@ -56,12 +56,12 @@ jobs:
 
       - uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0
+          version: 0.14.0
 
       - name: Build Binary
         run: |
           mkdir -p dist build/bin
-          # armv5te: Zig 0.13.0 doesn't extract the CPU from the target triple correctly;
+          # armv5te: pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
           # pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
           if [[ "${{ matrix.target }}" == armv5te-* ]]; then
             export CFLAGS_armv5te_unknown_linux_musleabi="-march=armv5te"
@@ -125,7 +125,7 @@ jobs:
 
       - uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0
+          version: 0.14.0
 
       - name: Build and Package
         run: |
@@ -290,7 +290,7 @@ jobs:
 
       - uses: goto-bus-stop/setup-zig@v2
         with:
-          version: 0.13.0
+          version: 0.14.0
 
       - name: Build Server Binary
         run: |
