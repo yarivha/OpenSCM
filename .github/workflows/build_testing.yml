@@ -23,7 +23,7 @@ jobs:
           - s390x-unknown-linux-musl
           - loongarch64-unknown-linux-musl
           - i686-unknown-linux-musl
-          - arm-unknown-linux-musleabi
+          - armv5te-unknown-linux-musleabi
           - x86_64-pc-windows-gnu
           - universal2-apple-darwin
         include:
@@ -44,7 +44,7 @@ jobs:
           - app: server
             target: i686-unknown-linux-musl
           - app: server
-            target: arm-unknown-linux-musleabi
+            target: armv5te-unknown-linux-musleabi
           - app: server
             target: universal2-apple-darwin
 
@@ -94,7 +94,7 @@ jobs:
             x86_64-*)        ARCH=amd64      ;;
             aarch64-*)       ARCH=arm64      ;;
             armv7-*)         ARCH=armhf      ;;
-            arm-*)           ARCH=armel      ;;
+            armv5te-*)       ARCH=armel      ;;
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;
@@ -112,7 +112,7 @@ jobs:
           elif [[ "${{ matrix.target }}" == s390x-* ]] || \
                [[ "${{ matrix.target }}" == loongarch64-* ]] || \
                [[ "${{ matrix.target }}" == i686-* ]] || \
-               [[ "${{ matrix.target }}" == arm-* ]]; then
+               [[ "${{ matrix.target }}" == armv5te-* ]]; then
             PACKAGERS="deb rpm"
           else
             PACKAGERS="deb rpm archlinux"
