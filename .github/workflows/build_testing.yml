@@ -75,6 +75,11 @@ jobs:
               target/x86_64-apple-darwin/release/$BINARY_NAME \
               -output build/bin/$BINARY_NAME
           else
+            # armv5te: Zig 0.13.0 doesn't extract the CPU from the target triple correctly;
+            # pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
+            if [[ "${{ matrix.target }}" == armv5te-* ]]; then
+              export CFLAGS_armv5te_unknown_linux_musleabi="-march=armv5te"
+            fi
             cargo zigbuild --release --target ${{ matrix.target }} -p $BINARY_NAME
             # Stage binary — Windows target produces .exe, others have no extension
             if [[ "${{ matrix.target }}" == *"windows"* ]]; then

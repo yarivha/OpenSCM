@@ -61,6 +61,11 @@ jobs:
       - name: Build Binary
         run: |
           mkdir -p dist build/bin
+          # armv5te: Zig 0.13.0 doesn't extract the CPU from the target triple correctly;
+          # pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
+          if [[ "${{ matrix.target }}" == armv5te-* ]]; then
+            export CFLAGS_armv5te_unknown_linux_musleabi="-march=armv5te"
+          fi
           cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
@@ -74,7 +79,6 @@ jobs:
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;
-            loongarch64-*)   ARCH=loong64    ;;
             i686-*)          ARCH=386        ;;
           esac
           export ARCH
