@@ -7,8 +7,7 @@ All notable changes to OpenSCM are documented here.
 ## [0.2.8] - 2026-05-11
 
 ### Added
-- **Linux client for s390x (IBM Z / LinuxONE)** — `scmclient` is now built and packaged (deb + rpm) for `s390x-unknown-linux-musl`. The server is not yet supported on s390x.
-- **Linux client for LoongArch64** — `scmclient` is now built and packaged (deb + rpm) for `loongarch64-unknown-linux-musl`, targeting LoongArch-based servers common in Chinese enterprise environments.
+- **Linux client for s390x (IBM Z / LinuxONE)** — `scmclient` is now built and packaged (deb + rpm) for `s390x-unknown-linux-gnu`. The server is not yet supported on s390x.
 - **Linux client for i686 (32-bit x86)** — `scmclient` is now built and packaged (deb + rpm) for `i686-unknown-linux-musl`, covering legacy 32-bit x86 servers.
 - **Linux client for ARMv6 (armel)** — `scmclient` is now built and packaged (deb + rpm) for `armv5te-unknown-linux-musleabi`, covering ARMv5TE/ARMv6 devices such as Raspberry Pi 1/Zero and older embedded Linux hardware.
 

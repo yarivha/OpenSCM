@@ -20,8 +20,7 @@ jobs:
           - armv7-unknown-linux-musleabihf
           - riscv64gc-unknown-linux-musl
           - powerpc64le-unknown-linux-musl
-          - s390x-unknown-linux-musl
-          - loongarch64-unknown-linux-musl
+          - s390x-unknown-linux-gnu
           - i686-unknown-linux-musl
           - armv5te-unknown-linux-musleabi
           - x86_64-pc-windows-gnu
@@ -38,9 +37,7 @@ jobs:
           - app: server
             target: powerpc64le-unknown-linux-musl
           - app: server
-            target: s390x-unknown-linux-musl
-          - app: server
-            target: loongarch64-unknown-linux-musl
+            target: s390x-unknown-linux-gnu
           - app: server
             target: i686-unknown-linux-musl
           - app: server
@@ -98,7 +95,6 @@ jobs:
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;
-            loongarch64-*)   ARCH=loong64    ;;
             i686-*)          ARCH=386        ;;
           esac
           export ARCH
@@ -106,11 +102,10 @@ jobs:
           export RELEASE=${{ github.run_number }}
           # Server: deb + rpm only.
           # Client: deb + rpm + archlinux — except targets with no Arch Linux support:
-          #   s390x, loongarch64 (no mainstream port), i686 (Arch dropped 32-bit), armel (outside Arch ARM scope)
+          #   s390x (no Arch port), i686 (Arch dropped 32-bit), armel (outside Arch ARM scope)
           if [[ "${{ matrix.app }}" == "server" ]]; then
             PACKAGERS="deb rpm"
           elif [[ "${{ matrix.target }}" == s390x-* ]] || \
-               [[ "${{ matrix.target }}" == loongarch64-* ]] || \
                [[ "${{ matrix.target }}" == i686-* ]] || \
                [[ "${{ matrix.target }}" == armv5te-* ]]; then
             PACKAGERS="deb rpm"
