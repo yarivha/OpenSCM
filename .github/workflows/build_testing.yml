@@ -22,6 +22,7 @@ jobs:
           - powerpc64le-unknown-linux-musl
           - s390x-unknown-linux-gnu
           - i686-unknown-linux-musl
+          - armv5te-unknown-linux-musleabi
           - x86_64-pc-windows-gnu
           - universal2-apple-darwin
         include:
@@ -40,6 +41,8 @@ jobs:
           - app: server
             target: i686-unknown-linux-musl
           - app: server
+            target: armv5te-unknown-linux-musleabi
+          - app: server
             target: universal2-apple-darwin
 
     steps:
@@ -57,7 +60,7 @@ jobs:
       - uses: goto-bus-stop/setup-zig@v2
         if: runner.os == 'Linux'
         with:
-          version: 0.14.0
+          version: 0.16.0
 
       - name: Build Binary
         run: |
@@ -90,6 +93,7 @@ jobs:
             x86_64-*)        ARCH=amd64      ;;
             aarch64-*)       ARCH=arm64      ;;
             armv7-*)         ARCH=armhf      ;;
+            armv5te-*)       ARCH=armel      ;;
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;
@@ -104,7 +108,8 @@ jobs:
           if [[ "${{ matrix.app }}" == "server" ]]; then
             PACKAGERS="deb rpm"
           elif [[ "${{ matrix.target }}" == s390x-* ]] || \
-               [[ "${{ matrix.target }}" == i686-* ]]; then
+               [[ "${{ matrix.target }}" == i686-* ]] || \
+               [[ "${{ matrix.target }}" == armv5te-* ]]; then
             PACKAGERS="deb rpm"
           else
             PACKAGERS="deb rpm archlinux"
