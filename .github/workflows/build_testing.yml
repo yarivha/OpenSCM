@@ -22,7 +22,6 @@ jobs:
           - powerpc64le-unknown-linux-musl
           - s390x-unknown-linux-gnu
           - i686-unknown-linux-musl
-          - armv5te-unknown-linux-musleabi
           - x86_64-pc-windows-gnu
           - universal2-apple-darwin
         include:
@@ -40,8 +39,6 @@ jobs:
             target: s390x-unknown-linux-gnu
           - app: server
             target: i686-unknown-linux-musl
-          - app: server
-            target: armv5te-unknown-linux-musleabi
           - app: server
             target: universal2-apple-darwin
 
@@ -77,11 +74,6 @@ jobs:
               target/x86_64-apple-darwin/release/$BINARY_NAME \
               -output build/bin/$BINARY_NAME
           else
-            # armv5te: pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
-            # pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
-            if [[ "${{ matrix.target }}" == armv5te-* ]]; then
-              export CFLAGS_armv5te_unknown_linux_musleabi="-march=armv5te"
-            fi
             cargo zigbuild --release --target ${{ matrix.target }} -p $BINARY_NAME
             # Stage binary — Windows target produces .exe, others have no extension
             if [[ "${{ matrix.target }}" == *"windows"* ]]; then
@@ -98,7 +90,6 @@ jobs:
             x86_64-*)        ARCH=amd64      ;;
             aarch64-*)       ARCH=arm64      ;;
             armv7-*)         ARCH=armhf      ;;
-            armv5te-*)       ARCH=armel      ;;
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;
@@ -113,8 +104,7 @@ jobs:
           if [[ "${{ matrix.app }}" == "server" ]]; then
             PACKAGERS="deb rpm"
           elif [[ "${{ matrix.target }}" == s390x-* ]] || \
-               [[ "${{ matrix.target }}" == i686-* ]] || \
-               [[ "${{ matrix.target }}" == armv5te-* ]]; then
+               [[ "${{ matrix.target }}" == i686-* ]]; then
             PACKAGERS="deb rpm"
           else
             PACKAGERS="deb rpm archlinux"

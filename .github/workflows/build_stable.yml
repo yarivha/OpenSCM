@@ -12,7 +12,7 @@ jobs:
 
   # ── LINUX ─────────────────────────────────────────────────────────────────
   # Client: x86_64 / aarch64 / armv7 / riscv64 / ppc64le  →  deb + rpm + archlinux
-  # Client: s390x / i686 / armel                           →  deb + rpm only
+  # Client: s390x / i686                                   →  deb + rpm only
   # Server: x86_64 / aarch64 only                          →  deb + rpm only
   build-linux:
     name: Linux · ${{ matrix.app }} · ${{ matrix.target }}
@@ -29,7 +29,6 @@ jobs:
           - powerpc64le-unknown-linux-musl
           - s390x-unknown-linux-gnu
           - i686-unknown-linux-musl
-          - armv5te-unknown-linux-musleabi
         exclude:
           - app: server
             target: armv7-unknown-linux-musleabihf
@@ -41,8 +40,6 @@ jobs:
             target: s390x-unknown-linux-gnu
           - app: server
             target: i686-unknown-linux-musl
-          - app: server
-            target: armv5te-unknown-linux-musleabi
     steps:
       - uses: actions/checkout@v4
 
@@ -61,11 +58,6 @@ jobs:
       - name: Build Binary
         run: |
           mkdir -p dist build/bin
-          # armv5te: pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
-          # pass -march=armv5te explicitly so ring's assembler accepts strd/ldrd two-register form.
-          if [[ "${{ matrix.target }}" == armv5te-* ]]; then
-            export CFLAGS_armv5te_unknown_linux_musleabi="-march=armv5te"
-          fi
           cargo zigbuild --release --target ${{ matrix.target }} -p scm${{ matrix.app }}
           cp target/${{ matrix.target }}/release/scm${{ matrix.app }} build/bin/
 
@@ -75,7 +67,6 @@ jobs:
             x86_64-*)        ARCH=amd64      ;;
             aarch64-*)       ARCH=arm64      ;;
             armv7-*)         ARCH=armhf      ;;
-            armv5te-*)       ARCH=armel      ;;
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;
@@ -86,12 +77,11 @@ jobs:
           export RELEASE=1
           # Server: deb + rpm only.
           # Client: deb + rpm + archlinux — except targets with no Arch Linux support:
-          #   s390x (no Arch port), i686 (Arch dropped 32-bit), armel (outside Arch ARM scope)
+          #   s390x (no Arch port), i686 (Arch dropped 32-bit)
           if [[ "${{ matrix.app }}" == "server" ]]; then
             PACKAGERS="deb rpm"
           elif [[ "${{ matrix.target }}" == s390x-* ]] || \
-               [[ "${{ matrix.target }}" == i686-* ]] || \
-               [[ "${{ matrix.target }}" == armv5te-* ]]; then
+               [[ "${{ matrix.target }}" == i686-* ]]; then
             PACKAGERS="deb rpm"
           else
             PACKAGERS="deb rpm archlinux"
