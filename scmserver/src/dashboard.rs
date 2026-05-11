@@ -23,9 +23,12 @@ pub struct DashboardParams {
 
 
 // dashboard
-pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>) 
+// Role: Viewer (minimum). No explicit authorize() call is needed here because
+// AuthSession already guarantees the user is authenticated, and every authenticated
+// user has at least the Viewer role — the user creation form restricts roles to
+// admin/editor/runner/viewer, and UserRole::from() defaults unknown values to Viewer.
+pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
     -> impl IntoResponse {
-
 
     let range: &str = match params.range.as_deref() {
         Some("yearly") => "yearly",
