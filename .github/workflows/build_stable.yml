@@ -12,7 +12,7 @@ jobs:
 
   # ── LINUX ─────────────────────────────────────────────────────────────────
   # Client: x86_64 / aarch64 / armv7 / riscv64 / ppc64le  →  deb + rpm + archlinux
-  # Client: s390x / i686                                   →  deb + rpm only
+  # Client: s390x / i686 / loongarch64                     →  deb + rpm only
   # Server: x86_64 / aarch64 only                          →  deb + rpm only
   # NOTE: armel (armv5te) is blocked — ring's x25519 assembly uses GNU two-register
   #       strd/ldrd syntax that LLVM's integrated assembler rejects. Needs fix in ring.
@@ -31,6 +31,7 @@ jobs:
           - powerpc64le-unknown-linux-musl
           - s390x-unknown-linux-gnu
           - i686-unknown-linux-musl
+          - loongarch64-unknown-linux-musl
         exclude:
           - app: server
             target: armv7-unknown-linux-musleabihf
@@ -42,6 +43,8 @@ jobs:
             target: s390x-unknown-linux-gnu
           - app: server
             target: i686-unknown-linux-musl
+          - app: server
+            target: loongarch64-unknown-linux-musl
     steps:
       - uses: actions/checkout@v4
 
@@ -72,6 +75,7 @@ jobs:
             riscv64gc-*)     ARCH=riscv64    ;;
             powerpc64le-*)   ARCH=ppc64le    ;;
             s390x-*)         ARCH=s390x      ;;
+            loongarch64-*)   ARCH=loong64    ;;
             i686-*)          ARCH=386        ;;
           esac
           export ARCH
@@ -83,7 +87,8 @@ jobs:
           if [[ "${{ matrix.app }}" == "server" ]]; then
             PACKAGERS="deb rpm"
           elif [[ "${{ matrix.target }}" == s390x-* ]] || \
-               [[ "${{ matrix.target }}" == i686-* ]]; then
+               [[ "${{ matrix.target }}" == i686-* ]] || \
+               [[ "${{ matrix.target }}" == loongarch64-* ]]; then
             PACKAGERS="deb rpm"
           else
             PACKAGERS="deb rpm archlinux"
