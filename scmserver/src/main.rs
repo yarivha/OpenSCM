@@ -8,10 +8,12 @@ use tokio::sync::mpsc;
 
 // Importing the public items from our own library (scmserver)
 use scmserver::{
-    AppState, 
-    create_core_router, 
-    init_tera, 
+    AppState,
+    DbBackend,
+    create_core_router,
+    init_tera,
     check_required_directories,
+    set_db_backend,
     config::{Config, private_key_path, db_path},
     schema::run_migrations,
     scheduler::{start_background_scheduler, recalculate_current_compliance},
@@ -107,8 +109,9 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // (triggered by the admin clicking "Complete Setup").  On subsequent starts
     // run_migrations() is sufficient.
 
-    // Register SQLite (and any future) drivers for AnyPool.
+    // CE is always SQLite — set the backend so db_compat helpers emit correct SQL.
     sqlx::any::install_default_drivers();
+    set_db_backend(DbBackend::Sqlite);
 
     // AnyPool's URL connect doesn't expose create_if_missing, so we pre-create
     // the file ourselves.  check_required_directories() already ensured the
@@ -126,14 +129,13 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .await?;
 
     // Apply SQLite pragmas for performance / safety.
-    // (These are no-ops on non-SQLite backends.)
     sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await.ok();
     sqlx::query("PRAGMA synchronous = NORMAL").execute(&pool).await.ok();
     sqlx::query("PRAGMA busy_timeout = 5000").execute(&pool).await.ok();
 
     // Detect real initialisation: schema_info table exists and has a row.
     let db_initialized: bool = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_info'"
+        scmserver::db_compat::schema_info_exists_sql()
     )
     .fetch_one(&pool)
     .await

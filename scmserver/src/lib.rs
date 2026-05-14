@@ -22,6 +22,7 @@ pub mod users;
 pub mod settings;
 pub mod scheduler;
 pub mod install;
+pub mod db_compat;
 
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
@@ -64,6 +65,31 @@ pub fn set_app_edition(edition: &str) {
 pub fn app_edition() -> &'static str {
     APP_EDITION.get().map(|s| s.as_str()).unwrap_or("Community Edition")
 }
+// ─────────────────────────────────────────────────────────────────────────────
+// DbBackend — active database backend, set once at binary startup.
+// Shared by db_compat helpers so they can emit the right SQL dialect.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum DbBackend {
+    Sqlite,
+    Mysql,
+    Postgres,
+}
+
+static DB_BACKEND: OnceLock<DbBackend> = OnceLock::new();
+
+/// Set the active DB backend. Must be called once at startup before any
+/// db_compat helper is used. Subsequent calls are silently ignored.
+pub fn set_db_backend(backend: DbBackend) {
+    let _ = DB_BACKEND.set(backend);
+}
+
+/// Returns the active DB backend. Defaults to SQLite if set_db_backend was
+/// never called (e.g. in unit tests or the CE binary before the call was added).
+pub fn get_db_backend() -> DbBackend {
+    *DB_BACKEND.get().unwrap_or(&DbBackend::Sqlite)
+}
+
 use axum::{Router, Extension, response::IntoResponse, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
 use axum::middleware;
 use tera::Tera;

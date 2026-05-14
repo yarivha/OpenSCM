@@ -82,7 +82,14 @@ pub struct ServerConfig {
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
 pub struct DatabaseConfig {
+    /// SQLite file path (used when db_type = "sqlite", the default).
     pub path: String,
+    /// Backend selector: "sqlite" (default), "mysql", or "postgres".
+    pub db_type: Option<String>,
+    /// Full MySQL connection URL (used when db_type = "mysql").
+    pub mysql_url: Option<String>,
+    /// Full PostgreSQL connection URL (used when db_type = "postgres").
+    pub postgres_url: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -102,6 +109,9 @@ impl Default for Config {
             },
             database: DatabaseConfig {
                 path: DB_PATH.to_string(),
+                db_type: None,
+                mysql_url: None,
+                postgres_url: None,
             },
             key: KeyConfig {
                 public_key: Some(PUBLIC_KEY_PATH.to_string()),
