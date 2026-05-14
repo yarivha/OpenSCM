@@ -12,7 +12,7 @@ use axum::http::request::Parts;
 use axum::http::StatusCode;
 use std::sync::Arc;
 use std::future::Future;
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use sqlx::Row;
 use bcrypt::verify;
 use serde::Deserialize;
@@ -131,7 +131,7 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn login_submit(
     jar: SignedCookieJar,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Form(form): Form<LoginForm>,
 ) -> (SignedCookieJar, Redirect) {
 

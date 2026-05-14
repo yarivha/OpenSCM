@@ -1,11 +1,9 @@
-use std::{sync::{Arc, atomic::{AtomicBool}}, str::FromStr, net::SocketAddr, fs, error::Error};
+use std::{sync::{Arc, atomic::{AtomicBool}}, net::SocketAddr, fs, error::Error};
 use tracing::{info, error, debug};
 use tracing_subscriber::{fmt, EnvFilter, registry, layer::SubscriberExt, util::SubscriberInitExt, reload};
 use base64::{Engine as _, engine::general_purpose};
 use hkdf::Hkdf;
 use sha2::Sha256;
-use sqlx::sqlite::{SqliteConnectOptions, SqliteJournalMode, SqlitePoolOptions, SqliteSynchronous};
-use std::time::Duration;
 use tokio::sync::mpsc;
 
 // Importing the public items from our own library (scmserver)
@@ -108,17 +106,21 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Rule: initialize_database() is ONLY ever called from the /install handler
     // (triggered by the admin clicking "Complete Setup").  On subsequent starts
     // run_migrations() is sufficient.
-    let database_url = format!("sqlite://{}", db_path());
-    let options = SqliteConnectOptions::from_str(&database_url)?
-        .create_if_missing(true)
-        .journal_mode(SqliteJournalMode::Wal)        // readers never blocked by writers
-        .synchronous(SqliteSynchronous::Normal)      // safe + faster than Full
-        .busy_timeout(Duration::from_secs(5));       // queue writes instead of immediate error
 
-    let pool = SqlitePoolOptions::new()
+    // Register SQLite (and any future) drivers for AnyPool.
+    sqlx::any::install_default_drivers();
+
+    let database_url = format!("sqlite://{}", db_path());
+    let pool: sqlx::AnyPool = sqlx::pool::PoolOptions::<sqlx::Any>::new()
         .max_connections(5)
-        .connect_with(options)
+        .connect(&database_url)
         .await?;
+
+    // Apply SQLite pragmas for performance / safety.
+    // (These are no-ops on non-SQLite backends.)
+    sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await.ok();
+    sqlx::query("PRAGMA synchronous = NORMAL").execute(&pool).await.ok();
+    sqlx::query("PRAGMA busy_timeout = 5000").execute(&pool).await.ok();
 
     // Detect real initialisation: schema_info table exists and has a row.
     let db_initialized: bool = sqlx::query_scalar::<_, i64>(

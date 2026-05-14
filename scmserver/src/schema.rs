@@ -5,7 +5,7 @@
 // install. run_migrations applies version-gated ALTER TABLE / data fixes to
 // existing databases without re-running the full schema.
 // =============================================================================
-use sqlx::SqlitePool;
+use sqlx::AnyPool;
 use sqlx::Row;
 use tracing::info;
 use ed25519_dalek::SigningKey;
@@ -17,7 +17,7 @@ use base64::{engine::general_purpose, Engine as _};
 // Creates all tables, indexes, triggers, and seed data for a fresh install.
 // Stamps schema_info.version = 9 so run_migrations skips all steps.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
     info!("Init Database......");
 
@@ -602,7 +602,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // Applies incremental schema migrations (v0→v9) to existing installations.
 // Each step is guarded by a version check so it runs exactly once.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // Create schema_info if it doesn't exist
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_info (

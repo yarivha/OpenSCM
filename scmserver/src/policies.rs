@@ -10,7 +10,7 @@ use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
 use tokio::sync::mpsc;
 use tera::{Tera, Context};
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use sqlx::Row;
 use std::sync::Arc;
 use urlencoding;
@@ -42,7 +42,7 @@ use crate::handlers::{render_template, parse_form_data, normalize_status};
 pub async fn policies(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -159,7 +159,7 @@ pub async fn policies(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_add(
     auth: AuthSession,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -228,7 +228,7 @@ pub async fn policies_add(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_add_save(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     RawForm(raw_form): RawForm,
 ) -> impl IntoResponse {
 
@@ -298,7 +298,7 @@ pub async fn policies_add_save(
     .await;
 
     let policy_id = match result {
-        Ok(res) => res.last_insert_rowid(),
+        Ok(res) => res.last_insert_id().unwrap_or(0),
         Err(e) => {
             let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
             tx.rollback().await.ok();
@@ -407,7 +407,7 @@ pub async fn policies_add_save(
 pub async fn policies_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -533,7 +533,7 @@ pub async fn policies_edit(
 pub async fn policies_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     RawForm(raw_form): RawForm,
 ) -> impl IntoResponse {
@@ -728,7 +728,7 @@ pub async fn policies_edit_save(
 pub async fn policies_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
@@ -779,7 +779,7 @@ pub async fn policies_delete(
 pub async fn policies_run(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
@@ -809,7 +809,7 @@ pub async fn policies_report(
     auth: AuthSession,
     Path(id): Path<i32>,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -932,7 +932,7 @@ fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
 pub async fn policies_report_download(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
@@ -1156,7 +1156,7 @@ pub async fn policies_report_download(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn execute_policy_run_logic(
     id: i32,
-    pool: &SqlitePool,
+    pool: &AnyPool,
     tenant_id: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(r#"

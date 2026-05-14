@@ -10,7 +10,7 @@ use axum::http::{StatusCode, header};
 use axum::body::Body;
 use axum::Extension;
 use tera::{Tera, Context};
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use std::collections::HashMap;
 use urlencoding::decode;
 use tracing::{info,error};
@@ -29,7 +29,7 @@ use crate::models::{Notification, UserRole, AuthSession};
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn render_template(
     tera: &Tera,
-    pool: Option<&SqlitePool>,
+    pool: Option<&AnyPool>,
     template_name: &str,
     mut context: Context,
     auth: Option<AuthSession>,
@@ -189,7 +189,7 @@ pub fn parse_form_data(raw_string: &str) -> HashMap<String, Vec<String>> {
 // Inserts a notification row for a specific user in the notify table.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn add_notification(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     tenant_id: &str,
     n_type: &str,
     owner_id: i32,
@@ -223,7 +223,7 @@ pub async fn add_notification(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn clear_notifications(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> Redirect {
     let result = sqlx::query("DELETE FROM notify WHERE owner_id = ? AND tenant_id = ?")
         .bind(&auth.userid)

@@ -40,7 +40,7 @@ pub async fn install_get(
 // Role: Public
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn install_post(
-    Extension(pool): Extension<sqlx::SqlitePool>,
+    Extension(pool): Extension<sqlx::AnyPool>,
     Extension(tera): Extension<Arc<Tera>>,
     Extension(is_initialized): Extension<Arc<AtomicBool>>,
     axum::extract::Form(form): axum::extract::Form<HashMap<String, String>>,

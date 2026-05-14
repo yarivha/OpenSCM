@@ -78,7 +78,7 @@ pub static STATIC_FILES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/st
 // This struct is the "glue" between your Core logic and the Enterprise wrapper.
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: sqlx::SqlitePool,
+    pub pool: sqlx::AnyPool,
     pub tera: Arc<Tera>,
     pub config: Arc<config::Config>,
     pub sync_tx: tokio::sync::mpsc::Sender<()>,

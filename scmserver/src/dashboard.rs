@@ -10,7 +10,7 @@ use axum::response::IntoResponse;
 use axum::http::StatusCode;
 use axum::extract::{Extension, Query};
 use tera::{Tera, Context};
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use std::sync::Arc;
 use tracing::error;
 
@@ -35,7 +35,7 @@ pub struct DashboardParams {
 // Render the main dashboard: stats, top failures, compliance trend chart.
 // Role: Viewer (any authenticated user; no explicit authorize() call needed)
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>, pool: Extension<SqlitePool>, tera: Extension<Arc<Tera>>)
+pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>, pool: Extension<AnyPool>, tera: Extension<Arc<Tera>>)
     -> impl IntoResponse {
 
     let range: &str = match params.range.as_deref() {

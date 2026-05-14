@@ -8,7 +8,7 @@
 
 use axum::{extract::Extension, http::StatusCode, response::IntoResponse, Json};
 use tokio::sync::mpsc;
-use sqlx::{SqlitePool, QueryBuilder};
+use sqlx::{AnyPool, QueryBuilder};
 use std::collections::HashMap;
 use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
@@ -35,7 +35,7 @@ struct AuthCheck {
 // Signs a JSON payload with the tenant's active Ed25519 private key.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn sign_response(
-    pool: &SqlitePool,
+    pool: &AnyPool,
     tenant_id: &str,
     payload: serde_json::Value,
 ) -> Result<SignedResponse, Box<dyn std::error::Error>> {
@@ -132,7 +132,7 @@ fn verify_signature(
 // Returns pending test commands for approved agents.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn send(
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Json(signed_req): Json<SignedRequest>,
 ) -> impl IntoResponse {
     // Parse the typed payload from the raw bytes.
@@ -242,7 +242,7 @@ pub async fn send(
 
         match res {
             Ok(r) => {
-                let new_id = r.last_insert_rowid();
+                let new_id = r.last_insert_id().unwrap_or(0);
                 info!(
                     "Agent '{}' registered with ID {} (pending approval).",
                     payload.hostname, new_id
@@ -548,7 +548,7 @@ pub async fn send(
 // Stores a single PASS/FAIL/NA compliance result from an approved agent.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn receive_result(
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     Json(signed_req): Json<SignedResult>,
 ) -> impl IntoResponse {

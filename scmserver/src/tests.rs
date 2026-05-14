@@ -9,7 +9,7 @@ use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path};
 use tokio::sync::mpsc;
 use tera::{Tera, Context};
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use sqlx::Row;
 use std::sync::Arc;
 use std::collections::HashMap;
@@ -28,7 +28,7 @@ use crate::handlers::{render_template, parse_form_data};
 // populate test-condition form dropdowns.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn fetch_lookup_tables(
-    pool: &SqlitePool,
+    pool: &AnyPool,
 ) -> Result<(Vec<Element>, Vec<SElement>, Vec<Condition>), sqlx::Error> {
     let element_rows = sqlx::query("SELECT id, name FROM elements")
         .fetch_all(pool).await?;
@@ -163,7 +163,7 @@ fn build_tests_with_conditions(
 pub async fn tests(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -232,7 +232,7 @@ pub async fn tests(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_add(
     auth: AuthSession,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -266,7 +266,7 @@ pub async fn tests_add(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_add_save(
     auth: AuthSession,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -319,7 +319,7 @@ pub async fn tests_add_save(
     .await;
 
     let test_id = match result {
-        Ok(r) => r.last_insert_rowid(),
+        Ok(r) => r.last_insert_id().unwrap_or(0),
         Err(e) => {
             let encoded = urlencoding::encode(&format!("Database insert error: {}", e)).to_string();
             tx.rollback().await.ok();
@@ -394,7 +394,7 @@ pub async fn tests_add_save(
 pub async fn tests_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
@@ -426,7 +426,7 @@ pub async fn tests_delete(
 pub async fn tests_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -498,7 +498,7 @@ pub async fn tests_edit(
 pub async fn tests_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
@@ -634,7 +634,7 @@ pub async fn tests_edit_save(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_bulk_delete(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
@@ -683,7 +683,7 @@ pub async fn tests_bulk_delete(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn tests_bulk_add_policy(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 

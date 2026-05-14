@@ -11,7 +11,7 @@ use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
 use bytes::Bytes;
 use tera::{Tera, Context};
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use sqlx::Row;
 use std::sync::Arc;
 use std::collections::BTreeMap;
@@ -41,7 +41,7 @@ use crate::systems::fetch_system_report_data;
 pub async fn reports(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -121,7 +121,7 @@ pub async fn reports(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn save_policy_report_logic(
     id: i64,
-    pool: &SqlitePool,
+    pool: &AnyPool,
     tenant_id: &str,
     submitter_name: &str,
 ) -> Result<(), sqlx::Error> {
@@ -241,7 +241,7 @@ pub async fn save_policy_report_logic(
 pub async fn reports_save(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
@@ -270,7 +270,7 @@ pub async fn reports_save(
 pub async fn reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -352,7 +352,7 @@ pub async fn reports_view(
 pub async fn reports_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -392,7 +392,7 @@ fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
 pub async fn reports_download(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
@@ -660,7 +660,7 @@ pub async fn reports_download(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports_bulk_delete(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -719,7 +719,7 @@ pub async fn reports_bulk_delete(
 pub async fn system_report_save(
     auth: AuthSession,
     Path(system_id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
@@ -778,7 +778,7 @@ pub async fn system_report_save(
 pub async fn system_reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -859,7 +859,7 @@ pub async fn system_reports_view(
 pub async fn system_reports_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -888,7 +888,7 @@ pub async fn system_reports_delete(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_reports_bulk_delete(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -1082,7 +1082,7 @@ fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Ve
 pub async fn system_reports_download(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
@@ -1150,7 +1150,7 @@ pub async fn system_reports_download(
 pub async fn system_report_live_download(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {

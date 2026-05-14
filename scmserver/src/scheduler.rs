@@ -7,7 +7,7 @@
 //   Task C — checks GitHub for new releases once per hour.
 // =============================================================================
 
-use sqlx::{SqlitePool, Row};
+use sqlx::{AnyPool, Row};
 use tokio::time::{self, Duration};
 use chrono::{Utc, Timelike};
 use tracing::{info, error};
@@ -42,7 +42,7 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
 // Helper: get_policy_owners
 // Returns all admin user IDs for a tenant (used to send schedule notifications).
 // ─────────────────────────────────────────────────────────────────────────────
-async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
+async fn get_policy_owners(pool: &AnyPool, tenant_id: &str) -> Vec<i32> {
     sqlx::query(
         "SELECT id FROM users WHERE tenant_id = ? AND role = 'admin'",
     )
@@ -61,7 +61,7 @@ async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
 // Purges ghost results, then recalculates compliance scores for all tests,
 // systems, and policies across all tenants in a single transaction.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn recalculate_current_compliance(pool: &AnyPool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation (Active Systems Only)...");
 
     let mut tx = pool.begin().await?;
@@ -264,7 +264,7 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
 // Helper: record_compliance_history
 // Inserts one compliance_history row per tenant with current avg scores.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+pub async fn record_compliance_history(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
     // Get all active tenants
     let tenants: Vec<String> = sqlx::query_scalar(
@@ -349,7 +349,7 @@ pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Er
 // Helper: start_background_scheduler
 // Spawns startup compliance sync and the 60-second main heartbeat loop.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn start_background_scheduler(pool: SqlitePool) {
+pub async fn start_background_scheduler(pool: AnyPool) {
     // Startup compliance sync
     let startup_pool = pool.clone();
     tokio::spawn(async move {
@@ -480,7 +480,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 // Helper: check_for_updates
 // Queries GitHub releases API; notifies admins if a newer version is available.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn check_for_updates(pool: &SqlitePool) {
+async fn check_for_updates(pool: &AnyPool) {
     let current = env!("CARGO_PKG_VERSION");
 
     let client = match Client::builder()

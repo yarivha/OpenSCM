@@ -11,7 +11,7 @@ use axum::extract::RawForm;
 use axum::http::StatusCode;
 use axum::Json;
 use tera::{Tera, Context};
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use sqlx::Row;
 use std::sync::Arc;
 use tracing::{info, error};
@@ -45,7 +45,7 @@ pub struct Settings {
 pub async fn settings(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
@@ -127,7 +127,7 @@ pub async fn settings(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn settings_save(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
     RawForm(raw_form): RawForm,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
@@ -238,7 +238,7 @@ pub struct TestEmailResponse {
 
 pub async fn settings_test_email(
     auth: AuthSession,
-    Extension(pool): Extension<SqlitePool>,
+    Extension(pool): Extension<AnyPool>,
 ) -> (StatusCode, Json<TestEmailResponse>) {
     if auth::authorize(&auth.role, UserRole::Superuser).is_some() {
         return (StatusCode::FORBIDDEN, Json(TestEmailResponse {
@@ -392,7 +392,7 @@ pub struct ResetForm {
 
 pub async fn settings_reset(
     auth: AuthSession,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     Form(form): Form<ResetForm>,
 ) -> impl IntoResponse {
     // Superuser only

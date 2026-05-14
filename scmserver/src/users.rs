@@ -8,7 +8,7 @@
 use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path, Form};
 use tera::{Tera, Context};
-use sqlx::sqlite::SqlitePool;
+use sqlx::AnyPool;
 use sqlx::Row;
 use std::sync::Arc;
 use urlencoding;
@@ -30,7 +30,7 @@ use crate::handlers::{render_template, parse_form_data};
 pub async fn users(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -89,7 +89,7 @@ pub async fn users(
 pub async fn users_add(
     Query(query): Query<ErrorQuery>,
     auth: AuthSession,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -118,7 +118,7 @@ pub async fn users_add(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn users_add_save(
     auth: AuthSession,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -246,7 +246,7 @@ pub async fn users_add_save(
 pub async fn users_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
@@ -291,7 +291,7 @@ pub async fn users_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
     Query(params): Query<UserEditParams>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -360,7 +360,7 @@ pub async fn users_edit(
 pub async fn users_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -494,7 +494,7 @@ pub struct ChangePasswordForm {
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn change_password(
     auth: AuthSession,
-    pool: Extension<SqlitePool>,
+    pool: Extension<AnyPool>,
     Path(user_id): Path<i64>,
     Form(payload): Form<ChangePasswordForm>,
 ) -> impl IntoResponse {
