@@ -26,10 +26,14 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     info!("Init Database......");
 
     // Tenants Table (no AUTOINCREMENT — TEXT PK)
+    // status and plan are EE/SaaS fields present in base schema so all editions
+    // share an identical table structure.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tenants (
-            id TEXT PRIMARY KEY,
-            name TEXT NOT NULL UNIQUE,
+            id         TEXT    PRIMARY KEY,
+            name       TEXT    NOT NULL UNIQUE,
+            status     TEXT    NOT NULL DEFAULT 'active',
+            plan       TEXT    NOT NULL DEFAULT 'free',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
     )
@@ -415,6 +419,51 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_reports_tenant_date ON reports (tenant_id, submission_date)")
         .execute(pool).await?;
 
+    // Email Verification Tokens (used by SaaS registration; harmless in CE/EE)
+    sqlx::query(&db_compat::adapt_sql(
+        "CREATE TABLE IF NOT EXISTS email_verifications (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            tenant_id  TEXT    NOT NULL,
+            token      TEXT    NOT NULL UNIQUE,
+            expires_at TEXT    NOT NULL,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )",
+    ))
+    .execute(pool).await?;
+
+    // Password Reset Tokens (used by SaaS; harmless in CE/EE)
+    sqlx::query(&db_compat::adapt_sql(
+        "CREATE TABLE IF NOT EXISTS password_resets (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            token      TEXT    NOT NULL UNIQUE,
+            expires_at TEXT    NOT NULL,
+            used       INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )",
+    ))
+    .execute(pool).await?;
+
+    // Plan Limits (used by SaaS to enforce per-plan resource caps; harmless in CE/EE)
+    // max_count = 0 means unlimited
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS plan_limits (
+            plan      TEXT    NOT NULL,
+            resource  TEXT    NOT NULL,
+            max_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (plan, resource)
+        )",
+    )
+    .execute(pool).await?;
+
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_email_verif_token ON email_verifications (token)")
+        .execute(pool).await.ok();
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token)")
+        .execute(pool).await.ok();
+
     // ── SEED DATA ─────────────────────────────────────────────────────────────
 
     // Default tenant
@@ -443,6 +492,35 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     ))
     .execute(pool)
     .await?;
+
+    // Plan limits seed data (SaaS uses these; CE/EE ignore the table)
+    for (plan, resource, max_count) in &[
+        ("free",       "systems",   5i64),
+        ("free",       "groups",    3),
+        ("free",       "policies",  3),
+        ("free",       "reports",   10),
+        ("starter",    "systems",   25),
+        ("starter",    "groups",    10),
+        ("starter",    "policies",  10),
+        ("starter",    "reports",   100),
+        ("pro",        "systems",   100),
+        ("pro",        "groups",    50),
+        ("pro",        "policies",  50),
+        ("pro",        "reports",   500),
+        ("enterprise", "systems",   0),
+        ("enterprise", "groups",    0),
+        ("enterprise", "policies",  0),
+        ("enterprise", "reports",   0),
+    ] {
+        let _ = sqlx::query(&db_compat::adapt_sql(
+            "INSERT OR IGNORE INTO plan_limits (plan, resource, max_count) VALUES (?, ?, ?)",
+        ))
+        .bind(plan)
+        .bind(resource)
+        .bind(max_count)
+        .execute(pool)
+        .await;
+    }
 
     // Elements
     for name in &[
