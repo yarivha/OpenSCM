@@ -4,6 +4,33 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.3.0] - 2026-05-14
+
+### Added
+- **Multi-database backend support** — CE now uses `sqlx::AnyPool` internally, laying the groundwork for MySQL and PostgreSQL in addition to SQLite. A new `DbBackend` enum and `set_db_backend()` / `get_db_backend()` globals are set once at startup; the new `db_compat` module provides backend-agnostic SQL helpers (`schema_info_exists_sql`, `column_exists`). **No configuration change needed for existing SQLite installs.**
+- **`db_compat` module** — backend-agnostic schema-introspection helpers used by EE/SaaS migrations (`column_exists`) and fresh-install detection (`schema_info_exists_sql`), each emitting the correct SQL dialect for SQLite, MySQL, or PostgreSQL.
+- **`DatabaseConfig` multi-backend fields** — `db_type`, `mysql_url`, and `postgres_url` added to the server config struct so EE/SaaS can target MySQL or PostgreSQL without code changes.
+
+### Fixed
+- **Bootstrap admin created with wrong role on fresh CE install** — the initial admin user was assigned role `admin` instead of `superuser`, leaving no superuser on a brand-new CE installation. Fixed to assign `superuser` at install time.
+- **All-NA policy verdict shown as FAILED** — when every test result for a system was NA, both the live policy report and archived policy report showed FAILED / NON-COMPLIANT. Both views now show a grey "NOT APPLICABLE" state, consistent with the existing system-level report behaviour.
+- **Archived policy reports failed to load after schema update** — reports saved before `pass_count` / `fail_count` were added to `SystemReport` crashed with `missing field` on deserialization. Fixed with `#[serde(default)]` on both fields plus a backfill step that recomputes counts from the stored results vec.
+- **Agent re-registration loop after server DB reset** — the `INSERT … SELECT last_insert_rowid()` sequence was not atomic through AnyPool, causing the rowid to always return 0 and the agent to re-register on every heartbeat. Wrapped in a transaction to make it atomic.
+- **Stale server public key caused permanent signature verification failure** — after a server DB reset (new signing keys), clients holding the old cached server public key failed all signature checks indefinitely. The client now drops the stale key file on first verification failure and re-handshakes on the next heartbeat.
+- **Non-deterministic wire format broke Ed25519 signatures** — `#[serde(flatten)]` on `TestWithConditions` produced inconsistent JSON key ordering when serialized for signing. Replaced with a flat `TestPayload` struct for deterministic serialization.
+- **AnyPool DATETIME decode error** — AnyPool could not decode `DATETIME` columns directly. All affected queries now `CAST` datetime columns to `TEXT` before binding to Rust `String` fields.
+- **`PolicySchedule.enabled` Bool type mismatch** — AnyPool maps `BOOLEAN`/`INTEGER` to `BIGINT`; changed the field from `bool` to `i64` and added `CAST(enabled AS INTEGER)` in all schedule queries. Tera templates treat `0`/`1` as falsy/truthy.
+- **`SELECT EXISTS(…)` returned BIGINT not bool** — `query_scalar::<_, bool>` for existence checks failed at runtime. Changed to `i64` with `.unwrap_or(0) > 0`.
+- **`email_verified` column referenced in CE login query** — CE's login handler referenced a SaaS-only column, causing SQL errors. Column reference removed from CE.
+- **Severity prefix cluttered test selection in Add Policy form** — removed the `[SEVERITY]` prefix from test options in the dual-listbox so only the test name is shown.
+- **macOS client config file path incorrect** — fixed the config file lookup path on macOS.
+
+### Internal
+- **EE AnyPool migration** — EE `main.rs` now sets `DbBackend` at startup and calls `set_db_backend()`. `run_ee_migrations` uses `db_compat::column_exists` for backend-agnostic schema checks.
+- **SaaS AnyPool migration** — all SaaS source files (`admin.rs`, `auth_email.rs`, `email.rs`, `plan_enforce.rs`, `register.rs`, `schema.rs`, `support.rs`, `main.rs`) migrated from `SqlitePool` to `AnyPool`. SaaS remains SQLite-only but is now type-compatible with the shared `AppState`.
+
+---
+
 ## [0.2.8] - 2026-05-11
 
 ### Added
