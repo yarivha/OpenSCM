@@ -27,6 +27,18 @@ pub mod db_compat;
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
 
+// ─────────────────────────────────────────────────────────────────────────────
+// PostInstallFn — optional async hook called by install_post after the CE
+// schema and migrations have completed.  EE/SaaS register this via
+// `.layer(Extension(hook))` on the app router so that their own migrations
+// (run_ee_migrations, run_saas_schema) run inside the same process on fresh
+// installs, not only on the next restart.
+// ─────────────────────────────────────────────────────────────────────────────
+pub type PostInstallFn = Arc<
+    dyn Fn(sqlx::AnyPool) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+    + Send + Sync
+>;
+
 // Version registry — set once at binary startup so EE/SaaS show their own version.
 static APP_VERSION: OnceLock<String> = OnceLock::new();
 

@@ -15,6 +15,7 @@ use tracing::error;
 use crate::schema::{initialize_database, run_migrations};
 use crate::scheduler::start_background_scheduler;
 use crate::db_compat;
+use crate::PostInstallFn;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // GET /install
@@ -44,6 +45,7 @@ pub async fn install_post(
     Extension(pool): Extension<sqlx::AnyPool>,
     Extension(tera): Extension<Arc<Tera>>,
     Extension(is_initialized): Extension<Arc<AtomicBool>>,
+    post_install: Option<Extension<PostInstallFn>>,
     axum::extract::Form(form): axum::extract::Form<HashMap<String, String>>,
 ) -> impl IntoResponse {
     let password     = form.get("password").map(|s| s.trim()).unwrap_or("");
@@ -117,9 +119,14 @@ pub async fn install_post(
         };
     }
 
-    // --- Run migrations (fresh DB starts at v4, so this is effectively a no-op) ---
+    // --- Run migrations (fresh DB starts at v9, so this is effectively a no-op) ---
     if let Err(e) = run_migrations(&pool).await {
         error!("install: run_migrations failed: {}", e);
+    }
+
+    // --- Run EE/SaaS post-install hook if registered (adds EE/SaaS-specific schema) ---
+    if let Some(Extension(hook)) = post_install {
+        hook(pool.clone()).await;
     }
 
     // --- Start background scheduler ---
