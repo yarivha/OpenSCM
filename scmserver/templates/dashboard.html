@@ -51,28 +51,28 @@
       <div class="row">
         <div class="col-lg-3 col-6">
           <div class="small-box bg-info shadow-sm">
-            <div class="inner"><h3>{{ systems_count }}</h3><p>Active Inventory</p></div>
+            <div class="inner"><h3>{{ systems_count }}</h3><p>Active Inventory</p>{% if systems_limit_text %}<small style="opacity:0.75;font-size:0.72rem">of {{ systems_limit_text }}</small>{% endif %}</div>
             <div class="icon"><i class="fas fa-server"></i></div>
             <a href="/systems" class="small-box-footer">View Systems <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
         <div class="col-lg-3 col-6">
           <div class="small-box {% if pending_count > 0 %}bg-danger{% else %}bg-success{% endif %} shadow-sm">
-            <div class="inner"><h3>{{ pending_count }}</h3><p>Pending Enrollment</p></div>
+            <div class="inner"><h3>{{ pending_count }}</h3><p>Pending Enrollment</p>{% if systems_limit_text %}<small style="opacity:0;font-size:0.72rem;">&nbsp;</small>{% endif %}</div>
             <div class="icon"><i class="fas fa-user-plus"></i></div>
             <a href="/systems?filter=pending" class="small-box-footer">Review Queue <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
         <div class="col-lg-3 col-6">
           <div class="small-box bg-warning shadow-sm">
-            <div class="inner"><h3>{{ policies_count }}</h3><p>Active Policies</p></div>
+            <div class="inner"><h3>{{ policies_count }}</h3><p>Active Policies</p>{% if policies_limit_text %}<small style="opacity:0.75;font-size:0.72rem">of {{ policies_limit_text }}</small>{% endif %}</div>
             <div class="icon"><i class="fas fa-shield-alt"></i></div>
             <a href="/policies" class="small-box-footer">Manage Policies <i class="fas fa-arrow-circle-right"></i></a>
           </div>
         </div>
         <div class="col-lg-3 col-6">
           <div class="small-box bg-primary shadow-sm">
-            <div class="inner"><h3>{{ reports_count }}</h3><p>Scan Reports</p></div>
+            <div class="inner"><h3>{{ reports_count }}</h3><p>Scan Reports</p>{% if reports_limit_text %}<small style="opacity:0.75;font-size:0.72rem">of {{ reports_limit_text }}</small>{% endif %}</div>
             <div class="icon"><i class="fas fa-file-contract"></i></div>
             <a href="/reports" class="small-box-footer">View History <i class="fas fa-arrow-circle-right"></i></a>
           </div>
