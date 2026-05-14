@@ -433,24 +433,19 @@ pub async fn settings_reset(
             // Top-level entities
             format!("DELETE FROM policies           WHERE tenant_id = '{tenant}'"),
             format!("DELETE FROM tests              WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM groups             WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM system_groups      WHERE tenant_id = '{tenant}'"),
             format!("DELETE FROM systems            WHERE tenant_id = '{tenant}'"),
             // Notifications
             format!("DELETE FROM notify             WHERE tenant_id = '{tenant}'"),
+            // Auth tokens (base schema — present in all editions)
+            format!("DELETE FROM email_verifications WHERE tenant_id = '{tenant}'"),
+            format!("DELETE FROM password_resets     WHERE user_id IN (SELECT id FROM users WHERE tenant_id = '{tenant}')"),
             // Users — keep bootstrap admin (id=1, default tenant)
             format!("DELETE FROM users WHERE tenant_id = '{tenant}' AND NOT (id = 1 AND tenant_id = 'default')"),
             // Tenant keys — keep only default tenant keys
             "DELETE FROM tenant_keys WHERE tenant_id != 'default'".to_string(),
         ] {
             sqlx::query(sql).execute(&mut *tx).await?;
-        }
-
-        // SaaS-only tables — ignore "no such table" errors gracefully
-        for sql in &[
-            format!("DELETE FROM email_verifications   WHERE tenant_id = '{tenant}'"),
-            format!("DELETE FROM password_reset_tokens WHERE tenant_id = '{tenant}'"),
-        ] {
-            let _ = sqlx::query(sql).execute(&mut *tx).await;
         }
 
         tx.commit().await
