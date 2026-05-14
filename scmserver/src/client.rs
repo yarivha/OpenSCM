@@ -233,18 +233,27 @@ pub async fn send(
                 Ok(Some(row)) => {
                     let existing_id: i64 = row.get("id");
                     let existing_status: String = row.try_get("status").unwrap_or_else(|_| "pending".into());
-                    info!(
-                        "Agent '{}' re-registration: key already exists as system ID {} (status: {})",
+                    debug!(
+                        "Agent '{}' re-registration: returning existing system ID {} (status: {})",
                         payload.hostname, existing_id, existing_status
                     );
-                    response_data = serde_json::json!({
+                    let mut rereg_data = serde_json::json!({
                         "status": existing_status,
                         "id": existing_id,
                         "tenant_id": tenant_id,
                         "command": "REGISTER"
                     });
-                    // Fall through to return response_data at the end
-                    return Json(response_data).into_response();
+                    // Include server public key so the client can verify signatures
+                    if let Ok(Some(pub_key)) = sqlx::query_scalar::<_, String>(
+                        "SELECT public_key FROM tenant_keys WHERE tenant_id = ? AND is_active = 1",
+                    )
+                    .bind(tenant_id)
+                    .fetch_optional(&pool)
+                    .await
+                    {
+                        rereg_data["server_public_key"] = serde_json::json!(pub_key);
+                    }
+                    return Json(rereg_data).into_response();
                 }
                 Ok(None) => { /* not found — proceed with normal insert */ }
                 Err(e) => {
