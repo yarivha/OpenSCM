@@ -16,6 +16,7 @@ use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
 
 use serde_json::value::RawValue;
 use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions, TestPayload};
+use crate::db_compat;
 
 
 #[derive(sqlx::FromRow)]
@@ -292,7 +293,7 @@ pub async fn send(
             .bind(&payload.arch)
             .execute(&mut *tx)
             .await?;
-            let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+            let id: i64 = sqlx::query_scalar(db_compat::last_insert_id_sql())
                 .fetch_one(&mut *tx)
                 .await?;
             tx.commit().await?;
@@ -739,12 +740,7 @@ pub async fn receive_result(
     );
 
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
-    if let Err(e) = sqlx::query(
-        r#"INSERT INTO results (tenant_id, system_id, test_id, result, last_updated)
-           VALUES (?, ?, ?, ?, ?)
-           ON CONFLICT(tenant_id, system_id, test_id)
-           DO UPDATE SET result = excluded.result, last_updated = excluded.last_updated"#,
-    )
+    if let Err(e) = sqlx::query(db_compat::upsert_results_sql())
     .bind(tenant_id)
     .bind(payload.client_id)
     .bind(payload.test_id)

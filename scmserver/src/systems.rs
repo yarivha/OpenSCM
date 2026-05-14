@@ -13,6 +13,7 @@ use tera::{Tera, Context};
 use sqlx::AnyPool;
 use sqlx::Row;
 use std::sync::Arc;
+use crate::db_compat;
 use urlencoding;
 use std::collections::HashMap;
 use tracing::{info, warn, error};
@@ -57,73 +58,76 @@ pub async fn systems(
     .await
     .unwrap_or(3600);
 
+    let gc        = db_compat::group_concat_col("sg.name");
+    let created   = db_compat::format_datetime_col("s.created_date");
+    let last_seen = db_compat::format_datetime_col("s.last_seen");
+    let unix_diff = db_compat::unix_diff_col("s.last_seen");
+
     let rows_result = match filter.as_deref() {
         Some("active") | Some("pending") => {
-            sqlx::query(
-                r#"
-                SELECT
+            let sql = format!(
+                r#"SELECT
                     s.id AS system_id,
                     COALESCE(s.name, 'NA') AS system_name,
-                    COALESCE(s.ver, 'NA') AS system_ver,
-                    COALESCE(s.ip, 'NA') AS system_ip,
-                    COALESCE(s.os, 'NA') AS system_os,
+                    COALESCE(s.ver,  'NA') AS system_ver,
+                    COALESCE(s.ip,   'NA') AS system_ip,
+                    COALESCE(s.os,   'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
                     COALESCE(s.status, 'NA') AS system_status,
-                    COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
-                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '') AS created_date,
-                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen),    '') AS last_seen,
+                    COALESCE({gc}, 'none') AS group_names,
+                    {created} AS created_date,
+                    {last_seen} AS last_seen,
                     CASE
                         WHEN s.status != 'active' THEN 0
-                        WHEN s.last_seen IS NULL THEN 0
-                        WHEN (CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', s.last_seen) AS INTEGER)) > ? THEN 1
+                        WHEN s.last_seen IS NULL   THEN 0
+                        WHEN {unix_diff} > ?        THEN 1
                         ELSE 0
                     END AS is_offline
                 FROM systems AS s
                 LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
-                LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
+                LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
                 WHERE s.status = ? AND s.tenant_id = ?
                 GROUP BY s.id
-                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC
-                "#,
-            )
-            .bind(offline_threshold)
-            .bind(filter.as_deref().unwrap_or("active"))
-            .bind(&auth.tenant_id)
-            .fetch_all(&pool)
-            .await
+                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC"#
+            );
+            sqlx::query(&sql)
+                .bind(offline_threshold)
+                .bind(filter.as_deref().unwrap_or("active"))
+                .bind(&auth.tenant_id)
+                .fetch_all(&pool)
+                .await
         }
         _ => {
-            sqlx::query(
-                r#"
-                SELECT
+            let sql = format!(
+                r#"SELECT
                     s.id AS system_id,
                     COALESCE(s.name, 'NA') AS system_name,
-                    COALESCE(s.ver, 'NA') AS system_ver,
-                    COALESCE(s.ip, 'NA') AS system_ip,
-                    COALESCE(s.os, 'NA') AS system_os,
+                    COALESCE(s.ver,  'NA') AS system_ver,
+                    COALESCE(s.ip,   'NA') AS system_ip,
+                    COALESCE(s.os,   'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
                     COALESCE(s.status, 'NA') AS system_status,
-                    COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
-                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '') AS created_date,
-                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen),    '') AS last_seen,
+                    COALESCE({gc}, 'none') AS group_names,
+                    {created} AS created_date,
+                    {last_seen} AS last_seen,
                     CASE
                         WHEN s.status != 'active' THEN 0
-                        WHEN s.last_seen IS NULL THEN 0
-                        WHEN (CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', s.last_seen) AS INTEGER)) > ? THEN 1
+                        WHEN s.last_seen IS NULL   THEN 0
+                        WHEN {unix_diff} > ?        THEN 1
                         ELSE 0
                     END AS is_offline
                 FROM systems AS s
                 LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
-                LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
+                LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
                 WHERE s.tenant_id = ?
                 GROUP BY s.id
-                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC
-                "#,
-            )
-            .bind(offline_threshold)
-            .bind(&auth.tenant_id)
-            .fetch_all(&pool)
-            .await
+                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC"#
+            );
+            sqlx::query(&sql)
+                .bind(offline_threshold)
+                .bind(&auth.tenant_id)
+                .fetch_all(&pool)
+                .await
         }
     };
 
@@ -490,29 +494,31 @@ pub async fn systems_pending(
         return redir;
     }
 
-    let rows_result = sqlx::query(
-        r#"
-        SELECT
+    let sql = format!(
+        r#"SELECT
             s.id AS system_id,
             COALESCE(s.name, 'NA') AS system_name,
-            COALESCE(s.ver, 'NA') AS system_ver,
-            COALESCE(s.ip, 'NA') AS system_ip,
-            COALESCE(s.os, 'NA') AS system_os,
+            COALESCE(s.ver,  'NA') AS system_ver,
+            COALESCE(s.ip,   'NA') AS system_ip,
+            COALESCE(s.os,   'NA') AS system_os,
             COALESCE(s.arch, 'NA') AS system_arch,
             COALESCE(s.status, 'NA') AS system_status,
-            COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
-            COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '') AS created_date,
-            COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen),    '') AS last_seen
+            COALESCE({gc}, 'none') AS group_names,
+            {created} AS created_date,
+            {last_seen} AS last_seen
         FROM systems AS s
         LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
-        LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
+        LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
         WHERE s.status = 'pending' AND s.tenant_id = ?
-        GROUP BY s.id
-        "#,
-    )
-    .bind(&auth.tenant_id)
-    .fetch_all(&*pool)
-    .await;
+        GROUP BY s.id"#,
+        gc      = db_compat::group_concat_col("sg.name"),
+        created = db_compat::format_datetime_col("s.created_date"),
+        last_seen = db_compat::format_datetime_col("s.last_seen"),
+    );
+    let rows_result = sqlx::query(&sql)
+        .bind(&auth.tenant_id)
+        .fetch_all(&*pool)
+        .await;
 
     let rows = match rows_result {
         Ok(r) => r,
@@ -577,23 +583,20 @@ pub async fn system_groups(
         return redir;
     }
 
-    let rows_result = sqlx::query(
-        r#"
-        SELECT
-            sg.id,
-            sg.name,
-            sg.description,
-            GROUP_CONCAT(s.name) AS systems
-        FROM system_groups AS sg
-        LEFT JOIN systems_in_groups AS sig ON sg.id = sig.group_id
-        LEFT JOIN systems AS s ON sig.system_id = s.id
-        WHERE sg.tenant_id = ?
-        GROUP BY sg.id, sg.name, sg.description
-        "#,
-    )
-    .bind(&auth.tenant_id)
-    .fetch_all(&*pool)
-    .await;
+    let gc_sql = format!(
+        "SELECT sg.id, sg.name, sg.description,
+            {gc} AS systems
+         FROM system_groups AS sg
+         LEFT JOIN systems_in_groups AS sig ON sg.id = sig.group_id
+         LEFT JOIN systems AS s ON sig.system_id = s.id
+         WHERE sg.tenant_id = ?
+         GROUP BY sg.id, sg.name, sg.description",
+        gc = db_compat::group_concat_col("s.name"),
+    );
+    let rows_result = sqlx::query(&gc_sql)
+        .bind(&auth.tenant_id)
+        .fetch_all(&*pool)
+        .await;
 
     let system_groups: Vec<SystemGroup> = match rows_result {
         Ok(rows) => rows
@@ -754,9 +757,7 @@ pub async fn system_groups_add_save(
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
-    // sqlx AnyPool always returns last_insert_id=None for SQLite; use
-    // last_insert_rowid() on the same transaction connection instead.
-    let group_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
+    let group_id: i64 = match sqlx::query_scalar(db_compat::last_insert_id_sql())
         .fetch_one(&mut *tx)
         .await
     {
@@ -1313,9 +1314,9 @@ pub async fn systems_bulk_add_group(
 
     let mut added = 0usize;
     for id in &ids {
-        if let Err(e) = sqlx::query(
+        if let Err(e) = sqlx::query(&db_compat::adapt_sql(
             "INSERT OR IGNORE INTO systems_in_groups (system_id, group_id, tenant_id) VALUES (?, ?, ?)",
-        )
+        ))
         .bind(id)
         .bind(group_id)
         .bind(&auth.tenant_id)
@@ -1344,11 +1345,12 @@ pub async fn fetch_system_report_data(
     tenant_id: &str,
     pool: &AnyPool,
 ) -> Result<SystemReportData, sqlx::Error> {
-    let sys_row = sqlx::query(
+    let sys_row = sqlx::query(&format!(
         "SELECT id, name, os, arch, ip, compliance_score,
-                strftime('%Y-%m-%dT%H:%M:%SZ', last_seen) AS last_seen
+                {last_seen} AS last_seen
          FROM systems WHERE id = ? AND tenant_id = ?",
-    )
+        last_seen = db_compat::format_datetime_col("last_seen"),
+    ))
     .bind(system_id)
     .bind(tenant_id)
     .fetch_one(pool)

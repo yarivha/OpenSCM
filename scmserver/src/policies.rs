@@ -27,6 +27,7 @@ use crate::models::{
 };
 use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data, normalize_status};
+use crate::db_compat;
 
 
 
@@ -302,7 +303,7 @@ pub async fn policies_add_save(
         tx.rollback().await.ok();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
-    let policy_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
+    let policy_id: i64 = match sqlx::query_scalar(db_compat::last_insert_id_sql())
         .fetch_one(&mut *tx)
         .await
     {
@@ -363,7 +364,7 @@ pub async fn policies_add_save(
     for test_id_str in tests {
         if let Ok(test_id) = test_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
+                &db_compat::adapt_sql("INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)"),
             )
             .bind(&auth.tenant_id)
             .bind(policy_id)
@@ -382,7 +383,7 @@ pub async fn policies_add_save(
     for group_id_str in system_groups {
         if let Ok(group_id) = group_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                "INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)",
+                &db_compat::adapt_sql("INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)"),
             )
             .bind(&auth.tenant_id)
             .bind(policy_id)
@@ -606,15 +607,7 @@ pub async fn policies_edit_save(
     // preserve what the scheduler last wrote so we don't reset a future firing time.
     let scan_explicit_next_run = next_run.filter(|s| !s.is_empty());
     let scan_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
-    if let Err(e) = sqlx::query(r#"
-        INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
-        VALUES (?, ?, 'scan', ?, ?, ?, ?)
-        ON CONFLICT(policy_id, schedule_type) DO UPDATE SET
-            enabled = excluded.enabled,
-            frequency = excluded.frequency,
-            cron_expression = excluded.cron_expression,
-            next_run = CASE WHEN excluded.next_run != '' THEN excluded.next_run ELSE next_run END
-    "#)
+    if let Err(e) = sqlx::query(&db_compat::upsert_schedule_sql("scan"))
     .bind(&auth.tenant_id)
     .bind(id)
     .bind(schedule_enabled)
@@ -632,15 +625,7 @@ pub async fn policies_edit_save(
     // Same next_run preservation logic as scan schedule above.
     let report_explicit_next_run = report_next_run.filter(|s| !s.is_empty());
     let report_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
-    if let Err(e) = sqlx::query(r#"
-        INSERT INTO policy_schedules (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
-        VALUES (?, ?, 'report', ?, ?, ?, ?)
-        ON CONFLICT(policy_id, schedule_type) DO UPDATE SET
-            enabled = excluded.enabled,
-            frequency = excluded.frequency,
-            cron_expression = excluded.cron_expression,
-            next_run = CASE WHEN excluded.next_run != '' THEN excluded.next_run ELSE next_run END
-    "#)
+    if let Err(e) = sqlx::query(&db_compat::upsert_schedule_sql("report"))
     .bind(&auth.tenant_id)
     .bind(id)
     .bind(report_schedule_enabled)
@@ -666,7 +651,7 @@ pub async fn policies_edit_save(
     for test_id_str in form_data.get("tests").cloned().unwrap_or_default() {
         if let Ok(test_id) = test_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
+                &db_compat::adapt_sql("INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)"),
             )
             .bind(&auth.tenant_id).bind(id).bind(test_id).execute(&mut *tx).await
             {
@@ -689,7 +674,7 @@ pub async fn policies_edit_save(
     for group_id_str in form_data.get("system_groups").cloned().unwrap_or_default() {
         if let Ok(group_id) = group_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                "INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)",
+                &db_compat::adapt_sql("INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)"),
             )
             .bind(&auth.tenant_id).bind(id).bind(group_id).execute(&mut *tx).await
             {
@@ -1177,7 +1162,7 @@ pub async fn execute_policy_run_logic(
     pool: &AnyPool,
     tenant_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(r#"
+    sqlx::query(&db_compat::adapt_sql(r#"
         INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id)
         SELECT ?, sig.system_id, tip.test_id
         FROM systems_in_policy sip
@@ -1185,7 +1170,7 @@ pub async fn execute_policy_run_logic(
         JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
         WHERE sip.policy_id = ?
           AND sip.tenant_id = ?
-    "#)
+    "#))
     .bind(tenant_id).bind(id).bind(tenant_id)
     .execute(pool).await?;
     Ok(())

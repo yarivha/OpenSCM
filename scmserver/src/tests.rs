@@ -18,6 +18,7 @@ use tracing::{info, error};
 use bytes::Bytes;
 
 use crate::models::{ErrorQuery, Test, TestWithConditions, TestCondition, Element, SElement, Condition, UserRole, AuthSession};
+use crate::db_compat;
 use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data};
 
@@ -323,7 +324,7 @@ pub async fn tests_add_save(
         tx.rollback().await.ok();
         return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
     }
-    let test_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
+    let test_id: i64 = match sqlx::query_scalar(db_compat::last_insert_id_sql())
         .fetch_one(&mut *tx)
         .await
     {
@@ -735,7 +736,7 @@ pub async fn tests_bulk_add_policy(
     let mut added = 0usize;
     for id in &ids {
         if let Err(e) = sqlx::query(
-            "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
+            &db_compat::adapt_sql("INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)"),
         )
         .bind(&auth.tenant_id).bind(policy_id).bind(id).execute(&pool).await
         {

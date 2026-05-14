@@ -21,6 +21,7 @@ use serde::Serialize;
 use crate::models::{ErrorQuery, UserRole, AuthSession};
 use crate::auth;
 use crate::handlers::{render_template, parse_form_data};
+use crate::db_compat;
 
 #[derive(serde::Serialize)]
 pub struct Settings {
@@ -204,11 +205,7 @@ pub async fn settings_save(
     for (key, value) in updates {
         // SMTP settings are global — always stored under the default tenant
         let tenant = if SMTP_KEYS.contains(&key) { "default" } else { &auth.tenant_id };
-        if let Err(e) = sqlx::query(
-            "INSERT INTO settings (tenant_id, key, value)
-             VALUES (?, ?, ?)
-             ON CONFLICT (tenant_id, key) DO UPDATE SET value = excluded.value",
-        )
+        if let Err(e) = sqlx::query(db_compat::upsert_setting_sql())
         .bind(tenant)
         .bind(key)
         .bind(&value)

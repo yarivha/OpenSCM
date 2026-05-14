@@ -13,6 +13,7 @@ use tera::{Tera, Context};
 use sqlx::AnyPool;
 use std::sync::Arc;
 use tracing::error;
+use crate::db_compat;
 
 use crate::models::{ComplianceHistoryRow, PolicyFailRow, SystemFailRow, AuthSession};
 use crate::handlers::render_template;
@@ -136,24 +137,22 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
     // 4. Fetch History including POLICY_SCORE
     
-    let history_query = match range {
-        "yearly" =>
-            "SELECT strftime('%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY check_date DESC LIMIT 10",
-        "weekly" =>
-            "SELECT strftime('%Y-W%W', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
-        "monthly" =>
-            "SELECT strftime('%m-%Y', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY check_date DESC LIMIT 12",
-        _ => // daily (average per hour)
-            "SELECT strftime('%m-%d %H:00', check_date) as check_date, AVG(systems_score) as systems_score, AVG(policies_score) as policies_score
-            FROM compliance_history WHERE tenant_id = ? GROUP BY 1 ORDER BY id DESC LIMIT 24"
-
+    let date_col   = db_compat::date_group_col("check_date", range);
+    let (order_col, limit) = match range {
+        "yearly"  => ("check_date", 10i32),
+        "weekly"  => ("check_date", 12),
+        "monthly" => ("check_date", 12),
+        _         => ("id",         24),
     };
+    let history_query = format!(
+        "SELECT {date_col} as check_date, \
+                AVG(systems_score) as systems_score, \
+                AVG(policies_score) as policies_score \
+         FROM compliance_history WHERE tenant_id = ? \
+         GROUP BY 1 ORDER BY {order_col} DESC LIMIT {limit}"
+    );
 
-    
-    let history = sqlx::query_as::<_, ComplianceHistoryRow>(history_query)
+    let history = sqlx::query_as::<_, ComplianceHistoryRow>(&history_query)
         .bind(&auth.tenant_id)
         .fetch_all(&*pool)
         .await
@@ -193,7 +192,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     // 5. Optional plan limits — only present when the plan_limits table exists (SaaS).
     //    Silently returns None in CE where the table is absent.
     let plan_limits_exist: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='plan_limits'"
+        &db_compat::table_exists_sql("plan_limits")
     )
     .fetch_one(&*pool)
     .await
