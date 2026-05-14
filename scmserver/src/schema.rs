@@ -579,7 +579,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    info!("Schema version stamped at 9 (fresh install).");
+    info!("Schema version stamped at 10 (fresh install).");
 
     Ok(())
 }
