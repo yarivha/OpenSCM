@@ -833,14 +833,15 @@ pub async fn system_reports_view(
     .await
     .unwrap_or(60);
 
-    let system_exists: bool = sqlx::query_scalar(
+    // AnyPool maps EXISTS(…) to BIGINT — use i64 and treat 0/1 as falsy/truthy
+    let system_exists: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM systems WHERE id = ? AND tenant_id = ?)"
     )
     .bind(row.system_id)
     .bind(&auth.tenant_id)
     .fetch_one(&pool)
     .await
-    .unwrap_or(false);
+    .unwrap_or(0);
 
     let mut context = Context::new();
     context.insert("meta", &row);
