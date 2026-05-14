@@ -17,6 +17,15 @@ use bcrypt::{hash, DEFAULT_COST};
 use tera::{Tera, Context};
 use tracing::error;
 
+use axum::extract::Form as AxumForm;
+use axum::http::StatusCode;
+use serde::{Deserialize, Serialize};
+use sqlx::ConnectOptions as _;
+use sqlx::mysql::MySqlConnectOptions;
+use std::str::FromStr;
+use std::time::Duration;
+use tokio::time::timeout;
+
 use crate::config::Config;
 use crate::schema::{initialize_database, run_migrations};
 use crate::scheduler::start_background_scheduler;
@@ -188,4 +197,81 @@ pub async fn install_post(
     is_initialized.store(true, Ordering::SeqCst);
 
     Redirect::to("/login").into_response()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /install/test-db
+// Attempts to connect to the supplied MySQL URL and returns a JSON result.
+// Uses a single direct connection (no pool) with a 5-second timeout so the
+// user gets fast, clear feedback even when the server is unreachable.
+// Only reachable before initialisation (enforced by init_guard).
+// Role: Public (install wizard)
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[derive(Deserialize)]
+pub struct TestDbForm {
+    pub mysql_url: String,
+}
+
+#[derive(Serialize)]
+struct TestDbResponse {
+    success: bool,
+    message: String,
+}
+
+pub async fn test_db_post(
+    AxumForm(form): AxumForm<TestDbForm>,
+) -> impl IntoResponse {
+    use sqlx::Connection as _;
+
+    let url = form.mysql_url.trim();
+
+    if url.is_empty() {
+        return (StatusCode::BAD_REQUEST, axum::Json(TestDbResponse {
+            success: false,
+            message: "MySQL URL is required.".into(),
+        }));
+    }
+
+    if !url.starts_with("mysql://") {
+        return (StatusCode::BAD_REQUEST, axum::Json(TestDbResponse {
+            success: false,
+            message: "URL must start with mysql://".into(),
+        }));
+    }
+
+    let opts = match MySqlConnectOptions::from_str(url) {
+        Ok(o) => o,
+        Err(e) => return (StatusCode::OK, axum::Json(TestDbResponse {
+            success: false,
+            message: format!("Invalid MySQL URL: {}", e),
+        })),
+    };
+
+    let connect_result = timeout(Duration::from_secs(5), opts.connect()).await;
+
+    match connect_result {
+        Err(_) => (StatusCode::OK, axum::Json(TestDbResponse {
+            success: false,
+            message: "Connection timed out after 5 seconds. Check host, port, and firewall.".into(),
+        })),
+        Ok(Err(e)) => (StatusCode::OK, axum::Json(TestDbResponse {
+            success: false,
+            message: format!("Connection failed: {}", e),
+        })),
+        Ok(Ok(mut conn)) => {
+            let ping = sqlx::query("SELECT 1").execute(&mut conn).await;
+            conn.close().await.ok();
+            match ping {
+                Ok(_) => (StatusCode::OK, axum::Json(TestDbResponse {
+                    success: true,
+                    message: "Connection successful.".into(),
+                })),
+                Err(e) => (StatusCode::OK, axum::Json(TestDbResponse {
+                    success: false,
+                    message: format!("Connected but ping failed: {}", e),
+                })),
+            }
+        }
+    }
 }

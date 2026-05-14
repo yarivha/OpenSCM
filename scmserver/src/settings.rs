@@ -294,49 +294,17 @@ pub async fn settings_test_email(
         .unwrap_or_else(|| format!("OpenSCM <noreply@{}>", host));
     let tls_mode  = map.get("smtp_tls").cloned().unwrap_or_else(|| "starttls".into());
 
-    // Build transport
-    use lettre::{AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
-                 transport::smtp::authentication::Credentials,
-                 message::header::ContentType};
-
-    let creds_opt = if !username.is_empty() {
-        Some(Credentials::new(username, password))
-    } else {
-        None
+    // Build transport using the shared email module helper
+    let transport = match crate::email::build_transport(&host, port, &tls_mode, &username, &password) {
+        Ok(t) => t,
+        Err(e) => return (StatusCode::BAD_GATEWAY, Json(TestEmailResponse {
+            ok: false,
+            message: format!("Failed to create SMTP transport: {}", e),
+        })),
     };
 
-    let transport: AsyncSmtpTransport<Tokio1Executor> = match tls_mode.as_str() {
-        "tls" => {
-            let mut b = AsyncSmtpTransport::<Tokio1Executor>::relay(&host)
-                .map_err(|e| e.to_string())
-                .unwrap()
-                .port(port);
-            if let Some(c) = creds_opt { b = b.credentials(c); }
-            b.build()
-        }
-        "none" => {
-            let mut b = AsyncSmtpTransport::<Tokio1Executor>::builder_dangerous(&host).port(port);
-            if let Some(c) = creds_opt { b = b.credentials(c); }
-            b.build()
-        }
-        _ => {
-            match AsyncSmtpTransport::<Tokio1Executor>::starttls_relay(&host) {
-                Ok(builder) => {
-                    let mut b = builder.port(port);
-                    if let Some(c) = creds_opt { b = b.credentials(c); }
-                    b.build()
-                }
-                Err(e) => {
-                    return (StatusCode::BAD_GATEWAY, Json(TestEmailResponse {
-                        ok: false,
-                        message: format!("Failed to create SMTP transport: {}", e),
-                    }));
-                }
-            }
-        }
-    };
-
-    // Build message
+    // Build and send a test message
+    use lettre::{AsyncTransport, Message, message::header::ContentType};
     let message = match Message::builder()
         .from(from.parse().unwrap_or_else(|_| "OpenSCM <noreply@openscm.io>".parse().unwrap()))
         .to(match to.parse() {
@@ -357,7 +325,6 @@ pub async fn settings_test_email(
         })),
     };
 
-    // Send
     match transport.send(message).await {
         Ok(_) => {
             info!("Test email sent to {} by '{}'", to, auth.username);

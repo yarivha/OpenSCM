@@ -23,6 +23,7 @@ pub mod settings;
 pub mod scheduler;
 pub mod install;
 pub mod db_compat;
+pub mod email;
 
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
@@ -266,6 +267,7 @@ async fn init_guard(
 pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
     Router::new()
         .route("/install", get(install::install_get).post(install::install_post))
+        .route("/install/test-db", post(install::test_db_post))
         .route("/", get(dashboard::dashboard))
         .route("/login", get(auth::login).post(auth::login_submit))
         .route("/logout", get(auth::logout))
