@@ -110,7 +110,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // Register SQLite (and any future) drivers for AnyPool.
     sqlx::any::install_default_drivers();
 
-    let database_url = format!("sqlite://{}", db_path());
+    // AnyPool's URL connect doesn't expose create_if_missing, so we pre-create
+    // the file ourselves.  check_required_directories() already ensured the
+    // parent directory exists, so this will only fail on a permissions problem.
+    let db_file = db_path();
+    if !std::path::Path::new(&db_file).exists() {
+        fs::File::create(&db_file)
+            .map_err(|e| format!("Cannot create database file '{}': {}", db_file, e))?;
+    }
+
+    let database_url = format!("sqlite://{}", db_file);
     let pool: sqlx::AnyPool = sqlx::pool::PoolOptions::<sqlx::Any>::new()
         .max_connections(5)
         .connect(&database_url)
