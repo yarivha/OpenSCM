@@ -26,7 +26,7 @@ pub mod db_compat;
 pub mod email;
 
 // 2. Imports needed for the public API
-use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
+use std::{sync::{Arc, atomic::{AtomicBool, AtomicU8, Ordering}, OnceLock}, path::PathBuf, error::Error};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PostInstallFn — optional async hook called by install_post after the CE
@@ -79,28 +79,33 @@ pub fn app_edition() -> &'static str {
     APP_EDITION.get().map(|s| s.as_str()).unwrap_or("Community Edition")
 }
 // ─────────────────────────────────────────────────────────────────────────────
-// DbBackend — active database backend, set once at binary startup.
-// Shared by db_compat helpers so they can emit the right SQL dialect.
+// DbBackend — active database backend.
+// Stored as an AtomicU8 so the install wizard can switch from the startup
+// default (SQLite) to MySQL/PostgreSQL without a process restart.
 // ─────────────────────────────────────────────────────────────────────────────
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum DbBackend {
-    Sqlite,
-    Mysql,
-    Postgres,
+    Sqlite   = 0,
+    Mysql    = 1,
+    Postgres = 2,
 }
 
-static DB_BACKEND: OnceLock<DbBackend> = OnceLock::new();
+static DB_BACKEND: AtomicU8 = AtomicU8::new(0); // default: Sqlite
 
-/// Set the active DB backend. Must be called once at startup before any
-/// db_compat helper is used. Subsequent calls are silently ignored.
+/// Set the active DB backend. Safe to call multiple times — the install wizard
+/// calls this when switching from the startup default (SQLite) to MySQL.
 pub fn set_db_backend(backend: DbBackend) {
-    let _ = DB_BACKEND.set(backend);
+    DB_BACKEND.store(backend as u8, Ordering::SeqCst);
 }
 
-/// Returns the active DB backend. Defaults to SQLite if set_db_backend was
-/// never called (e.g. in unit tests or the CE binary before the call was added).
+/// Returns the active DB backend. Defaults to SQLite (0) until set_db_backend
+/// is called.
 pub fn get_db_backend() -> DbBackend {
-    *DB_BACKEND.get().unwrap_or(&DbBackend::Sqlite)
+    match DB_BACKEND.load(Ordering::SeqCst) {
+        1 => DbBackend::Mysql,
+        2 => DbBackend::Postgres,
+        _ => DbBackend::Sqlite,
+    }
 }
 
 use axum::{Router, Extension, response::IntoResponse, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
