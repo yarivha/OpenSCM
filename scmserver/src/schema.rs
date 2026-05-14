@@ -493,35 +493,6 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    // Plan limits seed data (SaaS uses these; CE/EE ignore the table)
-    for (plan, resource, max_count) in &[
-        ("free",       "systems",   5i64),
-        ("free",       "groups",    3),
-        ("free",       "policies",  3),
-        ("free",       "reports",   10),
-        ("starter",    "systems",   25),
-        ("starter",    "groups",    10),
-        ("starter",    "policies",  10),
-        ("starter",    "reports",   100),
-        ("pro",        "systems",   100),
-        ("pro",        "groups",    50),
-        ("pro",        "policies",  50),
-        ("pro",        "reports",   500),
-        ("enterprise", "systems",   0),
-        ("enterprise", "groups",    0),
-        ("enterprise", "policies",  0),
-        ("enterprise", "reports",   0),
-    ] {
-        let _ = sqlx::query(&db_compat::adapt_sql(
-            "INSERT OR IGNORE INTO plan_limits (plan, resource, max_count) VALUES (?, ?, ?)",
-        ))
-        .bind(plan)
-        .bind(resource)
-        .bind(max_count)
-        .execute(pool)
-        .await;
-    }
-
     // Elements
     for name in &[
         "AGENT", "OS", "HOSTNAME", "IP", "DOMAIN", "ARCHITECTURE", "USER", "GROUP",
@@ -610,6 +581,45 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
     info!("Schema version stamped at 9 (fresh install).");
 
+    Ok(())
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: seed_plan_limits
+// Inserts the default per-plan resource caps into `plan_limits`.
+// Uses INSERT OR IGNORE so it is safe to call on every startup (idempotent).
+// Called by SaaS on every startup; CE/EE deliberately do NOT call this so
+// the table stays empty and the dashboard hides the limit counters.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn seed_plan_limits(pool: &AnyPool) -> Result<(), sqlx::Error> {
+    for (plan, resource, max_count) in &[
+        ("free",       "systems",   5i64),
+        ("free",       "groups",    3),
+        ("free",       "policies",  3),
+        ("free",       "reports",   10),
+        ("starter",    "systems",   25),
+        ("starter",    "groups",    10),
+        ("starter",    "policies",  10),
+        ("starter",    "reports",   100),
+        ("pro",        "systems",   100),
+        ("pro",        "groups",    50),
+        ("pro",        "policies",  50),
+        ("pro",        "reports",   500),
+        ("enterprise", "systems",   0),
+        ("enterprise", "groups",    0),
+        ("enterprise", "policies",  0),
+        ("enterprise", "reports",   0),
+    ] {
+        let _ = sqlx::query(&db_compat::adapt_sql(
+            "INSERT OR IGNORE INTO plan_limits (plan, resource, max_count) VALUES (?, ?, ?)",
+        ))
+        .bind(plan)
+        .bind(resource)
+        .bind(*max_count)
+        .execute(pool)
+        .await;
+    }
     Ok(())
 }
 
