@@ -101,7 +101,7 @@ pub async fn install_post(
 
     if let Err(e) = sqlx::query(
         "INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
-         VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'admin')"
+         VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'superuser')"
     )
     .bind(hashed)
     .execute(&pool)
