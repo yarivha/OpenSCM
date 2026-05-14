@@ -38,7 +38,7 @@ cfg_if! {
         const PRIVATE_KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Server\keys\scmserver.key";
         const PUBLIC_KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Server\keys\scmserver.pub";
     }  else if #[cfg(target_os = "macos")] {
-        const CONFIG_PATH: &str = "/etc/openscm/scmserver.config";
+        const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmserver.config";
         const DB_PATH: &str = "/var/db/openscm/scm.db";
         const PRIVATE_KEY_PATH: &str ="/usr/local/etc/openscm/keys/scmserver.key";
         const PUBLIC_KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmserver.pub";
