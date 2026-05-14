@@ -449,7 +449,8 @@ pub async fn policies_edit(
 
     // Fetch scan schedule
     let schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        "SELECT id, tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression,
+        "SELECT id, tenant_id, policy_id, schedule_type,
+                CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
                 CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
          FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'scan'",
     )
@@ -461,7 +462,8 @@ pub async fn policies_edit(
 
     // Fetch report schedule
     let report_schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        "SELECT id, tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression,
+        "SELECT id, tenant_id, policy_id, schedule_type,
+                CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
                 CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
          FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'report'",
     )
