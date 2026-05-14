@@ -249,7 +249,7 @@ async fn init_guard(
         return next.run(request).await;
     }
 
-    if !initialized && path != "/install" {
+    if !initialized && !path.starts_with("/install") {
         return axum::response::Redirect::to("/install").into_response();
     }
     if initialized && path == "/install" {
