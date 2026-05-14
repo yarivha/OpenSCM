@@ -69,7 +69,7 @@
               <div class="card-body">
                 <select name="tests" class="duallistbox" multiple="multiple">
                   {% for test in tests %}
-                    <option value="{{ test.id }}">[{{ test.severity | upper }}] {{ test.name }}</option>
+                    <option value="{{ test.id }}">{{ test.name }}</option>
                   {% endfor %}
                 </select>
               </div>
