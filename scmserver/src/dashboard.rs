@@ -40,10 +40,11 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     -> impl IntoResponse {
 
     let range: &str = match params.range.as_deref() {
-        Some("yearly") => "yearly",
-        Some("weekly") => "weekly",
+        Some("yearly")  => "yearly",
+        Some("weekly")  => "weekly",
         Some("monthly") => "monthly",
-        _ => "daily",
+        Some("daily")   => "daily",
+        _               => "hourly",   // default view
     };
 
 
@@ -142,7 +143,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
         "yearly"  => ("check_date", 10i32),
         "weekly"  => ("check_date", 12),
         "monthly" => ("check_date", 12),
-        _         => ("id",         24),
+        "daily"   => ("id",         30),  // last 30 days
+        _         => ("id",         24),  // hourly: last 24 hours
     };
     let history_query = format!(
         "SELECT {date_col} as check_date, \
