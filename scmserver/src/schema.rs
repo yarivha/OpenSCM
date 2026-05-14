@@ -25,13 +25,13 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
     info!("Init Database......");
 
-    // Tenants Table (no AUTOINCREMENT — TEXT PK)
+    // Tenants Table (no AUTOINCREMENT — VARCHAR(191) PK so MySQL can index it)
     // status and plan are EE/SaaS fields present in base schema so all editions
     // share an identical table structure.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tenants (
-            id         TEXT    PRIMARY KEY,
-            name       TEXT    NOT NULL UNIQUE,
+            id         VARCHAR(191) PRIMARY KEY,
+            name       VARCHAR(191) NOT NULL UNIQUE,
             status     TEXT    NOT NULL DEFAULT 'active',
             plan       TEXT    NOT NULL DEFAULT 'free',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
@@ -44,7 +44,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS tenant_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL,
+            tenant_id VARCHAR(191) NOT NULL,
             public_key TEXT NOT NULL,
             private_key TEXT NOT NULL,
             is_active INTEGER DEFAULT 1,
@@ -57,8 +57,8 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS settings (
-            tenant_id TEXT NOT NULL DEFAULT 'default',
-            key TEXT NOT NULL,
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+            key VARCHAR(191) NOT NULL,
             value TEXT NOT NULL,
             description TEXT,
             PRIMARY KEY (tenant_id, key),
@@ -72,7 +72,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS notify (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             type TEXT,
             timestamp TEXT,
             owner_id INTEGER,
@@ -87,8 +87,8 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
-            username TEXT NOT NULL,
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+            username VARCHAR(191) NOT NULL,
             password TEXT NOT NULL,
             name TEXT,
             email TEXT,
@@ -105,7 +105,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS systems (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             name TEXT,
             ver TEXT,
             key TEXT,
@@ -134,8 +134,8 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS system_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
-            name TEXT NOT NULL,
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+            name VARCHAR(191) NOT NULL,
             description TEXT,
             UNIQUE(name, tenant_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
@@ -147,7 +147,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // Systems-in-Groups join table (no AUTOINCREMENT — composite PK)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS systems_in_groups (
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             system_id INTEGER,
             group_id INTEGER,
             PRIMARY KEY (tenant_id, system_id, group_id),
@@ -163,7 +163,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS tests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             name TEXT NOT NULL,
             description TEXT,
             rational TEXT,
@@ -184,7 +184,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS test_conditions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             test_id INTEGER NOT NULL,
             name TEXT,
             description TEXT,
@@ -205,7 +205,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS policies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             name TEXT NOT NULL,
             description TEXT,
             version TEXT,
@@ -222,7 +222,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS policy_schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             policy_id INTEGER NOT NULL,
             schedule_type TEXT NOT NULL DEFAULT 'scan',
             enabled BOOLEAN NOT NULL DEFAULT 1,
@@ -242,7 +242,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // Tests-in-Policy join table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tests_in_policy (
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             policy_id INTEGER,
             test_id INTEGER,
             PRIMARY KEY (tenant_id, policy_id, test_id),
@@ -257,7 +257,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // Systems-in-Policy join table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS systems_in_policy (
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             policy_id INTEGER,
             group_id INTEGER,
             PRIMARY KEY (tenant_id, policy_id, group_id),
@@ -272,7 +272,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // Commands table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS commands (
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             system_id INTEGER,
             test_id INTEGER,
             PRIMARY KEY (tenant_id, system_id, test_id),
@@ -287,7 +287,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // Results table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS results (
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             system_id INTEGER,
             test_id INTEGER,
             result TEXT,
@@ -305,7 +305,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             submission_date DATETIME DEFAULT CURRENT_TIMESTAMP,
             policy_name TEXT NOT NULL,
             policy_version TEXT,
@@ -323,7 +323,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS system_reports (
             id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id        TEXT    NOT NULL DEFAULT 'default',
+            tenant_id        VARCHAR(191) NOT NULL DEFAULT 'default',
             submission_date  DATETIME DEFAULT CURRENT_TIMESTAMP,
             system_id        INTEGER NOT NULL,
             system_name      TEXT    NOT NULL,
@@ -346,7 +346,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS compliance_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id TEXT NOT NULL DEFAULT 'default',
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             check_date DATE DEFAULT CURRENT_TIMESTAMP,
             systems_score REAL DEFAULT 0.0,
             policies_score REAL DEFAULT 0.0,
@@ -364,7 +364,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS elements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            name VARCHAR(191) NOT NULL UNIQUE,
             description TEXT
         )",
     ))
@@ -375,7 +375,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS selements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            name VARCHAR(191) NOT NULL UNIQUE,
             description TEXT
         )",
     ))
@@ -386,7 +386,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS conditions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
-            name TEXT NOT NULL UNIQUE,
+            name VARCHAR(191) NOT NULL UNIQUE,
             description TEXT
         )",
     ))
@@ -424,8 +424,8 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS email_verifications (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id    INTEGER NOT NULL,
-            tenant_id  TEXT    NOT NULL,
-            token      TEXT    NOT NULL UNIQUE,
+            tenant_id  VARCHAR(191) NOT NULL,
+            token      VARCHAR(191) NOT NULL UNIQUE,
             expires_at TEXT    NOT NULL,
             created_at TEXT    NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -438,7 +438,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS password_resets (
             id         INTEGER PRIMARY KEY AUTOINCREMENT,
             user_id    INTEGER NOT NULL,
-            token      TEXT    NOT NULL UNIQUE,
+            token      VARCHAR(191) NOT NULL UNIQUE,
             expires_at TEXT    NOT NULL,
             used       INTEGER NOT NULL DEFAULT 0,
             created_at TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -451,8 +451,8 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // max_count = 0 means unlimited
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS plan_limits (
-            plan      TEXT    NOT NULL,
-            resource  TEXT    NOT NULL,
+            plan      VARCHAR(191) NOT NULL,
+            resource  VARCHAR(191) NOT NULL,
             max_count INTEGER NOT NULL DEFAULT 0,
             PRIMARY KEY (plan, resource)
         )",
@@ -681,7 +681,7 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
         sqlx::query(&db_compat::adapt_sql(
             "CREATE TABLE policy_schedules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id TEXT NOT NULL DEFAULT 'default',
+                tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
                 policy_id INTEGER NOT NULL,
                 schedule_type TEXT NOT NULL DEFAULT 'scan',
                 enabled BOOLEAN NOT NULL DEFAULT 1,
@@ -895,7 +895,7 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
         sqlx::query(&db_compat::adapt_sql(
             "CREATE TABLE IF NOT EXISTS system_reports (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
-                tenant_id        TEXT    NOT NULL DEFAULT 'default',
+                tenant_id        VARCHAR(191) NOT NULL DEFAULT 'default',
                 submission_date  DATETIME DEFAULT CURRENT_TIMESTAMP,
                 system_id        INTEGER NOT NULL,
                 system_name      TEXT    NOT NULL,
@@ -1003,8 +1003,8 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
             "CREATE TABLE IF NOT EXISTS email_verifications (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
-                tenant_id  TEXT    NOT NULL,
-                token      TEXT    NOT NULL UNIQUE,
+                tenant_id  VARCHAR(191) NOT NULL,
+                token      VARCHAR(191) NOT NULL UNIQUE,
                 expires_at TEXT    NOT NULL,
                 created_at TEXT    NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
@@ -1015,7 +1015,7 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
             "CREATE TABLE IF NOT EXISTS password_resets (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
-                token      TEXT    NOT NULL UNIQUE,
+                token      VARCHAR(191) NOT NULL UNIQUE,
                 expires_at TEXT    NOT NULL,
                 used       INTEGER NOT NULL DEFAULT 0,
                 created_at TEXT    NOT NULL DEFAULT (datetime('now')),
@@ -1025,8 +1025,8 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS plan_limits (
-                plan      TEXT    NOT NULL,
-                resource  TEXT    NOT NULL,
+                plan      VARCHAR(191) NOT NULL,
+                resource  VARCHAR(191) NOT NULL,
                 max_count INTEGER NOT NULL DEFAULT 0,
                 PRIMARY KEY (plan, resource)
             )"
