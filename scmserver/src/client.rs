@@ -253,7 +253,15 @@ pub async fn send(
                     {
                         rereg_data["server_public_key"] = serde_json::json!(pub_key);
                     }
-                    return Json(rereg_data).into_response();
+                    // Must go through sign_response — client verifies the signature on every response.
+                    return match sign_response(&pool, tenant_id, rereg_data).await {
+                        Ok(signed) => (StatusCode::OK, Json(signed)).into_response(),
+                        Err(e) => {
+                            error!("Failed to sign re-registration response for '{}': {}", payload.hostname, e);
+                            (StatusCode::INTERNAL_SERVER_ERROR,
+                             Json(serde_json::json!({"error": "Signing error"}))).into_response()
+                        }
+                    };
                 }
                 Ok(None) => { /* not found — proceed with normal insert */ }
                 Err(e) => {
