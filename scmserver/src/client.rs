@@ -226,26 +226,32 @@ pub async fn send(
             payload.hostname, tenant_id
         );
 
-        let res = sqlx::query(
-            r#"INSERT INTO systems (tenant_id, key, name, ver, os, ip, arch, status)
-               VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')"#,
-        )
-        .bind(tenant_id)
-        .bind(&payload.public_key)
-        .bind(&payload.hostname)
-        .bind(&payload.ver)
-        .bind(&payload.os)
-        .bind(&payload.ip)
-        .bind(&payload.arch)
-        .execute(&pool)
-        .await;
+        // Use a transaction so INSERT and last_insert_rowid() run on the same
+        // connection — AnyPool otherwise may route them to different connections.
+        let reg_result: Result<i64, sqlx::Error> = async {
+            let mut tx = pool.begin().await?;
+            sqlx::query(
+                r#"INSERT INTO systems (tenant_id, key, name, ver, os, ip, arch, status)
+                   VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')"#,
+            )
+            .bind(tenant_id)
+            .bind(&payload.public_key)
+            .bind(&payload.hostname)
+            .bind(&payload.ver)
+            .bind(&payload.os)
+            .bind(&payload.ip)
+            .bind(&payload.arch)
+            .execute(&mut *tx)
+            .await?;
+            let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+                .fetch_one(&mut *tx)
+                .await?;
+            tx.commit().await?;
+            Ok(id)
+        }.await;
 
-        match res {
-            Ok(_r) => {
-                let new_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
-                    .fetch_one(&pool)
-                    .await
-                    .unwrap_or(0);
+        match reg_result {
+            Ok(new_id) => {
                 info!(
                     "Agent '{}' registered with ID {} (pending approval).",
                     payload.hostname, new_id
