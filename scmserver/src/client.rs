@@ -15,7 +15,7 @@ use base64::{engine::general_purpose, Engine as _};
 use ed25519_dalek::{Verifier, VerifyingKey, Signature, SigningKey, Signer};
 
 use serde_json::value::RawValue;
-use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions};
+use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions, TestPayload};
 
 
 #[derive(sqlx::FromRow)]
@@ -531,12 +531,19 @@ pub async fn send(
                     tests_with_conditions.len()
                 );
 
+                // Convert to flat TestPayload (mirrors client struct) — eliminates
+                // #[serde(flatten)] and ensures deterministic JSON for Ed25519 signing.
+                let test_payloads: Vec<TestPayload> = tests_with_conditions
+                    .into_iter()
+                    .map(TestPayload::from)
+                    .collect();
+
                 response_data = serde_json::json!({
                     "status": "approved",
                     "id": id,
                     "tenant_id": tenant_id,
-                    "command": if tests_with_conditions.is_empty() { "NONE" } else { "TEST" },
-                    "data": tests_with_conditions
+                    "command": if test_payloads.is_empty() { "NONE" } else { "TEST" },
+                    "data": test_payloads
                 });
 
                 // Only send the server public key when the client explicitly

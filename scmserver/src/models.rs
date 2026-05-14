@@ -107,6 +107,40 @@ pub struct TestWithConditions {
     pub applicability: Option<Vec<TestCondition>>,
 }
 
+// Flat wire-format for sending a test + conditions to an agent.
+// Mirrors the client's Test struct exactly — no #[serde(flatten)] so
+// serialization is deterministic and the Ed25519 signature round-trips cleanly.
+#[derive(Debug, Serialize, Clone)]
+pub struct TestPayload {
+    pub id: Option<i64>,
+    pub name: String,
+    pub description: Option<String>,
+    pub rational: Option<String>,
+    pub remediation: Option<String>,
+    pub severity: Option<String>,
+    pub filter: Option<String>,
+    pub app_filter: Option<String>,
+    pub conditions: Vec<TestCondition>,
+    pub applicability: Option<Vec<TestCondition>>,
+}
+
+impl From<TestWithConditions> for TestPayload {
+    fn from(twc: TestWithConditions) -> Self {
+        TestPayload {
+            id:          twc.test.id.map(|i| i as i64),
+            name:        twc.test.name,
+            description: twc.test.description,
+            rational:    twc.test.rational,
+            remediation: twc.test.remediation,
+            severity:    twc.test.severity,
+            filter:      twc.test.filter,
+            app_filter:  twc.test.app_filter,
+            conditions:  twc.conditions,
+            applicability: twc.applicability,
+        }
+    }
+}
+
 
 // A security policy (name, version, description).
 #[derive(Serialize, Deserialize)]
