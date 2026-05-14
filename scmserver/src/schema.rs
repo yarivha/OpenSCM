@@ -89,6 +89,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
             name TEXT,
             email TEXT,
             role TEXT,
+            email_verified INTEGER NOT NULL DEFAULT 1,
             UNIQUE(username, tenant_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
