@@ -44,7 +44,11 @@ pub fn adapt_sql(sql: &str) -> String {
                     "INTEGER PRIMARY KEY AUTOINCREMENT",
                     "BIGSERIAL PRIMARY KEY",
                 )
-                .replace("DEFAULT (datetime('now'))", "DEFAULT CURRENT_TIMESTAMP");
+                .replace("DEFAULT (datetime('now'))", "DEFAULT CURRENT_TIMESTAMP")
+                // PostgreSQL has no DATETIME type — use TIMESTAMP instead.
+                .replace(" DATETIME ", " TIMESTAMP ")
+                .replace(" DATETIME\n", " TIMESTAMP\n")
+                .replace(" DATETIME,", " TIMESTAMP,");
             // Transform single-statement INSERT OR IGNORE:
             // "INSERT OR IGNORE INTO t (c) VALUES (?)"
             //   → "INSERT INTO t (c) VALUES (?) ON CONFLICT DO NOTHING"
@@ -135,7 +139,7 @@ pub async fn column_exists(pool: &AnyPool, table: &str, column: &str) -> bool {
         DbBackend::Postgres => {
             let count: i64 = sqlx::query_scalar(
                 "SELECT COUNT(*) FROM information_schema.columns \
-                 WHERE table_schema = 'public' AND table_name = $1 AND column_name = $2",
+                 WHERE table_schema = 'public' AND table_name = ? AND column_name = ?",
             )
             .bind(table)
             .bind(column)
@@ -256,6 +260,24 @@ pub fn group_concat_col(col: &str) -> String {
     match get_db_backend() {
         DbBackend::Sqlite | DbBackend::Mysql => format!("GROUP_CONCAT({col})"),
         DbBackend::Postgres => format!("STRING_AGG({col}, ',')"),
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: rename_table_sql
+// Returns the SQL statement that renames a table.
+// SQLite and PostgreSQL: ALTER TABLE old RENAME TO new
+// MySQL: RENAME TABLE old TO new  (ALTER TABLE … RENAME TO is not supported)
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn rename_table_sql(old: &str, new: &str) -> String {
+    match get_db_backend() {
+        DbBackend::Sqlite | DbBackend::Postgres => {
+            format!("ALTER TABLE {old} RENAME TO {new}")
+        }
+        DbBackend::Mysql => {
+            format!("RENAME TABLE {old} TO {new}")
+        }
     }
 }
 

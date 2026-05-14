@@ -596,7 +596,7 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
         sqlx::query("DROP TABLE IF EXISTS policy_schedules_old")
             .execute(&mut *migration_tx).await?;
-        sqlx::query("ALTER TABLE policy_schedules RENAME TO policy_schedules_old")
+        sqlx::query(&db_compat::rename_table_sql("policy_schedules", "policy_schedules_old"))
             .execute(&mut *migration_tx).await?;
 
         sqlx::query(&db_compat::adapt_sql(
