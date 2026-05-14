@@ -190,17 +190,21 @@ pub async fn save_policy_report_logic(
             system_name: s_name,
             results: Vec::new(),
             is_passed: false,
+            pass_count: 0,
+            fail_count: 0,
         });
 
         entry.results.push(IndividualResult { test_name: t_name, status: status.clone() });
     }
 
-    // Recalculate is_passed after all results are collected:
-    // A system passes only when it has no FAILs AND at least one PASS.
-    // All-NA systems are considered non-passing (consistent with live view).
+    // Recalculate is_passed, pass_count, and fail_count after all results are collected.
+    // A system passes when it has no FAILs AND at least one PASS.
+    // All-NA systems (pass_count == 0 && fail_count == 0) are shown as "NOT APPLICABLE"
+    // by the template — is_passed value does not affect their display.
     for entry in reports_map.values_mut() {
-        entry.is_passed = entry.results.iter().all(|r| r.status == "PASS" || r.status == "NA")
-            && entry.results.iter().any(|r| r.status == "PASS");
+        entry.pass_count = entry.results.iter().filter(|r| r.status == "PASS").count();
+        entry.fail_count = entry.results.iter().filter(|r| r.status == "FAIL").count();
+        entry.is_passed = entry.fail_count == 0 && entry.pass_count > 0;
     }
 
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();

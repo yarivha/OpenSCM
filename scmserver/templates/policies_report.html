@@ -118,15 +118,16 @@
       </div>
 
       {% for system in report.system_reports %}
-      <div class="card card-outline {% if system.is_passed %}card-success{% else %}card-danger{% endif %} shadow-sm">
+      {% set exempt = system.pass_count == 0 and system.fail_count == 0 %}
+      <div class="card card-outline {% if exempt %}card-secondary{% elif system.is_passed %}card-success{% else %}card-danger{% endif %} shadow-sm">
         <div class="card-header">
           <h3 class="card-title font-weight-bold">
-            <i class="fas fa-server mr-2 {% if system.is_passed %}text-success{% else %}text-danger{% endif %}"></i>
+            <i class="fas fa-server mr-2 {% if exempt %}text-muted{% elif system.is_passed %}text-success{% else %}text-danger{% endif %}"></i>
             {{ system.system_name }}
           </h3>
           <div class="card-tools">
-            <span class="badge {% if system.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1">
-              {% if system.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
+            <span class="badge {% if exempt %}badge-secondary{% elif system.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1">
+              {% if exempt %}NOT APPLICABLE{% elif system.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
             </span>
             <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
           </div>
@@ -182,7 +183,9 @@
                  <small class="text-muted">System must meet all policy requirements to achieve compliance.</small>
                </div>
                <div class="col-sm-4 text-right">
-                 {% if system.is_passed %}
+                 {% if exempt %}
+                    <span class="h5 text-muted font-weight-bold"><i class="fas fa-minus-circle mr-1"></i> NOT APPLICABLE</span>
+                 {% elif system.is_passed %}
                     <span class="h5 text-success font-weight-bold"><i class="fas fa-shield-alt mr-1"></i> PASSED</span>
                  {% else %}
                     <span class="h5 text-danger font-weight-bold"><i class="fas fa-exclamation-triangle mr-1"></i> FAILED</span>

@@ -895,12 +895,17 @@ pub async fn policies_report(
     }
 
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
-        let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
-            && results.iter().any(|r| r.status == "PASS");
-        SystemReport { system_name: name, results, is_passed }
+        let pass_count = results.iter().filter(|r| r.status == "PASS").count();
+        let fail_count = results.iter().filter(|r| r.status == "FAIL").count();
+        // A system passes when it has no FAILs AND at least one PASS.
+        // All-NA systems (pass_count == 0 && fail_count == 0) are shown as
+        // "NOT APPLICABLE" by the template — is_passed value does not matter for them.
+        let is_passed = fail_count == 0 && pass_count > 0;
+        SystemReport { system_name: name, results, is_passed, pass_count, fail_count }
     }).collect();
 
-    let fail_count = system_reports.iter().filter(|s| !s.is_passed && s.results.iter().any(|r| r.status != "NA")).count();
+    // All-NA systems (exempt) are not counted as failures.
+    let fail_count = system_reports.iter().filter(|s| s.fail_count > 0).count();
 
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
@@ -1011,9 +1016,10 @@ pub async fn policies_report_download(
     }
 
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
-        let is_passed = results.iter().all(|r| r.status == "PASS" || r.status == "NA")
-            && results.iter().any(|r| r.status == "PASS");
-        SystemReport { system_name: name, results, is_passed }
+        let pass_count = results.iter().filter(|r| r.status == "PASS").count();
+        let fail_count = results.iter().filter(|r| r.status == "FAIL").count();
+        let is_passed = fail_count == 0 && pass_count > 0;
+        SystemReport { system_name: name, results, is_passed, pass_count, fail_count }
     }).collect();
 
     let report_data = ReportData {

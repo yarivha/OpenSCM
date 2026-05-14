@@ -377,6 +377,10 @@ pub struct SystemReport {
     pub system_name: String,
     pub results: Vec<IndividualResult>,
     pub is_passed: bool,
+    /// Number of PASS results — used by templates for the all-NA "exempt" check.
+    pub pass_count: usize,
+    /// Number of FAIL results — used by templates for the all-NA "exempt" check.
+    pub fail_count: usize,
 }
 
 // A single test result (test name + PASS/FAIL/NA status) inside a report.
