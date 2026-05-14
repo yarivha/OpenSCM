@@ -8,7 +8,7 @@
 
 use axum::{extract::Extension, http::StatusCode, response::IntoResponse, Json};
 use tokio::sync::mpsc;
-use sqlx::{AnyPool, QueryBuilder};
+use sqlx::{AnyPool, QueryBuilder, Row};
 use std::collections::HashMap;
 use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
@@ -218,6 +218,38 @@ pub async fn send(
                     Json(serde_json::json!({"error": "Invalid public key format"})),
                 )
                     .into_response();
+            }
+        }
+
+        // If this public key already exists (e.g. client lost its stored ID),
+        // return the existing system rather than creating a duplicate row.
+        if let Some(ref pub_key) = payload.public_key {
+            match sqlx::query("SELECT id, status FROM systems WHERE key = ? AND tenant_id = ?")
+                .bind(pub_key)
+                .bind(tenant_id)
+                .fetch_optional(&pool)
+                .await
+            {
+                Ok(Some(row)) => {
+                    let existing_id: i64 = row.get("id");
+                    let existing_status: String = row.try_get("status").unwrap_or_else(|_| "pending".into());
+                    info!(
+                        "Agent '{}' re-registration: key already exists as system ID {} (status: {})",
+                        payload.hostname, existing_id, existing_status
+                    );
+                    response_data = serde_json::json!({
+                        "status": existing_status,
+                        "id": existing_id,
+                        "tenant_id": tenant_id,
+                        "command": "REGISTER"
+                    });
+                    // Fall through to return response_data at the end
+                    return Json(response_data).into_response();
+                }
+                Ok(None) => { /* not found — proceed with normal insert */ }
+                Err(e) => {
+                    error!("Failed to check existing registration for '{}': {}", payload.hostname, e);
+                }
             }
         }
 

@@ -70,8 +70,8 @@ pub async fn systems(
                     COALESCE(s.arch, 'NA') AS system_arch,
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
-                    COALESCE(CAST(s.created_date AS TEXT), '') AS created_date,
-                    COALESCE(CAST(s.last_seen    AS TEXT), '') AS last_seen,
+                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '') AS created_date,
+                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen),    '') AS last_seen,
                     CASE
                         WHEN s.status != 'active' THEN 0
                         WHEN s.last_seen IS NULL THEN 0
@@ -104,8 +104,8 @@ pub async fn systems(
                     COALESCE(s.arch, 'NA') AS system_arch,
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
-                    COALESCE(CAST(s.created_date AS TEXT), '') AS created_date,
-                    COALESCE(CAST(s.last_seen    AS TEXT), '') AS last_seen,
+                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '') AS created_date,
+                    COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen),    '') AS last_seen,
                     CASE
                         WHEN s.status != 'active' THEN 0
                         WHEN s.last_seen IS NULL THEN 0
@@ -501,8 +501,8 @@ pub async fn systems_pending(
             COALESCE(s.arch, 'NA') AS system_arch,
             COALESCE(s.status, 'NA') AS system_status,
             COALESCE(GROUP_CONCAT(sg.name), 'none') AS group_names,
-            COALESCE(s.created_date, '') AS created_date,
-            COALESCE(s.last_seen, '') AS last_seen
+            COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '') AS created_date,
+            COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen),    '') AS last_seen
         FROM systems AS s
         LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
         LEFT JOIN system_groups AS sg ON sig.group_id = sg.id
@@ -1346,7 +1346,7 @@ pub async fn fetch_system_report_data(
 ) -> Result<SystemReportData, sqlx::Error> {
     let sys_row = sqlx::query(
         "SELECT id, name, os, arch, ip, compliance_score,
-                CAST(last_seen AS TEXT) AS last_seen
+                strftime('%Y-%m-%dT%H:%M:%SZ', last_seen) AS last_seen
          FROM systems WHERE id = ? AND tenant_id = ?",
     )
     .bind(system_id)
