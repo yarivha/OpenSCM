@@ -318,10 +318,18 @@ pub async fn tests_add_save(
     .execute(&mut *tx)
     .await;
 
-    let test_id = match result {
-        Ok(r) => r.last_insert_id().unwrap_or(0),
+    if let Err(e) = result {
+        let encoded = urlencoding::encode(&format!("Database insert error: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
+    }
+    let test_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
+        .fetch_one(&mut *tx)
+        .await
+    {
+        Ok(id) => id,
         Err(e) => {
-            let encoded = urlencoding::encode(&format!("Database insert error: {}", e)).to_string();
+            let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
             tx.rollback().await.ok();
             return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
         }

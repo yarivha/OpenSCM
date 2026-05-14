@@ -297,8 +297,16 @@ pub async fn policies_add_save(
     .execute(&mut *tx)
     .await;
 
-    let policy_id = match result {
-        Ok(res) => res.last_insert_id().unwrap_or(0),
+    if let Err(e) = result {
+        let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
+    }
+    let policy_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
+        .fetch_one(&mut *tx)
+        .await
+    {
+        Ok(id) => id,
         Err(e) => {
             let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
             tx.rollback().await.ok();

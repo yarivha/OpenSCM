@@ -740,17 +740,27 @@ pub async fn system_groups_add_save(
     let systems: Option<Vec<String>> = form_data.get("systems").cloned();
 
     // The bind now sends a String (possibly "") instead of Option<String>
-    let result = sqlx::query(
+    if let Err(e) = sqlx::query(
         "INSERT INTO system_groups (tenant_id, name, description) VALUES (?, ?, ?)",
     )
     .bind(&auth.tenant_id)
     .bind(&name)
     .bind(&description)
     .execute(&mut *tx)
-    .await;
+    .await
+    {
+        let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+        tx.rollback().await.ok();
+        return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
+    }
 
-    let group_id = match result {
-        Ok(res) => res.last_insert_id().unwrap_or(0),
+    // sqlx AnyPool always returns last_insert_id=None for SQLite; use
+    // last_insert_rowid() on the same transaction connection instead.
+    let group_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
+        .fetch_one(&mut *tx)
+        .await
+    {
+        Ok(id) => id,
         Err(e) => {
             let encoded = urlencoding::encode(&format!("Database error: {}", e)).to_string();
             tx.rollback().await.ok();

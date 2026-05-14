@@ -241,8 +241,11 @@ pub async fn send(
         .await;
 
         match res {
-            Ok(r) => {
-                let new_id = r.last_insert_id().unwrap_or(0);
+            Ok(_r) => {
+                let new_id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
+                    .fetch_one(&pool)
+                    .await
+                    .unwrap_or(0);
                 info!(
                     "Agent '{}' registered with ID {} (pending approval).",
                     payload.hostname, new_id
