@@ -314,7 +314,7 @@ pub async fn reports_view(
         }
     };
 
-    let system_reports: Vec<SystemReport> = match serde_json::from_str(
+    let mut system_reports: Vec<SystemReport> = match serde_json::from_str(
         report.report_results.as_deref().unwrap_or("[]"),
     ) {
         Ok(r) => r,
@@ -323,6 +323,15 @@ pub async fn reports_view(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    // Backfill pass_count/fail_count for reports saved before those fields existed.
+    for s in &mut system_reports {
+        if s.pass_count == 0 && s.fail_count == 0 && !s.results.is_empty() {
+            s.pass_count = s.results.iter().filter(|r| r.status == "PASS").count();
+            s.fail_count = s.results.iter().filter(|r| r.status == "FAIL").count();
+            s.is_passed  = s.fail_count == 0 && s.pass_count > 0;
+        }
+    }
 
     // Check if the originating policy still exists (by name + version)
     let live_policy_id: Option<i32> = sqlx::query_scalar(
@@ -335,7 +344,7 @@ pub async fn reports_view(
     .await
     .unwrap_or(None);
 
-    let fail_count = system_reports.iter().filter(|s| !s.is_passed).count();
+    let fail_count = system_reports.iter().filter(|s| s.fail_count > 0).count();
 
     let mut context = Context::new();
     context.insert("report", &report);
@@ -426,7 +435,7 @@ pub async fn reports_download(
     };
 
 
-    let system_reports: Vec<SystemReport> = match serde_json::from_str(
+    let mut system_reports: Vec<SystemReport> = match serde_json::from_str(
         report.report_results.as_deref().unwrap_or("[]"),
     ) {
         Ok(r) => r,
@@ -435,6 +444,15 @@ pub async fn reports_download(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    // Backfill pass_count/fail_count for reports saved before those fields existed.
+    for s in &mut system_reports {
+        if s.pass_count == 0 && s.fail_count == 0 && !s.results.is_empty() {
+            s.pass_count = s.results.iter().filter(|r| r.status == "PASS").count();
+            s.fail_count = s.results.iter().filter(|r| r.status == "FAIL").count();
+            s.is_passed  = s.fail_count == 0 && s.pass_count > 0;
+        }
+    }
 
     // PDF Generation
     const FONT_REGULAR: &[u8] =

@@ -378,8 +378,11 @@ pub struct SystemReport {
     pub results: Vec<IndividualResult>,
     pub is_passed: bool,
     /// Number of PASS results — used by templates for the all-NA "exempt" check.
+    /// #[serde(default)] keeps old saved reports (which lack this field) deserializing cleanly.
+    #[serde(default)]
     pub pass_count: usize,
     /// Number of FAIL results — used by templates for the all-NA "exempt" check.
+    #[serde(default)]
     pub fail_count: usize,
 }
 
