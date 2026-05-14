@@ -603,7 +603,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     }
 
     sqlx::query(&db_compat::adapt_sql(
-        "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 9)"
+        "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 10)"
     ))
     .execute(pool)
     .await?;
@@ -968,6 +968,73 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE schema_info SET version = 9")
             .execute(pool).await?;
         info!("Schema migration v8 → v9 complete.");
+    }
+
+    // v9 → v10: backfill columns and tables that belong in the base schema but
+    // were missing from initialize_database on installs stamped at v9.
+    //   • users.email_verified  — added for SaaS registration/login
+    //   • tenants.status        — added for EE/SaaS tenant management
+    //   • tenants.plan          — added for EE/SaaS plan enforcement
+    //   • email_verifications   — SaaS registration tokens
+    //   • password_resets       — SaaS password reset tokens
+    //   • plan_limits           — SaaS per-plan resource caps
+    if version < 10 {
+        info!("Running schema migration v9 → v10 (unified base schema backfill)...");
+
+        if !db_compat::column_exists(pool, "users", "email_verified").await {
+            let _ = sqlx::query(
+                "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"
+            ).execute(pool).await;
+        }
+
+        if !db_compat::column_exists(pool, "tenants", "status").await {
+            let _ = sqlx::query(
+                "ALTER TABLE tenants ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
+            ).execute(pool).await;
+        }
+
+        if !db_compat::column_exists(pool, "tenants", "plan").await {
+            let _ = sqlx::query(
+                "ALTER TABLE tenants ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'"
+            ).execute(pool).await;
+        }
+
+        sqlx::query(&db_compat::adapt_sql(
+            "CREATE TABLE IF NOT EXISTS email_verifications (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL,
+                tenant_id  TEXT    NOT NULL,
+                token      TEXT    NOT NULL UNIQUE,
+                expires_at TEXT    NOT NULL,
+                created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )"
+        )).execute(pool).await?;
+
+        sqlx::query(&db_compat::adapt_sql(
+            "CREATE TABLE IF NOT EXISTS password_resets (
+                id         INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id    INTEGER NOT NULL,
+                token      TEXT    NOT NULL UNIQUE,
+                expires_at TEXT    NOT NULL,
+                used       INTEGER NOT NULL DEFAULT 0,
+                created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+                FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+            )"
+        )).execute(pool).await?;
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS plan_limits (
+                plan      TEXT    NOT NULL,
+                resource  TEXT    NOT NULL,
+                max_count INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (plan, resource)
+            )"
+        ).execute(pool).await?;
+
+        sqlx::query("UPDATE schema_info SET version = 10")
+            .execute(pool).await?;
+        info!("Schema migration v9 → v10 complete.");
     }
 
     Ok(())
