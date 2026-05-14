@@ -398,9 +398,13 @@ pub async fn send_system_info(
                     verify_server_response(inner_json, &signed_res.signature, &verifier)
                 {
                     error!(
-                        "SECURITY ALERT: Invalid server signature from '{}': {}. Connection dropped.",
+                        "SECURITY ALERT: Invalid server signature from '{}': {}. \
+                         Dropping cached server key — will re-handshake next cycle.",
                         base_url, e
                     );
+                    // Remove the stale server public key so the next heartbeat
+                    // includes our public key and triggers a fresh key exchange.
+                    let _ = fs::remove_file(&server_pub_path);
                     return Ok(());
                 }
                 debug!("Server signature verified for '{}'.", base_url);
