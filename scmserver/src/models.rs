@@ -123,7 +123,7 @@ pub struct PolicySchedule {
     pub id: i32,
     pub tenant_id: String,
     pub policy_id: i32,
-    pub enabled: bool, // sqlx handles SQLite 0/1 to bool automatically
+    pub enabled: i64, // AnyPool CAST(enabled AS INTEGER) yields BIGINT; Tera treats 0/1 as falsy/truthy
     pub schedule_type: String, // "scan" or "report"
     pub frequency: String, // "daily", "weekly", "monthly", "custom"
     pub cron_expression: Option<String>, // Only used for "custom"
