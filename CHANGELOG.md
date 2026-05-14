@@ -7,9 +7,9 @@ All notable changes to OpenSCM are documented here.
 ## [0.3.0] - 2026-05-14
 
 ### Added
-- **Multi-database backend support** — CE now uses `sqlx::AnyPool` internally, laying the groundwork for MySQL and PostgreSQL in addition to SQLite. A new `DbBackend` enum and `set_db_backend()` / `get_db_backend()` globals are set once at startup; the new `db_compat` module provides backend-agnostic SQL helpers (`schema_info_exists_sql`, `column_exists`). **No configuration change needed for existing SQLite installs.**
-- **`db_compat` module** — backend-agnostic schema-introspection helpers used by EE/SaaS migrations (`column_exists`) and fresh-install detection (`schema_info_exists_sql`), each emitting the correct SQL dialect for SQLite, MySQL, or PostgreSQL.
-- **`DatabaseConfig` multi-backend fields** — `db_type`, `mysql_url`, and `postgres_url` added to the server config struct so EE/SaaS can target MySQL or PostgreSQL without code changes.
+- **MySQL and PostgreSQL support (EE / SaaS)** — EE and SaaS can now connect to MySQL or PostgreSQL instead of SQLite by setting `db_type = "mysql"` / `"postgres"` and the corresponding `mysql_url` / `postgres_url` in the server config. SQLite remains the default; existing installs require no configuration change.
+- **`db_compat` module** — new backend-agnostic SQL helper library used by all query sites: `adapt_sql` (rewrites `AUTOINCREMENT`, `INSERT OR IGNORE`, `DEFAULT datetime('now')`), `last_insert_id_sql`, `format_datetime_col`, `unix_diff_col`, `date_group_col`, `group_concat_col`, `table_exists_sql`, `upsert_results_sql`, `upsert_schedule_sql`, `upsert_setting_sql`, `rename_table_sql`, `column_exists`, `schema_info_exists_sql`, and `admin_role_trigger_sql`. Each emits the correct SQL dialect for SQLite, MySQL, or PostgreSQL.
+- **`DatabaseConfig` multi-backend fields** — `db_type`, `mysql_url`, and `postgres_url` added to the server config struct.
 
 ### Fixed
 - **Bootstrap admin created with wrong role on fresh CE install** — the initial admin user was assigned role `admin` instead of `superuser`, leaving no superuser on a brand-new CE installation. Fixed to assign `superuser` at install time.
@@ -24,10 +24,14 @@ All notable changes to OpenSCM are documented here.
 - **`email_verified` column referenced in CE login query** — CE's login handler referenced a SaaS-only column, causing SQL errors. Column reference removed from CE.
 - **Severity prefix cluttered test selection in Add Policy form** — removed the `[SEVERITY]` prefix from test options in the dual-listbox so only the test name is shown.
 - **macOS client config file path incorrect** — fixed the config file lookup path on macOS.
+- **PostgreSQL `DATETIME` type unsupported** — `adapt_sql()` now converts `DATETIME` column declarations to `TIMESTAMP` for PostgreSQL; without this all `CREATE TABLE` statements would have failed on PG.
+- **PostgreSQL `column_exists()` used native `$1`/`$2` placeholders** — AnyPool requires `?` for all backends; using `$1`/`$2` directly caused a runtime panic during the v3→v4 migration on PostgreSQL.
+- **MySQL `ALTER TABLE … RENAME TO` syntax unsupported** — the v2→v3 schema migration used SQLite/PostgreSQL rename syntax. Replaced with a new `db_compat::rename_table_sql()` helper that emits `RENAME TABLE … TO` on MySQL.
 
 ### Internal
-- **EE AnyPool migration** — EE `main.rs` now sets `DbBackend` at startup and calls `set_db_backend()`. `run_ee_migrations` uses `db_compat::column_exists` for backend-agnostic schema checks.
-- **SaaS AnyPool migration** — all SaaS source files (`admin.rs`, `auth_email.rs`, `email.rs`, `plan_enforce.rs`, `register.rs`, `schema.rs`, `support.rs`, `main.rs`) migrated from `SqlitePool` to `AnyPool`. SaaS remains SQLite-only but is now type-compatible with the shared `AppState`.
+- **CE AnyPool migration** — CE core (`scmserver`) migrated from `SqlitePool` to `AnyPool` throughout. All SQLite-specific SQL in `client.rs`, `dashboard.rs`, `install.rs`, `policies.rs`, `schema.rs`, `settings.rs`, `systems.rs`, and `tests.rs` replaced with `db_compat` helpers. `sqlx` Cargo features extended to include `mysql` and `postgres` so all drivers are compiled in.
+- **EE multi-backend pool** — EE `main.rs` reads `db_type` from config, sets `DbBackend` at startup, and connects to the appropriate backend. SQLite PRAGMAs are guarded behind a backend check.
+- **SaaS multi-backend pool** — SaaS aligned with EE: `main.rs` now reads `db_type` from config and supports SQLite (default), MySQL, and PostgreSQL. All SaaS source files migrated from `SqlitePool` to `AnyPool`.
 
 ---
 
