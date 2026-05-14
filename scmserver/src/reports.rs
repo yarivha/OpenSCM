@@ -51,7 +51,7 @@ pub async fn reports(
 
     // Fetch policy reports
     let policy_reports: Vec<Report> = match sqlx::query(
-        "SELECT id, submission_date, policy_name, policy_version, submitter_name
+        "SELECT id, CAST(submission_date AS TEXT) AS submission_date, policy_name, policy_version, submitter_name
          FROM reports
          WHERE tenant_id = ?
          ORDER BY submission_date DESC",
@@ -82,7 +82,7 @@ pub async fn reports(
 
     // Fetch system reports
     let system_reports: Vec<SavedSystemReport> = match sqlx::query_as::<_, SavedSystemReport>(
-        "SELECT id, tenant_id, submission_date, system_id, system_name, submitter_name, NULL as report_data
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date, system_id, system_name, submitter_name, NULL as report_data
          FROM system_reports
          WHERE tenant_id = ?
          ORDER BY submission_date DESC",
@@ -280,8 +280,9 @@ pub async fn reports_view(
 
     // Fetch the saved report
     let report = match sqlx::query_as::<_, Report>(
-        "SELECT id, tenant_id, submission_date, policy_name, policy_version,
-                policy_description, submitter_name, tests_metadata, report_results
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                policy_name, policy_version, policy_description,
+                submitter_name, tests_metadata, report_results
          FROM reports
          WHERE id = ? AND tenant_id = ?",
     )
@@ -401,8 +402,9 @@ pub async fn reports_download(
 
     // Fetch the saved report
     let report = match sqlx::query_as::<_, Report>(
-        "SELECT id, tenant_id, submission_date, policy_name, policy_version,
-                policy_description, submitter_name, tests_metadata, report_results
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                policy_name, policy_version, policy_description,
+                submitter_name, tests_metadata, report_results
          FROM reports
          WHERE id = ? AND tenant_id = ?",
     )
@@ -787,7 +789,8 @@ pub async fn system_reports_view(
     }
 
     let row = match sqlx::query_as::<_, SavedSystemReport>(
-        "SELECT id, tenant_id, submission_date, system_id, system_name, submitter_name, report_data
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                system_id, system_name, submitter_name, report_data
          FROM system_reports
          WHERE id = ? AND tenant_id = ?",
     )
@@ -1090,7 +1093,8 @@ pub async fn system_reports_download(
     }
 
     let row = match sqlx::query_as::<_, SavedSystemReport>(
-        "SELECT id, tenant_id, submission_date, system_id, system_name, submitter_name, report_data
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                system_id, system_name, submitter_name, report_data
          FROM system_reports
          WHERE id = ? AND tenant_id = ?",
     )

@@ -377,7 +377,9 @@ pub async fn start_background_scheduler(pool: AnyPool) {
 
             // --- TASK A: POLICY SCHEDULER (scan + report) ---
             let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
-                "SELECT * FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
+                "SELECT id, tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression,
+                        CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+                 FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
             )
             .bind(&now_str)
             .fetch_all(&loop_pool)
