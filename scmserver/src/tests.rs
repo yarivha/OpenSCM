@@ -139,11 +139,11 @@ fn build_tests_with_conditions(
         let test_id = t.id.unwrap_or(0) as i64;
 
         let conds: Vec<TestCondition> = all_conditions.iter()
-            .filter(|c| c.test_id == test_id && c.ctype == "condition")
+            .filter(|c| c.test_id == test_id && c.r#type =="condition")
             .cloned().collect();
 
         let app: Vec<TestCondition> = all_conditions.iter()
-            .filter(|c| c.test_id == test_id && c.ctype == "applicability")
+            .filter(|c| c.test_id == test_id && c.r#type =="applicability")
             .cloned().collect();
 
         TestWithConditions {
@@ -193,7 +193,7 @@ pub async fn tests(
 
     // Fetch all conditions for this tenant in one query
     let all_conditions = sqlx::query_as::<_, TestCondition>(
-        "SELECT id, tenant_id, test_id, ctype, element, input, selement, comparison, sinput
+        "SELECT id, tenant_id, test_id, `type`, element, input, selement, condition, sinput
          FROM test_conditions WHERE tenant_id = ? ORDER BY test_id, id ASC",
     )
     .bind(&auth.tenant_id)
@@ -339,7 +339,7 @@ pub async fn tests_add_save(
     let conditions = extract_conditions_from_form(&form_data, 10);
     for (element, input, selement, condition, sinput) in &conditions {
         if let Err(e) = sqlx::query(
-            "INSERT INTO test_conditions (tenant_id, test_id, ctype, element, input, selement, comparison, sinput)
+            "INSERT INTO test_conditions (tenant_id, test_id, `type`, element, input, selement, condition, sinput)
              VALUES (?, ?, 'condition', ?, ?, ?, ?, ?)",
         )
         .bind(&auth.tenant_id).bind(test_id)
@@ -369,7 +369,7 @@ pub async fn tests_add_save(
                 .and_then(|v| v.first()).cloned().unwrap_or_default();
 
             if let Err(e) = sqlx::query(
-                "INSERT INTO test_conditions (tenant_id, test_id, ctype, element, input, selement, comparison, sinput)
+                "INSERT INTO test_conditions (tenant_id, test_id, `type`, element, input, selement, condition, sinput)
                  VALUES (?, ?, 'applicability', ?, ?, ?, ?, ?)",
             )
             .bind(&auth.tenant_id).bind(test_id)
@@ -457,11 +457,11 @@ pub async fn tests_edit(
         }
     };
 
-    // Fetch test conditions (ctype='condition')
+    // Fetch test conditions (type='condition')
     let test_conds = sqlx::query_as::<_, TestCondition>(
-        "SELECT id, tenant_id, test_id, ctype, element, input, selement, comparison, sinput
+        "SELECT id, tenant_id, test_id, `type`, element, input, selement, condition, sinput
          FROM test_conditions
-         WHERE test_id = ? AND tenant_id = ? AND ctype = 'condition'
+         WHERE test_id = ? AND tenant_id = ? AND `type` = 'condition'
          ORDER BY id ASC LIMIT 10",
     )
     .bind(id).bind(&auth.tenant_id)
@@ -469,9 +469,9 @@ pub async fn tests_edit(
 
     // Fetch applicability conditions
     let app_conditions = sqlx::query_as::<_, TestCondition>(
-        "SELECT id, tenant_id, test_id, ctype, element, input, selement, comparison, sinput
+        "SELECT id, tenant_id, test_id, `type`, element, input, selement, condition, sinput
          FROM test_conditions
-         WHERE test_id = ? AND tenant_id = ? AND ctype = 'applicability'
+         WHERE test_id = ? AND tenant_id = ? AND `type` = 'applicability'
          ORDER BY id ASC LIMIT 3",
     )
     .bind(id).bind(&auth.tenant_id)
@@ -578,7 +578,7 @@ pub async fn tests_edit_save(
     let conditions = extract_conditions_from_form(&form_data, 10);
     for (element, input, selement, condition, sinput) in &conditions {
         if let Err(e) = sqlx::query(
-            "INSERT INTO test_conditions (tenant_id, test_id, ctype, element, input, selement, comparison, sinput)
+            "INSERT INTO test_conditions (tenant_id, test_id, `type`, element, input, selement, condition, sinput)
              VALUES (?, ?, 'condition', ?, ?, ?, ?, ?)",
         )
         .bind(&auth.tenant_id).bind(id)
@@ -608,7 +608,7 @@ pub async fn tests_edit_save(
                 .and_then(|v| v.first()).cloned().unwrap_or_default();
 
             if let Err(e) = sqlx::query(
-                "INSERT INTO test_conditions (tenant_id, test_id, ctype, element, input, selement, comparison, sinput)
+                "INSERT INTO test_conditions (tenant_id, test_id, `type`, element, input, selement, condition, sinput)
                  VALUES (?, ?, 'applicability', ?, ?, ?, ?, ?)",
             )
             .bind(&auth.tenant_id).bind(id)

@@ -89,13 +89,11 @@ pub struct TestCondition {
     pub id: i64,
     pub tenant_id: String,
     pub test_id: i64,
-    /// "condition" or "applicability"
-    pub ctype: String,
+    pub r#type: String,
     pub element: String,
     pub input: String,
     pub selement: String,
-    /// Comparison operator (e.g. CONTAINS, EQUALS, REGEX).
-    pub comparison: Option<String>,
+    pub condition: Option<String>,
     pub sinput: Option<String>,
 }
 

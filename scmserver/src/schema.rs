@@ -200,11 +200,11 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             test_id INTEGER NOT NULL,
             name TEXT,
             description TEXT,
-            ctype TEXT NOT NULL,
+            `type` TEXT NOT NULL,
             element TEXT NOT NULL,
             input TEXT NOT NULL,
             selement TEXT NOT NULL,
-            comparison TEXT,
+            condition TEXT,
             sinput TEXT,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
@@ -509,6 +509,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
         ('default', 'offline_threshold', '3600', 'Seconds without activity before system is marked offline'),
+        ('default', 'auto_prune_inactive', '0', 'Minutes without activity before an inactive system is auto-deleted (0 = disabled)'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
         ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status'),
         ('default', 'smtp_host', '', 'SMTP relay hostname'),
@@ -567,7 +568,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: initialize_database
 // Creates all tables, indexes, triggers, and seed data for a fresh install.
-// Stamps schema_info.version = 11 so run_migrations skips all steps.
+// Stamps schema_info.version = 13 so run_migrations skips all steps.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
@@ -625,7 +626,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     sqlx::query(
-        "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 11)"
+        "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 13)"
     )
     .execute(pool)
     .await?;
@@ -843,7 +844,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
                     sqlx::query(
                         "INSERT INTO test_conditions
-                             (tenant_id, test_id, ctype, element, input, selement, comparison, sinput)
+                             (tenant_id, test_id, `type`, element, input, selement, condition, sinput)
                          VALUES (?, ?, 'condition', ?, ?, ?, ?, ?)"
                     )
                     .bind(&tenant_id)
@@ -1154,6 +1155,43 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE schema_info SET version = 11")
             .execute(pool).await?;
         info!("Schema migration v10 → v11 complete.");
+    }
+
+    // v11 → v12: revert MySQL-era column renames in test_conditions now that
+    // MySQL support is dropped. Restores "type" and "condition" so the JSON
+    // wire format to the scmclient agent matches without serde rename shims.
+    if version < 12 {
+        info!("Running schema migration v11 → v12 (restore test_conditions column names)...");
+
+        if column_exists(pool, "test_conditions", "ctype").await {
+            let _ = sqlx::query(
+                "ALTER TABLE test_conditions RENAME COLUMN ctype TO \"type\"",
+            ).execute(pool).await;
+        }
+        if column_exists(pool, "test_conditions", "comparison").await {
+            let _ = sqlx::query(
+                "ALTER TABLE test_conditions RENAME COLUMN comparison TO condition",
+            ).execute(pool).await;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 12")
+            .execute(pool).await?;
+        info!("Schema migration v11 → v12 complete.");
+    }
+
+    // v12 → v13: seed auto_prune_inactive for all existing tenants.
+    if version < 13 {
+        info!("Running schema migration v12 → v13 (seed auto_prune_inactive)...");
+        sqlx::query(
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
+             SELECT id, 'auto_prune_inactive', '0',
+                    'Minutes without activity before an inactive system is auto-deleted (0 = disabled)'
+             FROM tenants",
+        )
+        .execute(pool).await?;
+        sqlx::query("UPDATE schema_info SET version = 13")
+            .execute(pool).await?;
+        info!("Schema migration v12 → v13 complete.");
     }
 
     Ok(())

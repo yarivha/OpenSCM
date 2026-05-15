@@ -26,6 +26,7 @@ use crate::handlers::{render_template, parse_form_data};
 pub struct Settings {
     pub schema_version: String,
     pub offline_threshold: String,
+    pub auto_prune_inactive: String,
     pub compliance_sat: String,
     pub compliance_marginal: String,
     pub smtp_host:     String,
@@ -93,6 +94,7 @@ pub async fn settings(
     let settings = Settings {
         schema_version:    schema_version.to_string(),
         offline_threshold: map.get("offline_threshold").cloned().unwrap_or_else(|| "3600".to_string()),
+        auto_prune_inactive: map.get("auto_prune_inactive").cloned().unwrap_or_else(|| "0".to_string()),
         compliance_sat:    map.get("compliance_sat").cloned().unwrap_or_else(|| "80".to_string()),
         compliance_marginal: map.get("compliance_marginal").cloned().unwrap_or_else(|| "60".to_string()),
         smtp_host:     map.get("smtp_host").cloned().unwrap_or_default(),
@@ -138,13 +140,20 @@ pub async fn settings_save(
     let form_data = parse_form_data(&raw_string);
 
     // M7: Validate numeric settings before persisting.
-    let raw_threshold = form_data.get("offline_threshold").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let raw_sat       = form_data.get("compliance_sat").and_then(|v| v.first()).cloned().unwrap_or_default();
-    let raw_marginal  = form_data.get("compliance_marginal").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_threshold    = form_data.get("offline_threshold").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_auto_prune   = form_data.get("auto_prune_inactive").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_sat          = form_data.get("compliance_sat").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_marginal     = form_data.get("compliance_marginal").and_then(|v| v.first()).cloned().unwrap_or_default();
 
     let threshold: i64 = match raw_threshold.parse() {
         Ok(v) if v >= 60 => v,
         _ => return Redirect::to("/settings?error_message=Offline+threshold+must+be+a+number+%E2%89%A560+seconds").into_response(),
+    };
+
+    let auto_prune: i64 = match raw_auto_prune.parse::<i64>() {
+        Ok(0) => 0,
+        Ok(v) if v >= 1 => v,
+        _ => return Redirect::to("/settings?error_message=Auto-prune+threshold+must+be+0+(disabled)+or+a+positive+number+of+minutes").into_response(),
     };
 
     let sat: i64 = match raw_sat.parse() {
@@ -163,6 +172,7 @@ pub async fn settings_save(
 
     let mut updates: Vec<(&str, String)> = vec![
         ("offline_threshold",   threshold.to_string()),
+        ("auto_prune_inactive", auto_prune.to_string()),
         ("compliance_sat",      sat.to_string()),
         ("compliance_marginal", marginal.to_string()),
     ];

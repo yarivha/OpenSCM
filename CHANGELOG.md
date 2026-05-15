@@ -4,6 +4,20 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.3.3] - 2026-05-15
+
+### Fixed
+- **Agent results not stored — `missing field 'type'` deserialization error** — the v10→v11 MySQL-compatibility migration renamed `test_conditions.type` → `ctype` and `test_conditions.condition` → `comparison` on the server, but the scmclient agent still expected the original JSON field names. Every heartbeat that returned tests caused the agent to fail deserializing, so no compliance results were ever sent back. Fixed by reverting both columns to their original names (`type`, `condition`) via a new v11→v12 migration; the Rust struct field names match again so the JSON wire format is identical to what the agent expects, with no `serde(rename)` shims.
+
+### Added
+- **Auto-delete inactive systems** — new admin setting `auto_prune_inactive` (in minutes) automatically removes active systems whose `last_seen` is older than the configured threshold. `0` disables the feature (default). Runs every 60 seconds inside the existing scheduler loop. Per-tenant setting, exposed in the General tab of the Admin Settings page.
+
+### Changed
+- **`test_conditions.type` and `test_conditions.condition` restored** — the MySQL-era column names (`ctype`, `comparison`) reverted to the originals via migration v11→v12. SQLite identifier quoting (backticks) used in raw SQL where `type` collides with parser keywords. No external API change.
+- **Schema version bumped to 13** — fresh installs are stamped at v13; existing installs run the new v11→v12 (column rename) and v12→v13 (seed `auto_prune_inactive` for all tenants) migrations on startup.
+
+---
+
 ## [0.3.2] - 2026-05-15
 
 ### Changed

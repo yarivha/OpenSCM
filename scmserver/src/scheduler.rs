@@ -486,7 +486,10 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 }
             }
 
-            // --- TASK B: HOURLY COMPLIANCE SNAPSHOT ---
+            // --- TASK B: AUTO-PRUNE INACTIVE SYSTEMS ---
+            prune_inactive_systems(&loop_pool).await;
+
+            // --- TASK C: HOURLY COMPLIANCE SNAPSHOT ---
             if now.minute() == 0 && current_hour != last_snapshot_hour {
                 info!("Running hourly compliance aggregation snapshot...");
                 if let Err(e) = record_compliance_history(&loop_pool).await {
@@ -496,13 +499,53 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                     info!("Hourly compliance snapshot recorded successfully.");
                 }
 
-                // --- TASK C: VERSION UPDATE CHECK ---
+                // --- TASK D: VERSION UPDATE CHECK ---
                 check_for_updates(&loop_pool).await;
             }
         }
     });
 }
 
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: prune_inactive_systems
+// For each tenant with auto_prune_inactive > 0, deletes active systems whose
+// last_seen is older than the configured number of minutes.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn prune_inactive_systems(pool: &SqlitePool) {
+    let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
+        "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
+         WHERE skey = 'auto_prune_inactive' AND CAST(value AS INTEGER) > 0",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => { error!("Auto-prune: failed to fetch thresholds: {}", e); return; }
+    };
+
+    for (tenant_id, minutes) in tenants {
+        let deleted = sqlx::query(
+            "DELETE FROM systems
+             WHERE tenant_id = ?
+               AND status = 'active'
+               AND last_seen IS NOT NULL
+               AND (CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', last_seen) AS INTEGER)) > ?",
+        )
+        .bind(&tenant_id)
+        .bind(minutes * 60)
+        .execute(pool)
+        .await;
+
+        match deleted {
+            Ok(r) if r.rows_affected() > 0 => {
+                info!("Auto-prune: removed {} inactive system(s) for tenant '{}'.", r.rows_affected(), tenant_id);
+            }
+            Ok(_) => {}
+            Err(e) => error!("Auto-prune: delete failed for tenant '{}': {}", tenant_id, e),
+        }
+    }
+}
 
 
 // ============================================================
