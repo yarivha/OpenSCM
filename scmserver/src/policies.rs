@@ -52,7 +52,7 @@ pub async fn policies(
     }
 
     let compliance_sat: i64 = sqlx::query_scalar(
-        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_sat'"
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_sat'"
     )
     .bind(&auth.tenant_id)
     .fetch_one(&*pool)
@@ -60,7 +60,7 @@ pub async fn policies(
     .unwrap_or(80);
 
     let compliance_marginal: i64 = sqlx::query_scalar(
-        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_marginal'"
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_marginal'"
     )
     .bind(&auth.tenant_id)
     .fetch_one(&*pool)

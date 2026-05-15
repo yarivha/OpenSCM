@@ -32,8 +32,8 @@ impl Mailer {
     // ─────────────────────────────────────────────────────────────────────────
     pub async fn from_db(pool: &AnyPool) -> Option<Self> {
         let rows = sqlx::query(
-            "SELECT key, value FROM settings WHERE tenant_id = 'default'
-             AND key IN ('smtp_host','smtp_port','smtp_username','smtp_password',
+            "SELECT skey, value FROM settings WHERE tenant_id = 'default'
+             AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password',
                          'smtp_from','smtp_tls','app_url')"
         )
         .fetch_all(pool)
@@ -42,7 +42,7 @@ impl Mailer {
 
         let mut map = std::collections::HashMap::new();
         for row in rows {
-            let key: String = row.get("key");
+            let key: String = row.get("skey");
             let val: String = row.get("value");
             map.insert(key, val);
         }

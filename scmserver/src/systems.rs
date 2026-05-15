@@ -51,7 +51,7 @@ pub async fn systems(
 
     // Fetch threshold first so we can compute is_offline server-side in SQL.
     let offline_threshold: i64 = sqlx::query_scalar(
-        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'offline_threshold'"
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'offline_threshold'"
     )
     .bind(&auth.tenant_id)
     .fetch_one(&pool)
@@ -1479,7 +1479,7 @@ pub async fn system_report(
     };
 
     let compliance_sat: i64 = sqlx::query_scalar(
-        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_sat'"
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_sat'"
     )
     .bind(&auth.tenant_id)
     .fetch_one(&*pool)
@@ -1487,7 +1487,7 @@ pub async fn system_report(
     .unwrap_or(80);
 
     let compliance_marginal: i64 = sqlx::query_scalar(
-        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND key = 'compliance_marginal'"
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_marginal'"
     )
     .bind(&auth.tenant_id)
     .fetch_one(&*pool)

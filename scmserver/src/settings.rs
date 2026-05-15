@@ -55,8 +55,8 @@ pub async fn settings(
 
     // Per-tenant settings (compliance thresholds, offline threshold)
     let rows = sqlx::query(
-        "SELECT key, value FROM settings WHERE tenant_id = ?
-         AND key NOT IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')",
+        "SELECT skey, value FROM settings WHERE tenant_id = ?
+         AND skey NOT IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')",
     )
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
@@ -65,22 +65,22 @@ pub async fn settings(
 
     let mut map = std::collections::HashMap::new();
     for row in rows {
-        let key: String = row.get("key");
+        let key: String = row.get("skey");
         let value: String = row.get("value");
         map.insert(key, value);
     }
 
     // SMTP settings are global — always read from the default tenant
     let smtp_rows = sqlx::query(
-        "SELECT key, value FROM settings WHERE tenant_id = 'default'
-         AND key IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')",
+        "SELECT skey, value FROM settings WHERE tenant_id = 'default'
+         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')",
     )
     .fetch_all(&*pool)
     .await
     .unwrap_or_default();
 
     for row in smtp_rows {
-        let key: String = row.get("key");
+        let key: String = row.get("skey");
         let value: String = row.get("value");
         map.insert(key, value);
     }
@@ -264,8 +264,8 @@ pub async fn settings_test_email(
 
     // SMTP settings are global — always read from the default tenant
     let rows = sqlx::query(
-        "SELECT key, value FROM settings WHERE tenant_id = 'default'
-         AND key IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')"
+        "SELECT skey, value FROM settings WHERE tenant_id = 'default'
+         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')"
     )
     .fetch_all(&pool)
     .await
@@ -273,7 +273,7 @@ pub async fn settings_test_email(
 
     let mut map = std::collections::HashMap::new();
     for row in rows {
-        let k: String = row.get("key");
+        let k: String = row.get("skey");
         let v: String = row.get("value");
         map.insert(k, v);
     }

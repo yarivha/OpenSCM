@@ -225,7 +225,7 @@ pub async fn send(
         // If this public key already exists (e.g. client lost its stored ID),
         // return the existing system rather than creating a duplicate row.
         if let Some(ref pub_key) = payload.public_key {
-            match sqlx::query("SELECT id, status FROM systems WHERE key = ? AND tenant_id = ?")
+            match sqlx::query(&db_compat::adapt_sql("SELECT id, status FROM systems WHERE key = ? AND tenant_id = ?"))
                 .bind(pub_key)
                 .bind(tenant_id)
                 .fetch_optional(&pool)
@@ -343,7 +343,7 @@ pub async fn send(
         // STEP 3: HEARTBEAT (ID > 0)
         // =========================================================
         let auth_result = sqlx::query_as::<_, AuthCheck>(
-            "SELECT key, status FROM systems WHERE id = ? AND tenant_id = ?",
+            &db_compat::adapt_sql("SELECT key, status FROM systems WHERE id = ? AND tenant_id = ?"),
         )
         .bind(id)
         .bind(tenant_id)

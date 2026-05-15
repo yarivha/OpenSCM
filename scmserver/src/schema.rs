@@ -58,10 +58,10 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS settings (
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
-            key VARCHAR(191) NOT NULL,
+            skey VARCHAR(191) NOT NULL,
             value TEXT NOT NULL,
             description TEXT,
-            PRIMARY KEY (tenant_id, key),
+            PRIMARY KEY (tenant_id, skey),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
@@ -478,7 +478,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
     // Default settings
     sqlx::query(&db_compat::adapt_sql(
-        "INSERT OR IGNORE INTO settings (tenant_id, key, value, description) VALUES
+        "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
         ('default', 'offline_threshold', '3600', 'Seconds without activity before system is marked offline'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
         ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status'),
@@ -944,19 +944,19 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
         info!("Running schema migration v7 → v8 (SMTP settings)...");
 
         for sql in &[
-            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'smtp_host', '', 'SMTP relay hostname' FROM tenants t",
-            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'smtp_port', '587', 'SMTP relay port' FROM tenants t",
-            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'smtp_username', '', 'SMTP relay username' FROM tenants t",
-            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'smtp_password', '', 'SMTP relay password' FROM tenants t",
-            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'smtp_from', '', 'From address for outgoing emails' FROM tenants t",
-            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'smtp_tls', 'starttls', 'TLS mode: starttls, tls, or none' FROM tenants t",
-            "INSERT OR IGNORE INTO settings (tenant_id, key, value, description)
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'app_url', '', 'Public URL of this installation (used in email links)' FROM tenants t",
         ] {
             sqlx::query(&db_compat::adapt_sql(sql)).execute(pool).await?;

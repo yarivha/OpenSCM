@@ -30,13 +30,23 @@ pub fn adapt_sql(sql: &str) -> String {
     match get_db_backend() {
         DbBackend::Sqlite => sql.to_string(),
 
-        DbBackend::Mysql => sql
-            .replace(
-                "INTEGER PRIMARY KEY AUTOINCREMENT",
-                "INT NOT NULL AUTO_INCREMENT PRIMARY KEY",
-            )
-            .replace("INSERT OR IGNORE INTO", "INSERT IGNORE INTO")
-            .replace("DEFAULT (datetime('now'))", "DEFAULT CURRENT_TIMESTAMP"),
+        DbBackend::Mysql => {
+            let s = sql
+                .replace(
+                    "INTEGER PRIMARY KEY AUTOINCREMENT",
+                    "INT NOT NULL AUTO_INCREMENT PRIMARY KEY",
+                )
+                .replace("INSERT OR IGNORE INTO", "INSERT IGNORE INTO")
+                .replace("DEFAULT (datetime('now'))", "DEFAULT CURRENT_TIMESTAMP")
+                // MySQL: `key` is a reserved word. Quote it wherever it appears
+                // as the systems.key column identifier in DDL and DML.
+                .replace(" key TEXT,",  " `key` TEXT,")   // CREATE TABLE col def
+                .replace(" key = ",     " `key` = ")      // WHERE key = ?
+                .replace("SELECT key,", "SELECT `key`,")  // SELECT list
+                .replace(", key,",      ", `key`,")        // INSERT / column lists
+                .replace(", key)",      ", `key`)");       // end of column list
+            s
+        }
 
         DbBackend::Postgres => {
             let mut s = sql
@@ -376,12 +386,12 @@ pub fn upsert_schedule_sql(stype: &str) -> String {
 pub fn upsert_setting_sql() -> &'static str {
     match get_db_backend() {
         DbBackend::Sqlite | DbBackend::Postgres => {
-            r#"INSERT INTO settings (tenant_id, key, value)
+            r#"INSERT INTO settings (tenant_id, skey, value)
                VALUES (?, ?, ?)
-               ON CONFLICT (tenant_id, key) DO UPDATE SET value = excluded.value"#
+               ON CONFLICT (tenant_id, skey) DO UPDATE SET value = excluded.value"#
         }
         DbBackend::Mysql => {
-            r#"INSERT INTO settings (tenant_id, key, value)
+            r#"INSERT INTO settings (tenant_id, skey, value)
                VALUES (?, ?, ?)
                ON DUPLICATE KEY UPDATE value = VALUES(value)"#
         }
