@@ -736,7 +736,7 @@ pub async fn tests_bulk_add_policy(
     let mut added = 0usize;
     for id in &ids {
         if let Err(e) = sqlx::query(
-            &db_compat::adapt_sql("INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)"),
+            "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
         )
         .bind(&auth.tenant_id).bind(policy_id).bind(id).execute(&pool).await
         {

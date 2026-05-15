@@ -1,12 +1,12 @@
 // =============================================================================
 // lib.rs — AppState, Tera initialisation, router construction, public API
 //
-// This crate is both the CE binary (via main.rs) and a library consumed by the
-// Enterprise Edition.  create_core_router() builds the full Axum Router with
-// all CE routes; EE merges additional routes on top before serving.
+// Exposes all CE modules as a library so that the SaaS binary can depend on
+// this crate directly. create_core_router() builds the full Axum Router with
+// all CE routes; the SaaS binary merges additional routes on top.
 // =============================================================================
 
-// 1. Module Declarations (Now public so the SaaS repo can access them)
+// Module Declarations (public so the SaaS crate can access them)
 pub mod models;
 pub mod handlers;
 pub mod config;

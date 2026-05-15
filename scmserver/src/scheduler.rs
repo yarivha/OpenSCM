@@ -13,7 +13,6 @@ use chrono::{Utc, Timelike};
 use tracing::{info, error};
 use reqwest::Client;
 
-use crate::db_compat;
 use crate::models::PolicySchedule;
 use crate::policies::execute_policy_run_logic;
 use crate::handlers::add_notification;
@@ -58,19 +57,12 @@ async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: recalculate_current_compliance
-// Purges ghost results, then recalculates compliance scores for all tests,
-// systems, and policies across all tenants in a single transaction.
+// Helper: purge_ghost_results
+// Deletes result rows for (system, test) pairs that are no longer reachable via
+// the current policy → group → system assignment graph.
+// Must be called inside an active transaction.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    info!("Starting compliance aggregation (Active Systems Only)...");
-
-    let mut tx = pool.begin().await?;
-
-    // =========================================================
-    // 0. PURGE GHOST RESULTS
-    // Delete results for tests no longer assigned to a system
-    // =========================================================
+async fn purge_ghost_results(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
     sqlx::query(r#"
         DELETE FROM results
         WHERE NOT EXISTS (
@@ -85,13 +77,20 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
               AND sig.tenant_id = results.tenant_id
         )
     "#)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
+    Ok(())
+}
 
-    // =========================================================
-    // 1. Update TEST stats (active systems only, per tenant)
-    // =========================================================
-    sqlx::query(&db_compat::adapt_sql(r#"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: update_test_stats
+// Recalculates systems_passed, systems_failed, and compliance_score for every
+// test, counting only active systems.
+// Must be called inside an active transaction.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+    sqlx::query(r#"
         UPDATE tests SET
             systems_passed = (
                 SELECT COUNT(*) FROM results r
@@ -120,14 +119,21 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                   AND s.status    = 'active'
                   AND r.result    != 'NA'
             )
-    "#))
-    .execute(&mut *tx)
+    "#)
+    .execute(&mut **tx)
     .await?;
+    Ok(())
+}
 
-    // =========================================================
-    // 2. Update SYSTEM stats (active systems only, per tenant)
-    // =========================================================
-    sqlx::query(&db_compat::adapt_sql(r#"
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: update_system_stats
+// Recalculates tests_passed, tests_failed, total_tests, and compliance_score
+// for every active system.
+// Must be called inside an active transaction, after update_test_stats.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn update_system_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+    sqlx::query(r#"
         UPDATE systems SET
             tests_passed = (
                 SELECT COUNT(*) FROM results
@@ -156,15 +162,20 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                   AND result != 'NA'
             )
         WHERE status = 'active'
-    "#))
-    .execute(&mut *tx)
+    "#)
+    .execute(&mut **tx)
     .await?;
+    Ok(())
+}
 
-    // =========================================================
-    // 3. Update POLICY stats
-    // NA-aware: systems with only NA results are excluded from
-    // both numerator and denominator of compliance score.
-    // =========================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: update_policy_stats
+// Recalculates systems_passed, systems_failed, and compliance_score for every
+// policy. NA-only systems are excluded from both numerator and denominator.
+// Must be called inside an active transaction, after update_system_stats.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn update_policy_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
     sqlx::query(r#"
         UPDATE policies SET
             systems_passed = (
@@ -248,8 +259,26 @@ pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sql
                 ) sub
             )
     "#)
-    .execute(&mut *tx)
+    .execute(&mut **tx)
     .await?;
+    Ok(())
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: recalculate_current_compliance
+// Opens a single transaction, purges stale results, then updates test, system,
+// and policy stats in order. Commits only when all three steps succeed.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    info!("Starting compliance aggregation (Active Systems Only)...");
+
+    let mut tx = pool.begin().await?;
+
+    purge_ghost_results(&mut tx).await?;
+    update_test_stats(&mut tx).await?;
+    update_system_stats(&mut tx).await?;
+    update_policy_stats(&mut tx).await?;
 
     tx.commit().await?;
 
@@ -377,13 +406,11 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 
             // --- TASK A: POLICY SCHEDULER (scan + report) ---
             let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
-                &db_compat::adapt_sql(
-                    "SELECT id, tenant_id, policy_id, schedule_type,
-                            CAST(enabled AS INTEGER) AS enabled,
-                            frequency, cron_expression,
-                            CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
-                     FROM policy_schedules WHERE enabled = 1 AND next_run <= ?"
-                ),
+                "SELECT id, tenant_id, policy_id, schedule_type,
+                        CAST(enabled AS INTEGER) AS enabled,
+                        frequency, cron_expression,
+                        CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+                 FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
             )
             .bind(&now_str)
             .fetch_all(&loop_pool)

@@ -26,7 +26,7 @@ use crate::models::{
     UserRole, AuthSession,
 };
 use crate::auth::{self};
-use crate::handlers::{render_template, parse_form_data, normalize_status};
+use crate::handlers::{render_template, parse_form_data, normalize_status, is_system_passed};
 use crate::db_compat;
 
 
@@ -364,7 +364,7 @@ pub async fn policies_add_save(
     for test_id_str in tests {
         if let Ok(test_id) = test_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                &db_compat::adapt_sql("INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)"),
+                "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id)
             .bind(policy_id)
@@ -383,7 +383,7 @@ pub async fn policies_add_save(
     for group_id_str in system_groups {
         if let Ok(group_id) = group_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                &db_compat::adapt_sql("INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)"),
+                "INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id)
             .bind(policy_id)
@@ -450,12 +450,10 @@ pub async fn policies_edit(
 
     // Fetch scan schedule
     let schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        &db_compat::adapt_sql(
-            "SELECT id, tenant_id, policy_id, schedule_type,
-                    CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
-                    CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
-             FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'scan'"
-        ),
+        "SELECT id, tenant_id, policy_id, schedule_type,
+                CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
+                CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'scan'",
     )
     .bind(id)
     .bind(&auth.tenant_id)
@@ -465,12 +463,10 @@ pub async fn policies_edit(
 
     // Fetch report schedule
     let report_schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        &db_compat::adapt_sql(
-            "SELECT id, tenant_id, policy_id, schedule_type,
-                    CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
-                    CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
-             FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'report'"
-        ),
+        "SELECT id, tenant_id, policy_id, schedule_type,
+                CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
+                CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'report'",
     )
     .bind(id)
     .bind(&auth.tenant_id)
@@ -655,7 +651,7 @@ pub async fn policies_edit_save(
     for test_id_str in form_data.get("tests").cloned().unwrap_or_default() {
         if let Ok(test_id) = test_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                &db_compat::adapt_sql("INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)"),
+                "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id).bind(id).bind(test_id).execute(&mut *tx).await
             {
@@ -678,7 +674,7 @@ pub async fn policies_edit_save(
     for group_id_str in form_data.get("system_groups").cloned().unwrap_or_default() {
         if let Ok(group_id) = group_id_str.parse::<i32>() {
             if let Err(e) = sqlx::query(
-                &db_compat::adapt_sql("INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)"),
+                "INSERT OR IGNORE INTO systems_in_policy (tenant_id, policy_id, group_id) VALUES (?, ?, ?)",
             )
             .bind(&auth.tenant_id).bind(id).bind(group_id).execute(&mut *tx).await
             {
@@ -889,7 +885,7 @@ pub async fn policies_report(
         // A system passes when it has no FAILs AND at least one PASS.
         // All-NA systems (pass_count == 0 && fail_count == 0) are shown as
         // "NOT APPLICABLE" by the template — is_passed value does not matter for them.
-        let is_passed = fail_count == 0 && pass_count > 0;
+        let is_passed = is_system_passed(pass_count, fail_count);
         SystemReport { system_name: name, results, is_passed, pass_count, fail_count }
     }).collect();
 
@@ -1007,7 +1003,7 @@ pub async fn policies_report_download(
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
         let pass_count = results.iter().filter(|r| r.status == "PASS").count();
         let fail_count = results.iter().filter(|r| r.status == "FAIL").count();
-        let is_passed = fail_count == 0 && pass_count > 0;
+        let is_passed = is_system_passed(pass_count, fail_count);
         SystemReport { system_name: name, results, is_passed, pass_count, fail_count }
     }).collect();
 
@@ -1166,7 +1162,7 @@ pub async fn execute_policy_run_logic(
     pool: &SqlitePool,
     tenant_id: &str,
 ) -> Result<(), sqlx::Error> {
-    sqlx::query(&db_compat::adapt_sql(r#"
+    sqlx::query(r#"
         INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id)
         SELECT ?, sig.system_id, tip.test_id
         FROM systems_in_policy sip
@@ -1174,7 +1170,7 @@ pub async fn execute_policy_run_logic(
         JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
         WHERE sip.policy_id = ?
           AND sip.tenant_id = ?
-    "#))
+    "#)
     .bind(tenant_id).bind(id).bind(tenant_id)
     .execute(pool).await?;
     Ok(())

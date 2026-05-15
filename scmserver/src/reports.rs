@@ -21,7 +21,7 @@ use urlencoding;
 use genpdf::{fonts, elements, style, Element, Margins};
 
 use crate::auth::{self};
-use crate::handlers::{render_template, normalize_status, parse_form_data};
+use crate::handlers::{render_template, normalize_status, parse_form_data, is_system_passed};
 use crate::models::{
     UserRole, TestMeta, SystemReport, IndividualResult,
     Report, SavedSystemReport, ErrorQuery, AuthSession, SystemReportData,
@@ -194,7 +194,7 @@ pub async fn save_policy_report_logic(
     for entry in reports_map.values_mut() {
         entry.pass_count = entry.results.iter().filter(|r| r.status == "PASS").count();
         entry.fail_count = entry.results.iter().filter(|r| r.status == "FAIL").count();
-        entry.is_passed = entry.fail_count == 0 && entry.pass_count > 0;
+        entry.is_passed = is_system_passed(entry.pass_count, entry.fail_count);
     }
 
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();
@@ -319,7 +319,7 @@ pub async fn reports_view(
         if s.pass_count == 0 && s.fail_count == 0 && !s.results.is_empty() {
             s.pass_count = s.results.iter().filter(|r| r.status == "PASS").count();
             s.fail_count = s.results.iter().filter(|r| r.status == "FAIL").count();
-            s.is_passed  = s.fail_count == 0 && s.pass_count > 0;
+            s.is_passed  = is_system_passed(s.pass_count, s.fail_count);
         }
     }
 
@@ -440,7 +440,7 @@ pub async fn reports_download(
         if s.pass_count == 0 && s.fail_count == 0 && !s.results.is_empty() {
             s.pass_count = s.results.iter().filter(|r| r.status == "PASS").count();
             s.fail_count = s.results.iter().filter(|r| r.status == "FAIL").count();
-            s.is_passed  = s.fail_count == 0 && s.pass_count > 0;
+            s.is_passed  = is_system_passed(s.pass_count, s.fail_count);
         }
     }
 

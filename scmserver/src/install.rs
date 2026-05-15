@@ -14,7 +14,6 @@ use tracing::error;
 
 use crate::schema::{initialize_database, run_migrations};
 use crate::scheduler::start_background_scheduler;
-use crate::db_compat;
 use crate::PostInstallFn;
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -96,8 +95,8 @@ pub async fn install_post(
 
     // --- Create the admin user ---
     if let Err(e) = sqlx::query(
-        &db_compat::adapt_sql("INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
-         VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'superuser')")
+        "INSERT OR IGNORE INTO users (id, tenant_id, username, password, name, email, role)
+         VALUES (1, 'default', 'admin', ?, 'Admin User', 'admin@example.com', 'superuser')"
     )
     .bind(hashed)
     .execute(&pool)

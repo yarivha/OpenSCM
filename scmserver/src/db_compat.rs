@@ -1,24 +1,12 @@
 // =============================================================================
-// db_compat.rs — SQLite-only SQL helpers
+// db_compat.rs — SQLite-specific SQL helpers
 //
 // Previously contained multi-backend (SQLite/MySQL/PostgreSQL) dispatch logic.
-// Simplified to SQLite-only for v0.3.1. All functions that previously branched
-// on get_db_backend() now return the SQLite variant unconditionally.
-//
-// adapt_sql() is kept as an identity function so all call sites continue to
-// compile without modification. last_insert_id_sql(), schema_info_exists_sql(),
-// table_exists_sql(), and column_exists() are kept for the same reason.
+// Simplified to SQLite-only for v0.3.1. adapt_sql() removed — all SQL is now
+// plain SQLite and no compatibility wrapping is needed.
 // =============================================================================
 
 use sqlx::SqlitePool;
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: adapt_sql
-// Identity function — returns sql unchanged. Kept so callers need no changes.
-// ─────────────────────────────────────────────────────────────────────────────
-pub fn adapt_sql(sql: &str) -> String {
-    sql.to_string()
-}
 
 
 // ─────────────────────────────────────────────────────────────────────────────

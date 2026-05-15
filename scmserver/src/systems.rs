@@ -21,7 +21,7 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use std::collections::BTreeMap;
-use crate::handlers::normalize_status;
+use crate::handlers::{normalize_status, is_system_passed};
 use crate::models::{
     ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
     IndividualResult, PolicyResultGroup, SystemReportData,
@@ -1309,9 +1309,9 @@ pub async fn systems_bulk_add_group(
 
     let mut added = 0usize;
     for id in &ids {
-        if let Err(e) = sqlx::query(&db_compat::adapt_sql(
+        if let Err(e) = sqlx::query(
             "INSERT OR IGNORE INTO systems_in_groups (system_id, group_id, tenant_id) VALUES (?, ?, ?)",
-        ))
+        )
         .bind(id)
         .bind(group_id)
         .bind(&auth.tenant_id)
@@ -1411,7 +1411,7 @@ pub async fn fetch_system_report_data(
 
     let mut policy_groups: Vec<PolicyResultGroup> = policy_map.into_values().collect();
     for p in &mut policy_groups {
-        p.is_passed = p.pass_count > 0 && p.fail_count == 0;
+        p.is_passed = is_system_passed(p.pass_count, p.fail_count);
     }
 
     let total_pass: usize = policy_groups.iter().map(|p| p.pass_count).sum();

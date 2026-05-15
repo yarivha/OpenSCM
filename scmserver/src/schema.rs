@@ -5,8 +5,7 @@
 // install. run_migrations applies version-gated ALTER TABLE / data fixes to
 // existing databases without re-running the full schema.
 //
-// Every CREATE TABLE and INSERT OR IGNORE is wrapped with db_compat::adapt_sql()
-// so that the same source compiles and runs on SQLite, MySQL, and PostgreSQL.
+// SQLite-only since v0.3.1. All SQL is plain SQLite syntax with no compatibility wrappers.
 // =============================================================================
 use sqlx::SqlitePool;
 use sqlx::Row;
@@ -17,18 +16,15 @@ use base64::{engine::general_purpose, Engine as _};
 use crate::db_compat;
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: initialize_database
-// Creates all tables, indexes, triggers, and seed data for a fresh install.
-// Stamps schema_info.version = 11 so run_migrations skips all steps.
+// Helper: create_tables
+// Issues all CREATE TABLE IF NOT EXISTS statements for a fresh database.
+// Called exclusively by initialize_database; safe to call again (idempotent).
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-
-    info!("Init Database......");
-
+async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Tenants Table (no AUTOINCREMENT — VARCHAR(191) PK so MySQL can index it)
     // status and plan are EE/SaaS fields present in base schema so all editions
     // share an identical table structure.
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS tenants (
             id         VARCHAR(191) PRIMARY KEY,
             name       VARCHAR(191) NOT NULL UNIQUE,
@@ -36,12 +32,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             plan       TEXT NOT NULL DEFAULT 'free',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Tenant Keys Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS tenant_keys (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL,
@@ -51,11 +47,11 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS settings (
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             skey VARCHAR(191) NOT NULL,
@@ -64,12 +60,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             PRIMARY KEY (tenant_id, skey),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Notify Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS notify (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -79,12 +75,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             message TEXT NOT NULL,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Users Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS users (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -97,12 +93,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             UNIQUE(username, tenant_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Systems Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS systems (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -126,12 +122,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             total_tests INTEGER DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // System Groups Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS system_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -140,7 +136,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             UNIQUE(name, tenant_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
@@ -160,7 +156,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Tests Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS tests (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -176,12 +172,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             systems_failed INTEGER DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Test Conditions Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS test_conditions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -197,12 +193,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Policies Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS policies (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -214,12 +210,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             systems_failed INTEGER DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Policy Schedules Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS policy_schedules (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -235,7 +231,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
@@ -285,7 +281,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Results table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS results (
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             system_id INTEGER,
@@ -297,14 +293,14 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Reports table
     // tests_metadata and report_results store arbitrary-size JSON — use MEDIUMTEXT
     // so MySQL does not impose a row-size limit.  They are decoded via row_get_string().
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -317,13 +313,13 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             report_results MEDIUMTEXT NOT NULL,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // System Reports table
     // report_data stores arbitrary-size JSON — use MEDIUMTEXT decoded via row_get_string().
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS system_reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -334,19 +330,12 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             report_data MEDIUMTEXT NOT NULL,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
-    .execute(pool)
-    .await?;
-
-    sqlx::query(
-        "CREATE INDEX IF NOT EXISTS idx_system_reports_tenant_date
-         ON system_reports (tenant_id, submission_date)",
     )
     .execute(pool)
     .await?;
 
     // Compliance History table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS compliance_history (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -359,44 +348,92 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             failed_policies INTEGER,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Elements Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS elements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR(191) NOT NULL UNIQUE,
             description TEXT
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Selements Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS selements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR(191) NOT NULL UNIQUE,
             description TEXT
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
     // Conditions Table
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "CREATE TABLE IF NOT EXISTS conditions (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR(191) NOT NULL UNIQUE,
             description TEXT
         )",
-    ))
+    )
     .execute(pool)
     .await?;
 
-    // ── INDEXES ──────────────────────────────────────────────────────────────
+    // Email Verification Tokens (used by SaaS registration; harmless in CE/EE)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS email_verifications (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tenant_id VARCHAR(191) NOT NULL,
+            token VARCHAR(191) NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool).await?;
+
+    // Password Reset Tokens (used by SaaS; harmless in CE/EE)
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS password_resets (
+            id         INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id    INTEGER NOT NULL,
+            token      VARCHAR(191) NOT NULL UNIQUE,
+            expires_at TEXT    NOT NULL,
+            used       INTEGER NOT NULL DEFAULT 0,
+            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool).await?;
+
+    // Plan Limits (used by SaaS to enforce per-plan resource caps; harmless in CE/EE)
+    // max_count = 0 means unlimited
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS plan_limits (
+            plan      VARCHAR(191) NOT NULL,
+            resource  VARCHAR(191) NOT NULL,
+            max_count INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (plan, resource)
+        )",
+    )
+    .execute(pool).await?;
+
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: create_indexes
+// Issues all CREATE INDEX IF NOT EXISTS statements for a fresh database.
+// Called exclusively by initialize_database; safe to call again (idempotent).
+// ─────────────────────────────────────────────────────────────────────────────
+async fn create_indexes(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_next_run ON policy_schedules (enabled, next_run)")
         .execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_results_tenant_test ON results (tenant_id, test_id)")
@@ -421,58 +458,31 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_reports_tenant_date ON reports (tenant_id, submission_date)")
         .execute(pool).await?;
-
-    // Email Verification Tokens (used by SaaS registration; harmless in CE/EE)
-    sqlx::query(&db_compat::adapt_sql(
-        "CREATE TABLE IF NOT EXISTS email_verifications (
-            id INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id INTEGER NOT NULL,
-            tenant_id VARCHAR(191) NOT NULL,
-            token VARCHAR(191) NOT NULL UNIQUE,
-            expires_at TEXT NOT NULL,
-            created_at TEXT NOT NULL DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )",
-    ))
-    .execute(pool).await?;
-
-    // Password Reset Tokens (used by SaaS; harmless in CE/EE)
-    sqlx::query(&db_compat::adapt_sql(
-        "CREATE TABLE IF NOT EXISTS password_resets (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id    INTEGER NOT NULL,
-            token      VARCHAR(191) NOT NULL UNIQUE,
-            expires_at TEXT    NOT NULL,
-            used       INTEGER NOT NULL DEFAULT 0,
-            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )",
-    ))
-    .execute(pool).await?;
-
-    // Plan Limits (used by SaaS to enforce per-plan resource caps; harmless in CE/EE)
-    // max_count = 0 means unlimited
-    sqlx::query(
-        "CREATE TABLE IF NOT EXISTS plan_limits (
-            plan      VARCHAR(191) NOT NULL,
-            resource  VARCHAR(191) NOT NULL,
-            max_count INTEGER NOT NULL DEFAULT 0,
-            PRIMARY KEY (plan, resource)
-        )",
-    )
-    .execute(pool).await?;
-
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_email_verif_token ON email_verifications (token)")
         .execute(pool).await.ok();
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_password_resets_token ON password_resets (token)")
         .execute(pool).await.ok();
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_system_reports_tenant_date
+         ON system_reports (tenant_id, submission_date)",
+    )
+    .execute(pool)
+    .await?;
 
-    // ── SEED DATA ─────────────────────────────────────────────────────────────
+    Ok(())
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: seed_lookup_data
+// Inserts the default tenant, default settings, and lookup table rows
+// (elements, selements, conditions) using INSERT OR IGNORE (idempotent).
+// Called exclusively by initialize_database on a fresh install.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Default tenant
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "INSERT OR IGNORE INTO tenants (id, name) VALUES ('default', 'Default Tenant')"
-    ))
+    )
     .execute(pool)
     .await?;
 
@@ -480,7 +490,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // administrator's chosen password so no default credentials exist on disk.
 
     // Default settings
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
         ('default', 'offline_threshold', '3600', 'Seconds without activity before system is marked offline'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
@@ -492,7 +502,7 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ('default', 'smtp_from', '', 'From address for outgoing emails'),
         ('default', 'smtp_tls', 'starttls', 'TLS mode: starttls, tls, or none'),
         ('default', 'app_url', '', 'Public URL of this installation (used in email links)')"
-    ))
+    )
     .execute(pool)
     .await?;
 
@@ -501,9 +511,9 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "AGENT", "OS", "HOSTNAME", "IP", "DOMAIN", "ARCHITECTURE", "USER", "GROUP",
         "FILE", "DIRECTORY", "PROCESS", "PACKAGE", "REGISTRY", "PORT", "CMD",
     ] {
-        sqlx::query(&db_compat::adapt_sql(
+        sqlx::query(
             "INSERT OR IGNORE INTO elements (name) VALUES (?)"
-        ))
+        )
         .bind(name)
         .execute(pool)
         .await?;
@@ -514,9 +524,9 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "EXISTS", "NOT EXISTS", "CONTENT", "VERSION", "PERMISSION",
         "OWNER", "GROUP", "SHA1", "SHA2", "OUTPUT",
     ] {
-        sqlx::query(&db_compat::adapt_sql(
+        sqlx::query(
             "INSERT OR IGNORE INTO selements (name) VALUES (?)"
-        ))
+        )
         .bind(name)
         .execute(pool)
         .await?;
@@ -527,13 +537,29 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "CONTAINS", "NOT CONTAINS", "EQUALS", "NOT EQUALS",
         "MORE THAN", "LESS THAN", "REGEX",
     ] {
-        sqlx::query(&db_compat::adapt_sql(
+        sqlx::query(
             "INSERT OR IGNORE INTO conditions (name) VALUES (?)"
-        ))
+        )
         .bind(name)
         .execute(pool)
         .await?;
     }
+
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: initialize_database
+// Creates all tables, indexes, triggers, and seed data for a fresh install.
+// Stamps schema_info.version = 11 so run_migrations skips all steps.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+
+    info!("Init Database......");
+
+    create_tables(pool).await?;
+    create_indexes(pool).await?;
+    seed_lookup_data(pool).await?;
 
     // Generate Ed25519 keypair for the default tenant if it doesn't exist yet
     let existing_key = sqlx::query("SELECT id FROM tenant_keys WHERE tenant_id = 'default' LIMIT 1")
@@ -576,9 +602,9 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query(trigger_sql).execute(pool).await?;
     }
 
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 11)"
-    ))
+    )
     .execute(pool)
     .await?;
 
@@ -614,9 +640,9 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("enterprise", "policies",  0),
         ("enterprise", "reports",   0),
     ] {
-        let _ = sqlx::query(&db_compat::adapt_sql(
+        let _ = sqlx::query(
             "INSERT OR IGNORE INTO plan_limits (plan, resource, max_count) VALUES (?, ?, ?)",
-        ))
+        )
         .bind(plan)
         .bind(resource)
         .bind(*max_count)
@@ -644,9 +670,9 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Seed with version 0 if the table is empty
-    sqlx::query(&db_compat::adapt_sql(
+    sqlx::query(
         "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 0)"
-    ))
+    )
     .execute(pool)
     .await?;
 
@@ -707,7 +733,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query(&db_compat::rename_table_sql("policy_schedules", "policy_schedules_old"))
             .execute(&mut *migration_tx).await?;
 
-        sqlx::query(&db_compat::adapt_sql(
+        sqlx::query(
             "CREATE TABLE policy_schedules (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -723,7 +749,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 FOREIGN KEY (policy_id) REFERENCES policies (id) ON DELETE CASCADE,
                 FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
             )"
-        ))
+        )
         .execute(&mut *migration_tx).await?;
 
         sqlx::query(
@@ -921,7 +947,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     if version < 7 {
         info!("Running schema migration v6 → v7 (system_reports + indexes)...");
 
-        sqlx::query(&db_compat::adapt_sql(
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS system_reports (
                 id               INTEGER PRIMARY KEY AUTOINCREMENT,
                 tenant_id        VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -932,7 +958,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 report_data      TEXT    NOT NULL,
                 FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
             )"
-        ))
+        )
         .execute(pool).await?;
 
         for idx in &[
@@ -978,7 +1004,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
              SELECT t.id, 'app_url', '', 'Public URL of this installation (used in email links)' FROM tenants t",
         ] {
-            sqlx::query(&db_compat::adapt_sql(sql)).execute(pool).await?;
+            sqlx::query(sql).execute(pool).await?;
         }
 
         sqlx::query("UPDATE schema_info SET version = 8")
@@ -1028,7 +1054,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             ).execute(pool).await;
         }
 
-        sqlx::query(&db_compat::adapt_sql(
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS email_verifications (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
@@ -1038,9 +1064,9 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 created_at TEXT    NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )"
-        )).execute(pool).await?;
+        ).execute(pool).await?;
 
-        sqlx::query(&db_compat::adapt_sql(
+        sqlx::query(
             "CREATE TABLE IF NOT EXISTS password_resets (
                 id         INTEGER PRIMARY KEY AUTOINCREMENT,
                 user_id    INTEGER NOT NULL,
@@ -1050,7 +1076,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 created_at TEXT    NOT NULL DEFAULT (datetime('now')),
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )"
-        )).execute(pool).await?;
+        ).execute(pool).await?;
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS plan_limits (

@@ -174,7 +174,7 @@ pub struct PolicySchedule {
 pub struct ComplianceHistoryRow {
     pub check_date: String,
     pub systems_score: f64,
-    pub policies_score: f64, // <--- ADD THIS LINE
+    pub policies_score: f64,
 }
 
 
@@ -262,8 +262,8 @@ pub struct PolicyCompliance {
     pub policy_version: String,
     pub policy_description: Option<String>,
     pub compliance: f64,
-    pub test_count: i64,    // Added
-    pub system_count: i64,  // Added
+    pub test_count: i64,
+    pub system_count: i64,
     pub systems_passed: Option<i64>,
     pub systems_failed: Option<i64>,
 }
@@ -275,7 +275,7 @@ pub struct SystemFailRow {
     pub system_id: i32,
     pub system_name: String,
     pub os: String,
-    pub compliance: f64, // Alias for compliance_score
+    pub compliance: f64,
     pub tests_passed: i32,
     pub tests_failed: i32,
     pub tests_na: i64,
@@ -314,9 +314,9 @@ pub struct SystemReportData {
 #[derive(sqlx::FromRow, serde::Serialize)]
 pub struct PolicyFailRow {
     pub policy_id: i32,
-    pub policy_name: String, // Alias for test_name
+    pub policy_name: String,
     pub policy_version: String,
-    pub compliance: f64,     // Alias for compliance_score
+    pub compliance: f64,
     pub systems_passed: i32,
     pub systems_failed: i32,
 }

@@ -42,32 +42,36 @@ pub async fn render_template(
     // Database-driven context
     if let Some(db_pool) = pool {
         if let Some(session) = &auth {
-            // Pending systems count — filtered by tenant
-            let pending_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM systems WHERE status = 'pending' AND tenant_id = ?",
+            // Batch query 1: pending systems count + tenant display name in one round-trip.
+            // LEFT JOIN ensures we always get a row even if the tenant row is missing.
+            let (pending_count, tenant_name): (i64, String) = sqlx::query_as(
+                "SELECT
+                    (SELECT COUNT(*) FROM systems
+                     WHERE status = 'pending' AND tenant_id = t.id) AS pending_count,
+                    t.name AS tenant_name
+                 FROM tenants t WHERE t.id = ?",
             )
             .bind(&session.tenant_id)
-            .fetch_one(db_pool)
+            .fetch_optional(db_pool)
             .await
-            .unwrap_or(0);
+            .ok()
+            .flatten()
+            .unwrap_or((0i64, session.tenant_id.clone()));
 
             context.insert("pending_count", &pending_count);
 
-            // Notification count for current user
-            let notify_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM notify WHERE owner_id = ? AND tenant_id = ?",
-            )
-            .bind(&session.userid)
-            .bind(&session.tenant_id)
-            .fetch_one(db_pool)
-            .await
-            .unwrap_or(0);
-
-            context.insert("notify_count", &notify_count);
-
-            // Top 10 notifications for current user
-            let notifications = sqlx::query_as::<_, Notification>(
-                "SELECT id, tenant_id, ntype, nts, owner_id, message
+            // Batch query 2: top 10 notifications + total count in one round-trip.
+            // COUNT(*) OVER() is a window function supported by SQLite ≥ 3.25 (2018).
+            // The count reflects all rows, the LIMIT applies only to returned rows.
+            #[derive(sqlx::FromRow)]
+            struct NotifyRow {
+                id: i64, tenant_id: String, ntype: String, nts: String,
+                owner_id: i32, message: String,
+                total_count: i64,
+            }
+            let notify_rows: Vec<NotifyRow> = sqlx::query_as(
+                "SELECT id, tenant_id, ntype, nts, owner_id, message,
+                        COUNT(*) OVER() AS total_count
                  FROM notify
                  WHERE owner_id = ? AND tenant_id = ?
                  ORDER BY nts DESC
@@ -79,19 +83,29 @@ pub async fn render_template(
             .await
             .unwrap_or_default();
 
+            let notify_count = notify_rows.first().map(|r| r.total_count).unwrap_or(0);
+            let notifications: Vec<Notification> = notify_rows.into_iter().map(|r| Notification {
+                id: r.id, tenant_id: r.tenant_id, ntype: r.ntype,
+                nts: r.nts, owner_id: r.owner_id, message: r.message,
+            }).collect();
+
+            context.insert("notify_count", &notify_count);
             context.insert("notifications", &notifications);
+            context.insert("tenant_name", &tenant_name);
 
         } else {
             // Guest defaults
             context.insert("pending_count", &0i64);
             context.insert("notify_count", &0i64);
             context.insert("notifications", &Vec::<Notification>::new());
+            context.insert("tenant_name", &String::new());
         }
     } else {
         // No pool available
         context.insert("pending_count", &0i64);
         context.insert("notify_count", &0i64);
         context.insert("notifications", &Vec::<Notification>::new());
+        context.insert("tenant_name", &String::new());
     }
 
     // Session context — user info and permissions
@@ -102,22 +116,6 @@ pub async fn render_template(
         context.insert("userid", &session.userid);
         context.insert("tenant_id", &session.tenant_id);
         context.insert("role", &session.role);
-
-        // Tenant display name — used by SaaS to show the org name in the navbar
-        if let Some(db_pool) = pool {
-            let tenant_name: String = sqlx::query_scalar(
-                "SELECT name FROM tenants WHERE id = ?",
-            )
-            .bind(&session.tenant_id)
-            .fetch_optional(db_pool)
-            .await
-            .ok()
-            .flatten()
-            .unwrap_or_else(|| session.tenant_id.clone());
-            context.insert("tenant_name", &tenant_name);
-        } else {
-            context.insert("tenant_name", &session.tenant_id);
-        }
 
         context.insert("is_superuser", &(role_enum >= UserRole::Superuser));
         context.insert("is_admin",  &(role_enum >= UserRole::Admin));
@@ -243,8 +241,19 @@ pub async fn clear_notifications(
 
 
 // ============================================================
-// STATUS NORMALIZATION
+// STATUS NORMALIZATION AND COMPLIANCE VERDICT
 // ============================================================
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: is_system_passed
+// Returns true when a system (or policy) has at least one PASS and zero FAILs.
+// All-NA systems (pass == 0 && fail == 0) return false; the caller is
+// responsible for rendering them as "NOT APPLICABLE" rather than "Non-Compliant".
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn is_system_passed(pass_count: usize, fail_count: usize) -> bool {
+    pass_count > 0 && fail_count == 0
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: normalize_status
