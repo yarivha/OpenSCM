@@ -647,6 +647,22 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // ── Pre-migration: rename settings.key → settings.skey ────────────────────
+    // `key` is a MySQL/MariaDB reserved word.  The rename was applied to the
+    // CREATE TABLE in initialize_database (so fresh installs are fine), but
+    // existing SQLite/PostgreSQL databases still carry the old column name.
+    // This must run BEFORE any version-gated INSERT into settings so that
+    // "no such column: skey" errors can never occur at any schema version.
+    // On MySQL the old column never existed, so column_exists returns false
+    // and the block is skipped.
+    if db_compat::column_exists(pool, "settings", "key").await {
+        let _ = sqlx::query(
+            "ALTER TABLE settings RENAME COLUMN \"key\" TO skey"
+        ).execute(pool).await;
+        info!("Pre-migration: renamed settings.key → settings.skey");
+    }
+    // ──────────────────────────────────────────────────────────────────────────
+
     let version: i64 = sqlx::query_scalar("SELECT version FROM schema_info")
         .fetch_one(pool)
         .await?;
