@@ -67,10 +67,10 @@ pub async fn render_template(
 
             // Top 10 notifications for current user
             let notifications = sqlx::query_as::<_, Notification>(
-                "SELECT id, tenant_id, type, timestamp, owner_id, message
+                "SELECT id, tenant_id, ntype, nts, owner_id, message
                  FROM notify
                  WHERE owner_id = ? AND tenant_id = ?
-                 ORDER BY timestamp DESC
+                 ORDER BY nts DESC
                  LIMIT 10",
             )
             .bind(&session.userid)
@@ -198,7 +198,7 @@ pub async fn add_notification(
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
 
     if let Err(e) = sqlx::query(
-        "INSERT INTO notify (tenant_id, type, timestamp, owner_id, message) VALUES (?, ?, ?, ?, ?)",
+        "INSERT INTO notify (tenant_id, ntype, nts, owner_id, message) VALUES (?, ?, ?, ?, ?)",
     )
     .bind(tenant_id)
     .bind(n_type)

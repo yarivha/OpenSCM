@@ -466,7 +466,7 @@ pub async fn send(
                     vec![]
                 } else {
                     let mut qb = QueryBuilder::new(
-                        "SELECT id, tenant_id, test_id, type, element, input, selement, condition, sinput
+                        "SELECT id, tenant_id, test_id, ctype, element, input, selement, comparison, sinput
                          FROM test_conditions WHERE tenant_id = ",
                     );
                     qb.push_bind(tenant_id);
@@ -487,7 +487,7 @@ pub async fn send(
                 // Group by (test_id, type)
                 let mut cond_map: HashMap<(i64, &str), Vec<TestCondition>> = HashMap::new();
                 for c in all_conditions {
-                    let key = (c.test_id, if c.r#type == "applicability" { "applicability" } else { "condition" });
+                    let key = (c.test_id, if c.ctype == "applicability" { "applicability" } else { "condition" });
                     cond_map.entry(key).or_default().push(c);
                 }
 

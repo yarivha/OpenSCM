@@ -73,8 +73,8 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
         "CREATE TABLE IF NOT EXISTS notify (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
-            type TEXT,
-            timestamp TEXT,
+            ntype TEXT,
+            nts TEXT,
             owner_id INTEGER,
             message TEXT NOT NULL,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
@@ -188,11 +188,11 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
             test_id INTEGER NOT NULL,
             name TEXT,
             description TEXT,
-            type TEXT NOT NULL,
+            ctype TEXT NOT NULL,
             element TEXT NOT NULL,
             input TEXT NOT NULL,
             selement TEXT NOT NULL,
-            condition TEXT,
+            comparison TEXT,
             sinput TEXT,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
@@ -574,12 +574,12 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     }
 
     sqlx::query(&db_compat::adapt_sql(
-        "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 10)"
+        "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 11)"
     ))
     .execute(pool)
     .await?;
 
-    info!("Schema version stamped at 10 (fresh install).");
+    info!("Schema version stamped at 11 (fresh install).");
 
     Ok(())
 }
@@ -777,7 +777,7 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
 
                     sqlx::query(
                         "INSERT INTO test_conditions
-                             (tenant_id, test_id, type, element, input, selement, condition, sinput)
+                             (tenant_id, test_id, ctype, element, input, selement, comparison, sinput)
                          VALUES (?, ?, 'condition', ?, ?, ?, ?, ?)"
                     )
                     .bind(&tenant_id)
@@ -1045,6 +1045,51 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE schema_info SET version = 10")
             .execute(pool).await?;
         info!("Schema migration v9 → v10 complete.");
+    }
+
+    // v10 → v11: rename MySQL/MariaDB reserved-word columns.
+    //   test_conditions.type      → ctype      (TYPE is reserved in some MariaDB versions)
+    //   test_conditions.condition → comparison  (CONDITION is reserved in MySQL/MariaDB)
+    //   notify.type               → ntype
+    //   notify.timestamp          → nts         (TIMESTAMP is a MySQL/MariaDB type keyword)
+    // MySQL installs never had these old column names (the schema creation failed before
+    // this fix), so on MySQL the column_exists checks return false and nothing is renamed.
+    if version < 11 {
+        info!("Running schema migration v10 → v11 (rename reserved-word columns)...");
+
+        // RENAME COLUMN is supported on SQLite ≥ 3.25 and PostgreSQL ≥ 9.
+        // On MySQL we skip — the tables were never created with the old names.
+        match crate::get_db_backend() {
+            crate::DbBackend::Sqlite | crate::DbBackend::Postgres => {
+                if db_compat::column_exists(pool, "test_conditions", "type").await {
+                    let _ = sqlx::query(
+                        "ALTER TABLE test_conditions RENAME COLUMN \"type\" TO ctype",
+                    ).execute(pool).await;
+                }
+                if db_compat::column_exists(pool, "test_conditions", "condition").await {
+                    let _ = sqlx::query(
+                        "ALTER TABLE test_conditions RENAME COLUMN \"condition\" TO comparison",
+                    ).execute(pool).await;
+                }
+                if db_compat::column_exists(pool, "notify", "type").await {
+                    let _ = sqlx::query(
+                        "ALTER TABLE notify RENAME COLUMN \"type\" TO ntype",
+                    ).execute(pool).await;
+                }
+                if db_compat::column_exists(pool, "notify", "timestamp").await {
+                    let _ = sqlx::query(
+                        "ALTER TABLE notify RENAME COLUMN \"timestamp\" TO nts",
+                    ).execute(pool).await;
+                }
+            }
+            crate::DbBackend::Mysql => {
+                // Tables were never created with the old names on MySQL — nothing to do.
+            }
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 11")
+            .execute(pool).await?;
+        info!("Schema migration v10 → v11 complete.");
     }
 
     Ok(())

@@ -199,7 +199,7 @@
                           <select class="form-control" name="app_condition_{{ i }}">
                             <option value="">-- Select --</option>
                             {% for condition in conditions %}
-                              <option {% if ac and ac.condition == condition.name %}selected{% endif %}>{{ condition.name }}</option>
+                              <option {% if ac and ac.comparison == condition.name %}selected{% endif %}>{{ condition.name }}</option>
                             {% endfor %}
                           </select>
                         </div>
@@ -280,7 +280,7 @@
                         <select name="condition_{{ i }}" class="form-control">
                           <option value=""></option>
                           {% for cond_opt in conditions %}
-                            <option {% if tc and tc.condition == cond_opt.name %}selected{% endif %}>{{ cond_opt.name }}</option>
+                            <option {% if tc and tc.comparison == cond_opt.name %}selected{% endif %}>{{ cond_opt.name }}</option>
                           {% endfor %}
                         </select>
                       </div>
