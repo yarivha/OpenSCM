@@ -7,6 +7,7 @@ All notable changes to OpenSCM are documented here.
 ## [0.3.3] - 2026-05-15
 
 ### Fixed
+- **Offline badge missing on Systems page after DataTables redraw** — the offline indicator (row dimming + "Offline" badge) was applied via jQuery on document ready, so any DataTables interaction (search, sort, pagination) wiped it out for the affected rows. Moved the badge into the Tera template so it renders server-side as part of the cell, and replaced the JS-applied row dimming with a pure CSS rule (`tr[data-offline="true"] td:not(:last-child) { opacity: 0.5; }`) that survives DOM redraws.
 - **Agent results not stored — `missing field 'type'` deserialization error** — the v10→v11 MySQL-compatibility migration renamed `test_conditions.type` → `ctype` and `test_conditions.condition` → `comparison` on the server, but the scmclient agent still expected the original JSON field names. Every heartbeat that returned tests caused the agent to fail deserializing, so no compliance results were ever sent back. Fixed by reverting both columns to their original names (`type`, `condition`) via a new v11→v12 migration; the Rust struct field names match again so the JSON wire format is identical to what the agent expects, with no `serde(rename)` shims.
 
 ### Added

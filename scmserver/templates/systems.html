@@ -1,6 +1,14 @@
 {% extends "base.html" %}
 {% block content %}
 
+<style>
+  /* Dim rows for systems that have not checked in within the offline threshold.
+     Applied via CSS so DataTables redraws (search/sort/paginate) preserve it. */
+  #systems_table tbody tr[data-offline="true"] td:not(:last-child) {
+    opacity: 0.5;
+  }
+</style>
+
 <div class="content-wrapper">
   <section class="content-header">
     <div class="container-fluid">
@@ -121,7 +129,10 @@
   		      {% endif %}
 		    </td>
                     <td><span class="badge badge-light">v{{ system.ver }}</span></td>
-                    <td class="datetime" data-utc="{{ system.last_seen }}">{{ system.last_seen }}</td>
+                    <td class="datetime" data-utc="{{ system.last_seen }}">
+                      {{ system.last_seen }}
+                      {% if system.is_offline %}<span class="badge badge-secondary ml-1">Offline</span>{% endif %}
+                    </td>
 
                     <td class="text-right">
                       {% if system.status == "pending" %}
@@ -388,11 +399,5 @@
     });
   });
 
-  $(document).ready(function() {
-    $('#systems_table tbody tr[data-offline="true"]').each(function() {
-        $(this).find('td:not(:last-child)').addClass('text-muted').css('opacity', '0.5');
-        $(this).find('td.datetime').append(' <span class="badge badge-secondary ml-1">Offline</span>');
-    });
-  });
 </script>
 {% endblock %}
