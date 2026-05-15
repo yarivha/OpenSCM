@@ -4,20 +4,26 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.3.2] - 2026-05-15
+
+### Changed
+- **`db_compat` module deleted** — the entire multi-backend compatibility shim is removed. All 52 `adapt_sql()` call sites converted to direct SQL literals; remaining helpers (`format_datetime_col`, `unix_diff_col`, `date_group_col`, `group_concat_col`, `last_insert_id_sql`, `upsert_*_sql`, `admin_role_trigger_sql`, `rename_table_sql`, `table_exists_sql`) inlined at their call sites; `column_exists` moved as a private function into `schema.rs`.
+- **`render_template` DB round-trips halved** — the four per-page queries (pending count, notify count, notifications list, tenant name) batched into two: a single sub-select retrieves pending count + tenant name; a window-function query retrieves notifications + total count simultaneously.
+- **`initialize_database` split into focused helpers** — the 560-line function broken into three private helpers (`create_tables`, `create_indexes`, `seed_lookup_data`) called by a thin coordinator.
+- **`recalculate_current_compliance` split into focused helpers** — the 195-line aggregation function broken into `purge_ghost_results`, `update_test_stats`, `update_system_stats`, `update_policy_stats`, all sharing one transaction.
+- **Compliance verdict centralised** — `handlers::is_system_passed(pass, fail)` replaces the inline `fail_count == 0 && pass_count > 0` expression in `reports.rs`, `policies.rs`, and `systems.rs`.
+- **Stale comments removed** — scaffolding annotations (`// <--- ADD THIS LINE`, `// Added`, `// Alias for …`) cleaned from `models.rs`; `lib.rs` header updated to remove EE references.
+
+---
+
 ## [0.3.1] - 2026-05-15
 
 ### Changed
-- **SQLite-only — MySQL and PostgreSQL support dropped** — CE reverts to `sqlx::SqlitePool` exclusively. The multi-backend `AnyPool`, `DbBackend` enum, `set_db_backend`, `MYSQL_SUPPORT`, and `row_get_string` / `row_get_opt_string` helpers have been removed. `db_compat` helpers are retained for SQLite-specific SQL generation but all backend-dispatch logic is gone.
+- **SQLite-only — MySQL and PostgreSQL support dropped** — CE reverts to `sqlx::SqlitePool` exclusively. The multi-backend `AnyPool`, `DbBackend` enum, `set_db_backend`, `MYSQL_SUPPORT`, and `row_get_string` / `row_get_opt_string` helpers have been removed.
 - **SaaS drops EE dependency** — SaaS (0.2.2) now depends directly on `scmserver` (CE) instead of `openscm-ee`. `create_core_router` replaces `create_ee_router`. The admin→superuser promotion migration is inlined in SaaS `main.rs`. The `sqlx` feature set is trimmed back to `sqlite` only.
-- **`db_compat` module deleted** — the entire compatibility shim is gone. `adapt_sql()` and all 52 call sites were removed in the previous pass; this pass inlines the remaining helpers (`format_datetime_col`, `unix_diff_col`, `date_group_col`, `group_concat_col`, `last_insert_id_sql`, `upsert_*_sql`, `column_exists`, `admin_role_trigger_sql`, `rename_table_sql`, `table_exists_sql`) directly at their single call sites or as private functions in the module that owns them (`column_exists` moved into `schema.rs`).
-- **`render_template` DB round-trips halved** — the four per-page queries (pending count, notify count, notifications list, tenant name) are now batched into two queries: a single sub-select retrieves pending count + tenant name, and a window-function query retrieves notifications + total count simultaneously.
-- **`initialize_database` split into focused helpers** — the 560-line function is broken into three private helpers (`create_tables`, `create_indexes`, `seed_lookup_data`) called in sequence by the thin coordinator, making each section independently readable and testable.
-- **`recalculate_current_compliance` split into focused helpers** — the 195-line aggregation function is broken into four private helpers (`purge_ghost_results`, `update_test_stats`, `update_system_stats`, `update_policy_stats`) that share a single transaction, called by the public coordinator.
-- **Compliance verdict centralised** — the `fail_count == 0 && pass_count > 0` expression extracted to `handlers::is_system_passed()` and used across `reports.rs`, `policies.rs`, and `systems.rs`.
 
 ### Fixed
-- **Unscanned tests shown as FAIL in system compliance report** — when a policy had never been run, tests with no entry in the `results` table were mapped to `"FAIL"` by `normalize_status()`. Added a `"not_scanned"` arm that preserves `"NOT_SCANNED"` so unrun tests are counted in the N/A bucket and rendered as the grey *Not Scanned* badge, not as failures.
-- **Stale comments removed** — cleaned up scaffolding comments in `models.rs` (`// <--- ADD THIS LINE`, `// Added`, `// Alias for …`) and updated the `lib.rs` file header to remove references to the EE binary.
+- **Unscanned tests shown as FAIL in system compliance report** — tests with no entry in the `results` table were mapped to `"FAIL"` by `normalize_status()`. Added a `"not_scanned"` arm so unrun tests are counted in the N/A bucket and rendered as the grey *Not Scanned* badge.
 
 ---
 
