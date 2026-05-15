@@ -11,7 +11,7 @@ use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
 use bytes::Bytes;
 use tera::{Tera, Context};
-use sqlx::AnyPool;
+use sqlx::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
 use std::collections::BTreeMap;
@@ -41,7 +41,7 @@ use crate::systems::fetch_system_report_data;
 pub async fn reports(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -50,8 +50,10 @@ pub async fn reports(
     }
 
     // Fetch policy reports
-    let policy_reports: Vec<Report> = match sqlx::query(
-        "SELECT id, CAST(submission_date AS TEXT) AS submission_date, policy_name, policy_version, submitter_name
+    let policy_reports: Vec<Report> = match sqlx::query_as::<_, Report>(
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                policy_name, policy_version, NULL as policy_description,
+                submitter_name, NULL as tests_metadata, NULL as report_results
          FROM reports
          WHERE tenant_id = ?
          ORDER BY submission_date DESC",
@@ -60,20 +62,7 @@ pub async fn reports(
     .fetch_all(&pool)
     .await
     {
-        Ok(rows) => rows
-            .into_iter()
-            .map(|row| Report {
-                id: row.get("id"),
-                tenant_id: auth.tenant_id.clone(),
-                submission_date: row.get("submission_date"),
-                policy_name: row.get("policy_name"),
-                policy_version: row.get("policy_version"),
-                policy_description: None,
-                submitter_name: row.get("submitter_name"),
-                tests_metadata: None,
-                report_results: None,
-            })
-            .collect(),
+        Ok(rows) => rows,
         Err(e) => {
             error!("Failed to fetch policy reports: {}", e);
             vec![]
@@ -82,7 +71,8 @@ pub async fn reports(
 
     // Fetch system reports
     let system_reports: Vec<SavedSystemReport> = match sqlx::query_as::<_, SavedSystemReport>(
-        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date, system_id, system_name, submitter_name, NULL as report_data
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                system_id, system_name, submitter_name, NULL as report_data
          FROM system_reports
          WHERE tenant_id = ?
          ORDER BY submission_date DESC",
@@ -121,7 +111,7 @@ pub async fn reports(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn save_policy_report_logic(
     id: i64,
-    pool: &AnyPool,
+    pool: &SqlitePool,
     tenant_id: &str,
     submitter_name: &str,
 ) -> Result<(), sqlx::Error> {
@@ -245,7 +235,7 @@ pub async fn save_policy_report_logic(
 pub async fn reports_save(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
@@ -274,7 +264,7 @@ pub async fn reports_save(
 pub async fn reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -366,7 +356,7 @@ pub async fn reports_view(
 pub async fn reports_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -406,7 +396,7 @@ fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
 pub async fn reports_download(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
@@ -684,7 +674,7 @@ pub async fn reports_download(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn reports_bulk_delete(
     auth: AuthSession,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -743,7 +733,7 @@ pub async fn reports_bulk_delete(
 pub async fn system_report_save(
     auth: AuthSession,
     Path(system_id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
@@ -802,7 +792,7 @@ pub async fn system_report_save(
 pub async fn system_reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -855,7 +845,6 @@ pub async fn system_reports_view(
     .await
     .unwrap_or(60);
 
-    // AnyPool maps EXISTS(…) to BIGINT — use i64 and treat 0/1 as falsy/truthy
     let system_exists: i64 = sqlx::query_scalar(
         "SELECT EXISTS(SELECT 1 FROM systems WHERE id = ? AND tenant_id = ?)"
     )
@@ -885,7 +874,7 @@ pub async fn system_reports_view(
 pub async fn system_reports_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -914,7 +903,7 @@ pub async fn system_reports_delete(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_reports_bulk_delete(
     auth: AuthSession,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -1108,7 +1097,7 @@ fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Ve
 pub async fn system_reports_download(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
@@ -1177,7 +1166,7 @@ pub async fn system_reports_download(
 pub async fn system_report_live_download(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {

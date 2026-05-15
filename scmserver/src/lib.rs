@@ -26,17 +26,16 @@ pub mod db_compat;
 pub mod email;
 
 // 2. Imports needed for the public API
-use std::{sync::{Arc, atomic::{AtomicBool, AtomicU8, Ordering}, OnceLock}, path::PathBuf, error::Error};
+use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
 
 // ─────────────────────────────────────────────────────────────────────────────
 // PostInstallFn — optional async hook called by install_post after the CE
-// schema and migrations have completed.  EE/SaaS register this via
-// `.layer(Extension(hook))` on the app router so that their own migrations
-// (run_ee_migrations, run_saas_schema) run inside the same process on fresh
-// installs, not only on the next restart.
+// schema and migrations have completed.  SaaS registers this via
+// `.layer(Extension(hook))` on the app router so that its own migrations run
+// inside the same process on fresh installs, not only on the next restart.
 // ─────────────────────────────────────────────────────────────────────────────
 pub type PostInstallFn = Arc<
-    dyn Fn(sqlx::AnyPool) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
+    dyn Fn(sqlx::SqlitePool) -> std::pin::Pin<Box<dyn std::future::Future<Output = ()> + Send>>
     + Send + Sync
 >;
 
@@ -60,7 +59,7 @@ pub fn app_version() -> &'static str {
     APP_VERSION.get().map(|s| s.as_str()).unwrap_or(env!("CARGO_PKG_VERSION"))
 }
 
-// Edition registry — "Community Edition", "Enterprise Edition", "SaaS Edition"
+// Edition registry — "Community Edition", "SaaS Edition"
 static APP_EDITION: OnceLock<String> = OnceLock::new();
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -78,36 +77,6 @@ pub fn set_app_edition(edition: &str) {
 pub fn app_edition() -> &'static str {
     APP_EDITION.get().map(|s| s.as_str()).unwrap_or("Community Edition")
 }
-// ─────────────────────────────────────────────────────────────────────────────
-// DbBackend — active database backend.
-// Stored as an AtomicU8 so the install wizard can switch from the startup
-// default (SQLite) to MySQL/PostgreSQL without a process restart.
-// ─────────────────────────────────────────────────────────────────────────────
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub enum DbBackend {
-    Sqlite   = 0,
-    Mysql    = 1,
-    Postgres = 2,
-}
-
-static DB_BACKEND: AtomicU8 = AtomicU8::new(0); // default: Sqlite
-
-/// Set the active DB backend. Safe to call multiple times — the install wizard
-/// calls this when switching from the startup default (SQLite) to MySQL.
-pub fn set_db_backend(backend: DbBackend) {
-    DB_BACKEND.store(backend as u8, Ordering::SeqCst);
-}
-
-/// Returns the active DB backend. Defaults to SQLite (0) until set_db_backend
-/// is called.
-pub fn get_db_backend() -> DbBackend {
-    match DB_BACKEND.load(Ordering::SeqCst) {
-        1 => DbBackend::Mysql,
-        2 => DbBackend::Postgres,
-        _ => DbBackend::Sqlite,
-    }
-}
-
 use axum::{Router, Extension, response::IntoResponse, routing::{get, post}, http::{header, StatusCode}, body::{Bytes, Body}};
 use axum::middleware;
 use tera::Tera;
@@ -122,7 +91,7 @@ pub static STATIC_FILES_DIR: Dir<'static> = include_dir!("$CARGO_MANIFEST_DIR/st
 // This struct is the "glue" between your Core logic and the Enterprise wrapper.
 #[derive(Clone)]
 pub struct AppState {
-    pub pool: sqlx::AnyPool,
+    pub pool: sqlx::SqlitePool,
     pub tera: Arc<Tera>,
     pub config: Arc<config::Config>,
     pub sync_tx: tokio::sync::mpsc::Sender<()>,
@@ -272,7 +241,6 @@ async fn init_guard(
 pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
     Router::new()
         .route("/install", get(install::install_get).post(install::install_post))
-        .route("/install/test-db", post(install::test_db_post))
         .route("/", get(dashboard::dashboard))
         .route("/login", get(auth::login).post(auth::login_submit))
         .route("/logout", get(auth::logout))

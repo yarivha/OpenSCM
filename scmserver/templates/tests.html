@@ -103,14 +103,14 @@
             </thead>
             <tbody>
               {% for test in tests %}
-              {% set sev = test.severity | lower | trim %}
+              {% set sev = test.severity | default(value="") | lower | trim %}
               <tr>
                 <td>{{ test.id }}</td>
                 <td class="text-center">
                   <input type="checkbox" class="row-checkbox" value="{{ test.id }}" title="Select">
                 </td>
                 <td><strong>{{ test.name }}</strong></td>
-                <td>{{ test.description | truncate(length=65) }}</td>
+                <td>{{ test.description | default(value="") | truncate(length=65) }}</td>
                 <td class="text-center">
                   <span class="badge shadow-sm
                     {% if sev == 'critical' %}badge-critical
@@ -119,7 +119,7 @@
                     {% elif sev == 'low' %}badge-info
                     {% else %}badge-secondary
                     {% endif %}" style="min-width: 100px; padding: 6px;">
-                    {{ test.severity | upper }}
+                    {{ test.severity | default(value="") | upper }}
                   </span>
                 </td>
                 <td class="text-right">

@@ -12,7 +12,7 @@ use axum::http::request::Parts;
 use axum::http::StatusCode;
 use std::sync::Arc;
 use std::future::Future;
-use sqlx::AnyPool;
+use sqlx::SqlitePool;
 use sqlx::Row;
 use bcrypt::verify;
 use serde::Deserialize;
@@ -131,7 +131,7 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn login_submit(
     jar: SignedCookieJar,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Form(form): Form<LoginForm>,
 ) -> (SignedCookieJar, Redirect) {
 
@@ -193,7 +193,7 @@ pub async fn login_submit(
 
     let (hash_to_check, maybe_row) = match row {
         Ok(Some(row)) => {
-            let hash: String = row.get("password");
+            let hash = row.get("password");
             (hash, Some(row))
         },
         Ok(None) => {
@@ -214,7 +214,7 @@ pub async fn login_submit(
             let userid: i32 = row.get("id");
             let role: String = row.get("role");
 
-            let tenant_id: String = row.try_get::<String, _>("tenant_id")
+            let tenant_id = row.try_get::<String, _>("tenant_id")
                 .unwrap_or_else(|_| "default".to_string());
 
             let session_data = json!({

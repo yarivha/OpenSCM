@@ -71,7 +71,7 @@
                   <tr>
                     <td>{{ group.id }}</td>
                     <td><strong>{{ group.name }}</strong></td>
-                    <td>{{ group.description | truncate(length=65) }}</td>
+                    <td>{{ group.description | default(value="") | truncate(length=65) }}</td>
                     <td class="text-right">
                       
                       {# Primary Action: View Modal #}

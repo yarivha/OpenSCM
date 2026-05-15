@@ -8,7 +8,7 @@
 
 use axum::{extract::Extension, http::StatusCode, response::IntoResponse, Json};
 use tokio::sync::mpsc;
-use sqlx::{AnyPool, QueryBuilder, Row};
+use sqlx::{SqlitePool, QueryBuilder, Row};
 use std::collections::HashMap;
 use tracing::{info, error, debug, warn};
 use base64::{engine::general_purpose, Engine as _};
@@ -36,7 +36,7 @@ struct AuthCheck {
 // Signs a JSON payload with the tenant's active Ed25519 private key.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn sign_response(
-    pool: &AnyPool,
+    pool: &SqlitePool,
     tenant_id: &str,
     payload: serde_json::Value,
 ) -> Result<SignedResponse, Box<dyn std::error::Error>> {
@@ -133,7 +133,7 @@ fn verify_signature(
 // Returns pending test commands for approved agents.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn send(
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Json(signed_req): Json<SignedRequest>,
 ) -> impl IntoResponse {
     // Parse the typed payload from the raw bytes.
@@ -276,13 +276,12 @@ pub async fn send(
             payload.hostname, tenant_id
         );
 
-        // Use a transaction so INSERT and last_insert_rowid() run on the same
-        // connection — AnyPool otherwise may route them to different connections.
+        // Use a transaction so INSERT and last_insert_rowid() run on the same connection.
         let reg_result: Result<i64, sqlx::Error> = async {
             let mut tx = pool.begin().await?;
             sqlx::query(
-                r#"INSERT INTO systems (tenant_id, key, name, ver, os, ip, arch, status)
-                   VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')"#,
+                "INSERT INTO systems (tenant_id, key, name, ver, os, ip, arch, status)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
             )
             .bind(tenant_id)
             .bind(&payload.public_key)
@@ -343,7 +342,7 @@ pub async fn send(
         // STEP 3: HEARTBEAT (ID > 0)
         // =========================================================
         let auth_result = sqlx::query_as::<_, AuthCheck>(
-            &db_compat::adapt_sql("SELECT key, status FROM systems WHERE id = ? AND tenant_id = ?"),
+            "SELECT key, status FROM systems WHERE id = ? AND tenant_id = ?",
         )
         .bind(id)
         .bind(tenant_id)
@@ -614,7 +613,7 @@ pub async fn send(
 // Stores a single PASS/FAIL/NA compliance result from an approved agent.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn receive_result(
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     Json(signed_req): Json<SignedResult>,
 ) -> impl IntoResponse {

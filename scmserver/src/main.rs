@@ -9,11 +9,9 @@ use tokio::sync::mpsc;
 // Importing the public items from our own library (scmserver)
 use scmserver::{
     AppState,
-    DbBackend,
     create_core_router,
     init_tera,
     check_required_directories,
-    set_db_backend,
     config::{Config, private_key_path, db_path},
     schema::run_migrations,
     scheduler::{start_background_scheduler, recalculate_current_compliance},
@@ -109,24 +107,16 @@ async fn main() -> Result<(), Box<dyn Error>> {
     // (triggered by the admin clicking "Complete Setup").  On subsequent starts
     // run_migrations() is sufficient.
 
-    // CE is always SQLite — set the backend so db_compat helpers emit correct SQL.
-    sqlx::any::install_default_drivers();
-    set_db_backend(DbBackend::Sqlite);
-
-    // AnyPool's URL connect doesn't expose create_if_missing, so we pre-create
-    // the file ourselves.  check_required_directories() already ensured the
-    // parent directory exists, so this will only fail on a permissions problem.
+    // 5. Database — SQLite only.
+    // Pre-create the file so SqlitePool can open it with mode=rwc.
     let db_file = db_path();
     if !std::path::Path::new(&db_file).exists() {
         fs::File::create(&db_file)
             .map_err(|e| format!("Cannot create database file '{}': {}", db_file, e))?;
     }
 
-    let database_url = format!("sqlite://{}", db_file);
-    let pool: sqlx::AnyPool = sqlx::pool::PoolOptions::<sqlx::Any>::new()
-        .max_connections(5)
-        .connect(&database_url)
-        .await?;
+    let database_url = format!("sqlite://{}?mode=rwc", db_file);
+    let pool: sqlx::SqlitePool = sqlx::SqlitePool::connect(&database_url).await?;
 
     // Apply SQLite pragmas for performance / safety.
     sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await.ok();

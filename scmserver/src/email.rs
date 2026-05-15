@@ -11,7 +11,7 @@ use lettre::{
     transport::smtp::authentication::Credentials,
     message::header::ContentType,
 };
-use sqlx::{AnyPool, Row};
+use sqlx::{SqlitePool, Row};
 use tracing::{error, info};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -30,7 +30,7 @@ impl Mailer {
     // Load SMTP settings from the `settings` table (default tenant).
     // Returns None when smtp_host is not configured.
     // ─────────────────────────────────────────────────────────────────────────
-    pub async fn from_db(pool: &AnyPool) -> Option<Self> {
+    pub async fn from_db(pool: &SqlitePool) -> Option<Self> {
         let rows = sqlx::query(
             "SELECT skey, value FROM settings WHERE tenant_id = 'default'
              AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password',

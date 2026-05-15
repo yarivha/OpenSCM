@@ -10,7 +10,7 @@ use axum::http::{StatusCode, header};
 use axum::extract::{RawForm, Extension, Query, Path};
 use tokio::sync::mpsc;
 use tera::{Tera, Context};
-use sqlx::AnyPool;
+use sqlx::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
 use urlencoding;
@@ -43,7 +43,7 @@ use crate::db_compat;
 pub async fn policies(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -160,7 +160,7 @@ pub async fn policies(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_add(
     auth: AuthSession,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -229,7 +229,7 @@ pub async fn policies_add(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn policies_add_save(
     auth: AuthSession,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     RawForm(raw_form): RawForm,
 ) -> impl IntoResponse {
 
@@ -416,7 +416,7 @@ pub async fn policies_add_save(
 pub async fn policies_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -450,10 +450,12 @@ pub async fn policies_edit(
 
     // Fetch scan schedule
     let schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        "SELECT id, tenant_id, policy_id, schedule_type,
-                CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
-                CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
-         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'scan'",
+        &db_compat::adapt_sql(
+            "SELECT id, tenant_id, policy_id, schedule_type,
+                    CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
+                    CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+             FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'scan'"
+        ),
     )
     .bind(id)
     .bind(&auth.tenant_id)
@@ -463,10 +465,12 @@ pub async fn policies_edit(
 
     // Fetch report schedule
     let report_schedule_row = sqlx::query_as::<_, PolicySchedule>(
-        "SELECT id, tenant_id, policy_id, schedule_type,
-                CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
-                CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
-         FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'report'",
+        &db_compat::adapt_sql(
+            "SELECT id, tenant_id, policy_id, schedule_type,
+                    CAST(enabled AS INTEGER) AS enabled, frequency, cron_expression,
+                    CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+             FROM policy_schedules WHERE policy_id = ? AND tenant_id = ? AND schedule_type = 'report'"
+        ),
     )
     .bind(id)
     .bind(&auth.tenant_id)
@@ -546,7 +550,7 @@ pub async fn policies_edit(
 pub async fn policies_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     RawForm(raw_form): RawForm,
 ) -> impl IntoResponse {
@@ -725,7 +729,7 @@ pub async fn policies_edit_save(
 pub async fn policies_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
@@ -776,7 +780,7 @@ pub async fn policies_delete(
 pub async fn policies_run(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
@@ -806,7 +810,7 @@ pub async fn policies_report(
     auth: AuthSession,
     Path(id): Path<i32>,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -934,7 +938,7 @@ fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
 pub async fn policies_report_download(
     auth: AuthSession,
     Path(id): Path<i64>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
@@ -1159,7 +1163,7 @@ pub async fn policies_report_download(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn execute_policy_run_logic(
     id: i32,
-    pool: &AnyPool,
+    pool: &SqlitePool,
     tenant_id: &str,
 ) -> Result<(), sqlx::Error> {
     sqlx::query(&db_compat::adapt_sql(r#"

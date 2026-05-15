@@ -10,13 +10,13 @@
 </head>
 <body class="hold-transition login-page">
 
-<div class="login-box">
+<div class="login-box" style="width:480px;">
   <div class="card card-outline card-primary">
 
     <div class="card-header text-center">
       <i class="fas fa-shield-alt fa-2x text-primary"></i>
       <h1 class="h3 mt-2"><b>OpenSCM</b></h1>
-      <p class="text-muted mb-0" style="font-size:.85rem;">Security Compliance Manager</p>
+      <p class="text-muted mb-0" style="font-size:.85rem;">{{ edition }} — First-Run Setup</p>
     </div>
 
     <div class="card-body">
@@ -33,12 +33,37 @@
       </div>
       {% endif %}
 
-      <p class="text-muted text-sm mb-3">
-        No database was found. Choose an admin password to complete the installation.
-        You can change it later from <strong>Admin Settings</strong>.
-      </p>
+      {% if restarting %}
+      <!-- MySQL setup complete — server is restarting automatically -->
+      <div class="alert alert-success">
+        <h5><i class="icon fas fa-check-circle"></i> MySQL Database Ready</h5>
+        The schema has been initialised and your admin account created.
+      </div>
+      <div class="callout callout-info mb-3 text-center">
+        <i class="fas fa-spinner fa-spin fa-2x text-primary mb-2"></i>
+        <h6 class="mb-1">Connecting to MySQL…</h6>
+        <p class="text-muted mb-0" style="font-size:.85rem;">
+          The server is restarting to switch its database connection.<br>
+          You will be redirected to the login page automatically.
+        </p>
+      </div>
+      <script>
+        // Poll /login every second; redirect as soon as the restarted server responds.
+        function waitForServer() {
+          fetch('/login', { method: 'HEAD', cache: 'no-store' })
+            .then(function() { window.location.replace('/login'); })
+            .catch(function() { setTimeout(waitForServer, 1000); });
+        }
+        setTimeout(waitForServer, 2000);
+      </script>
+      {% else %}
 
-      <form method="post" action="/install">
+      <form method="post" action="/install" id="installForm">
+
+        <!-- ── Admin Password ─────────────────────────────────────────── -->
+        <p class="text-muted text-sm mb-1" style="font-weight:600;">
+          <i class="fas fa-user-shield mr-1 text-primary"></i> Admin Account
+        </p>
 
         <div class="input-group mb-1">
           <input type="password" name="password" class="form-control"
@@ -47,11 +72,11 @@
             <div class="input-group-text"><span class="fas fa-lock"></span></div>
           </div>
         </div>
-        <p class="text-muted text-xs mb-3" style="font-size:.78rem; padding-left:2px;">
+        <p class="text-muted mb-2" style="font-size:.78rem; padding-left:2px;">
           Minimum 8 characters.
         </p>
 
-        <div class="input-group mb-4">
+        <div class="input-group mb-3">
           <input type="password" name="confirm_password" class="form-control"
                  placeholder="Confirm password" autocomplete="new-password" required>
           <div class="input-group-append">
@@ -59,7 +84,8 @@
           </div>
         </div>
 
-        <div class="row">
+        <!-- ── Submit ─────────────────────────────────────────────────── -->
+        <div class="row mt-3">
           <div class="col-12 text-center">
             <button type="submit" class="btn btn-primary px-5">
               <i class="fas fa-rocket mr-1"></i> Complete Setup
@@ -68,6 +94,7 @@
         </div>
 
       </form>
+      {% endif %}
 
     </div>
   </div>

@@ -10,7 +10,7 @@ use axum::response::{IntoResponse, Redirect};
 use axum::extract::{RawForm, Extension, Query, Path};
 use tokio::sync::mpsc;
 use tera::{Tera, Context};
-use sqlx::AnyPool;
+use sqlx::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
 use crate::db_compat;
@@ -39,7 +39,7 @@ use crate::handlers::{render_template, parse_form_data};
 pub async fn systems(
     auth: AuthSession,
     Query(params): Query<HashMap<String, String>>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -148,7 +148,7 @@ pub async fn systems(
         .into_iter()
         .map(|row| System {
             id: row.try_get("system_id").unwrap_or(None),
-            name: row.try_get("system_name").unwrap_or_default(),
+            name: row.get("system_name"),
             ver: row.try_get("system_ver").ok(),
             ip: row.try_get("system_ip").ok(),
             os: row.try_get("system_os").ok(),
@@ -159,11 +159,8 @@ pub async fn systems(
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            // Use .ok() so a NULL/unparseable timestamp becomes None instead of Utc::now()
-            created_date: row.try_get::<String, _>("created_date").ok()
-                .and_then(|s| s.parse::<DateTime<Utc>>().ok()),
-            last_seen: row.try_get::<String, _>("last_seen").ok()
-                .and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+            created_date: row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+            last_seen: row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
             is_offline: row.try_get::<bool, _>("is_offline").unwrap_or(false),
         })
         .collect();
@@ -203,7 +200,7 @@ pub async fn systems(
 pub async fn systems_approve(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -236,7 +233,7 @@ pub async fn systems_approve(
 pub async fn systems_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
@@ -270,7 +267,7 @@ pub async fn systems_delete(
 pub async fn systems_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -301,7 +298,7 @@ pub async fn systems_edit(
 
     let system = System {
         id: row.try_get("id").unwrap_or(None),
-        name: row.try_get("name").unwrap_or_default(),
+        name: row.get("name"),
         ver: row.try_get("ver").ok(),
         ip: row.try_get("ip").ok(),
         os: row.try_get("os").ok(),
@@ -314,7 +311,7 @@ pub async fn systems_edit(
         trust_proof: None,
         created_date: None,
         last_seen: None,
-            is_offline: false,
+        is_offline: false,
     };
 
     let groups_result = sqlx::query(
@@ -332,7 +329,7 @@ pub async fn systems_edit(
             .map(|row| SystemGroup {
                 id: row.get("group_id"),
                 name: row.get("group_name"),
-                description: row.get("group_description"),
+                description: row.try_get("group_description").ok(),
                 systems: None,
             })
             .collect(),
@@ -382,7 +379,7 @@ pub async fn systems_edit(
 pub async fn systems_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
@@ -486,7 +483,7 @@ pub async fn systems_edit_save(
 pub async fn systems_pending(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -537,7 +534,7 @@ pub async fn systems_pending(
         .into_iter()
         .map(|row| System {
             id: row.try_get("system_id").unwrap_or(None),
-            name: row.try_get("system_name").unwrap_or_default(),
+            name: row.get("system_name"),
             ver: row.try_get("system_ver").ok(),
             ip: row.try_get("system_ip").ok(),
             os: row.try_get("system_os").ok(),
@@ -548,10 +545,8 @@ pub async fn systems_pending(
             auth_public_key: None,
             trust_challenge: None,
             trust_proof: None,
-            created_date: row.try_get::<String, _>("created_date").ok()
-                .and_then(|s| s.parse::<DateTime<Utc>>().ok()),
-            last_seen: row.try_get::<String, _>("last_seen").ok()
-                .and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+            created_date: row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+            last_seen: row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
             is_offline: false,
         })
         .collect();
@@ -575,7 +570,7 @@ pub async fn systems_pending(
 pub async fn system_groups(
     auth: AuthSession,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -604,8 +599,8 @@ pub async fn system_groups(
             .map(|row| SystemGroup {
                 id: Some(row.get("id")),
                 name: row.get("name"),
-                description: row.get("description"),
-                systems: row.get("systems"),
+                description: row.try_get("description").ok(),
+                systems: row.try_get("systems").ok(),
             })
             .collect(),
         Err(e) => {
@@ -637,7 +632,7 @@ pub async fn system_groups(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups_add(
     auth: AuthSession,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -662,7 +657,7 @@ pub async fn system_groups_add(
                 ip: None,
                 os: None,
                 arch: None,
-                status: row.get("status"),
+                status: row.try_get("status").ok(),
                 groups: None,
                 auth_signature: None,
                 auth_public_key: None,
@@ -695,7 +690,7 @@ pub async fn system_groups_add(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn system_groups_add_save(
     auth: AuthSession,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -817,7 +812,7 @@ pub async fn system_groups_add_save(
 pub async fn system_groups_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
 ) -> impl IntoResponse {
 
@@ -882,7 +877,7 @@ pub async fn system_groups_delete(
 pub async fn system_groups_edit(
     auth: AuthSession,
     Path(id): Path<i32>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 
@@ -914,8 +909,8 @@ pub async fn system_groups_edit(
 
     let group = SystemGroup {
         id: row.try_get("id").unwrap_or(None),
-        name: row.try_get("name").unwrap_or_default(),
-        description: row.try_get("description").unwrap_or(None),
+        name: row.get("name"),
+        description: row.try_get("description").ok(),
         systems: None,
     };
 
@@ -936,7 +931,7 @@ pub async fn system_groups_edit(
                 ip: None,
                 os: None,
                 arch: None,
-                status: row.get("status"),
+                status: row.try_get("status").ok(),
                 groups: None,
                 auth_signature: None,
                 auth_public_key: None,
@@ -944,7 +939,7 @@ pub async fn system_groups_edit(
                 trust_proof: None,
                 created_date: None,
                 last_seen: None,
-            is_offline: false,
+                is_offline: false,
             })
             .collect(),
         Err(e) => {
@@ -995,7 +990,7 @@ pub async fn system_groups_edit(
 pub async fn system_groups_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
@@ -1149,7 +1144,7 @@ pub async fn system_groups_edit_save(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_bulk_approve(
     auth: AuthSession,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -1205,7 +1200,7 @@ pub async fn systems_bulk_approve(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_bulk_delete(
     auth: AuthSession,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
@@ -1261,7 +1256,7 @@ pub async fn systems_bulk_delete(
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_bulk_add_group(
     auth: AuthSession,
-    Extension(pool): Extension<AnyPool>,
+    Extension(pool): Extension<SqlitePool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -1343,7 +1338,7 @@ pub async fn systems_bulk_add_group(
 pub async fn fetch_system_report_data(
     system_id: i32,
     tenant_id: &str,
-    pool: &AnyPool,
+    pool: &SqlitePool,
 ) -> Result<SystemReportData, sqlx::Error> {
     let sys_row = sqlx::query(&format!(
         "SELECT id, name, os, arch, ip, compliance_score,
@@ -1387,12 +1382,12 @@ pub async fn fetch_system_report_data(
 
     let mut policy_map: BTreeMap<i32, PolicyResultGroup> = BTreeMap::new();
     for row in &raw {
-        let policy_id: i32                  = row.get("policy_id");
-        let policy_name: String             = row.get("policy_name");
-        let policy_version: String          = row.get("policy_version");
-        let policy_description: Option<String> = row.get("policy_description");
-        let test_name: String               = row.get("test_name");
-        let status_raw: String              = row.get("status");
+        let policy_id: i32                     = row.get("policy_id");
+        let policy_name: String                = row.get("policy_name");
+        let policy_version: String             = row.get("policy_version");
+        let policy_description: Option<String> = row.try_get("policy_description").ok();
+        let test_name: String                  = row.get("test_name");
+        let status_raw: String                 = row.get("status");
         let status = normalize_status(&status_raw).to_string();
 
         let entry = policy_map.entry(policy_id).or_insert_with(|| PolicyResultGroup {
@@ -1459,7 +1454,7 @@ pub async fn system_report(
     auth: AuthSession,
     Path(id): Path<i32>,
     Query(query): Query<ErrorQuery>,
-    pool: Extension<AnyPool>,
+    pool: Extension<SqlitePool>,
     tera: Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
 

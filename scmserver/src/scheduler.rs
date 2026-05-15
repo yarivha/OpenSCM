@@ -7,12 +7,13 @@
 //   Task C — checks GitHub for new releases once per hour.
 // =============================================================================
 
-use sqlx::{AnyPool, Row};
+use sqlx::{SqlitePool, Row};
 use tokio::time::{self, Duration};
 use chrono::{Utc, Timelike};
 use tracing::{info, error};
 use reqwest::Client;
 
+use crate::db_compat;
 use crate::models::PolicySchedule;
 use crate::policies::execute_policy_run_logic;
 use crate::handlers::add_notification;
@@ -42,7 +43,7 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
 // Helper: get_policy_owners
 // Returns all admin user IDs for a tenant (used to send schedule notifications).
 // ─────────────────────────────────────────────────────────────────────────────
-async fn get_policy_owners(pool: &AnyPool, tenant_id: &str) -> Vec<i32> {
+async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
     sqlx::query(
         "SELECT id FROM users WHERE tenant_id = ? AND role = 'admin'",
     )
@@ -61,7 +62,7 @@ async fn get_policy_owners(pool: &AnyPool, tenant_id: &str) -> Vec<i32> {
 // Purges ghost results, then recalculates compliance scores for all tests,
 // systems, and policies across all tenants in a single transaction.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn recalculate_current_compliance(pool: &AnyPool) -> Result<(), sqlx::Error> {
+pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     info!("Starting compliance aggregation (Active Systems Only)...");
 
     let mut tx = pool.begin().await?;
@@ -90,7 +91,7 @@ pub async fn recalculate_current_compliance(pool: &AnyPool) -> Result<(), sqlx::
     // =========================================================
     // 1. Update TEST stats (active systems only, per tenant)
     // =========================================================
-    sqlx::query(r#"
+    sqlx::query(&db_compat::adapt_sql(r#"
         UPDATE tests SET
             systems_passed = (
                 SELECT COUNT(*) FROM results r
@@ -119,14 +120,14 @@ pub async fn recalculate_current_compliance(pool: &AnyPool) -> Result<(), sqlx::
                   AND s.status    = 'active'
                   AND r.result    != 'NA'
             )
-    "#)
+    "#))
     .execute(&mut *tx)
     .await?;
 
     // =========================================================
     // 2. Update SYSTEM stats (active systems only, per tenant)
     // =========================================================
-    sqlx::query(r#"
+    sqlx::query(&db_compat::adapt_sql(r#"
         UPDATE systems SET
             tests_passed = (
                 SELECT COUNT(*) FROM results
@@ -155,14 +156,14 @@ pub async fn recalculate_current_compliance(pool: &AnyPool) -> Result<(), sqlx::
                   AND result != 'NA'
             )
         WHERE status = 'active'
-    "#)
+    "#))
     .execute(&mut *tx)
     .await?;
 
     // =========================================================
-    // 3. Update POLICY stats (SQLite compatible, per tenant)
+    // 3. Update POLICY stats
     // NA-aware: systems with only NA results are excluded from
-    // both numerator and denominator of compliance score
+    // both numerator and denominator of compliance score.
     // =========================================================
     sqlx::query(r#"
         UPDATE policies SET
@@ -217,7 +218,6 @@ pub async fn recalculate_current_compliance(pool: &AnyPool) -> Result<(), sqlx::
             ),
             compliance_score = (
                 SELECT CASE
-                    -- No systems with PASS or FAIL results → Not Scanned
                     WHEN COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) = 0 THEN -1.0
                     ELSE (
                         CAST(COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END) AS REAL) /
@@ -264,7 +264,7 @@ pub async fn recalculate_current_compliance(pool: &AnyPool) -> Result<(), sqlx::
 // Helper: record_compliance_history
 // Inserts one compliance_history row per tenant with current avg scores.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn record_compliance_history(pool: &AnyPool) -> Result<(), sqlx::Error> {
+pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     // Get all active tenants
     let tenants: Vec<String> = sqlx::query_scalar(
@@ -349,7 +349,7 @@ pub async fn record_compliance_history(pool: &AnyPool) -> Result<(), sqlx::Error
 // Helper: start_background_scheduler
 // Spawns startup compliance sync and the 60-second main heartbeat loop.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn start_background_scheduler(pool: AnyPool) {
+pub async fn start_background_scheduler(pool: SqlitePool) {
     // Startup compliance sync
     let startup_pool = pool.clone();
     tokio::spawn(async move {
@@ -377,11 +377,13 @@ pub async fn start_background_scheduler(pool: AnyPool) {
 
             // --- TASK A: POLICY SCHEDULER (scan + report) ---
             let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
-                "SELECT id, tenant_id, policy_id, schedule_type,
-                        CAST(enabled AS INTEGER) AS enabled,
-                        frequency, cron_expression,
-                        CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
-                 FROM policy_schedules WHERE enabled = 1 AND next_run <= ?",
+                &db_compat::adapt_sql(
+                    "SELECT id, tenant_id, policy_id, schedule_type,
+                            CAST(enabled AS INTEGER) AS enabled,
+                            frequency, cron_expression,
+                            CAST(next_run AS TEXT) AS next_run, CAST(last_run AS TEXT) AS last_run
+                     FROM policy_schedules WHERE enabled = 1 AND next_run <= ?"
+                ),
             )
             .bind(&now_str)
             .fetch_all(&loop_pool)
@@ -484,7 +486,7 @@ pub async fn start_background_scheduler(pool: AnyPool) {
 // Helper: check_for_updates
 // Queries GitHub releases API; notifies admins if a newer version is available.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn check_for_updates(pool: &AnyPool) {
+async fn check_for_updates(pool: &SqlitePool) {
     let current = env!("CARGO_PKG_VERSION");
 
     let client = match Client::builder()

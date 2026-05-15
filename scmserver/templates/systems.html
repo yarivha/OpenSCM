@@ -88,7 +88,7 @@
                 </thead>
                 <tbody>
                   {% for system in systems %}
-                  {% set os_lower = system.os | lower %}
+                  {% set os_lower = system.os | default(value="") | lower %}
 
                   <tr class="{% if system.status == 'pending' %}table-warning{% endif %}" data-offline="{{ system.is_offline }}">
                     <td style="display:none;">{{ system.status }}</td>

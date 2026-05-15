@@ -8,7 +8,7 @@
 // Every CREATE TABLE and INSERT OR IGNORE is wrapped with db_compat::adapt_sql()
 // so that the same source compiles and runs on SQLite, MySQL, and PostgreSQL.
 // =============================================================================
-use sqlx::AnyPool;
+use sqlx::SqlitePool;
 use sqlx::Row;
 use tracing::info;
 use ed25519_dalek::SigningKey;
@@ -19,24 +19,24 @@ use crate::db_compat;
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: initialize_database
 // Creates all tables, indexes, triggers, and seed data for a fresh install.
-// Stamps schema_info.version = 9 so run_migrations skips all steps.
+// Stamps schema_info.version = 11 so run_migrations skips all steps.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
+pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     info!("Init Database......");
 
     // Tenants Table (no AUTOINCREMENT — VARCHAR(191) PK so MySQL can index it)
     // status and plan are EE/SaaS fields present in base schema so all editions
     // share an identical table structure.
-    sqlx::query(
+    sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS tenants (
             id         VARCHAR(191) PRIMARY KEY,
             name       VARCHAR(191) NOT NULL UNIQUE,
-            status     TEXT    NOT NULL DEFAULT 'active',
-            plan       TEXT    NOT NULL DEFAULT 'free',
+            status     TEXT NOT NULL DEFAULT 'active',
+            plan       TEXT NOT NULL DEFAULT 'free',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )",
-    )
+    ))
     .execute(pool)
     .await?;
 
@@ -55,7 +55,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    sqlx::query(
+    sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS settings (
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             skey VARCHAR(191) NOT NULL,
@@ -64,7 +64,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
             PRIMARY KEY (tenant_id, skey),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
-    )
+    ))
     .execute(pool)
     .await?;
 
@@ -285,7 +285,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Results table
-    sqlx::query(
+    sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS results (
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             system_id INTEGER,
@@ -297,11 +297,13 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
         )",
-    )
+    ))
     .execute(pool)
     .await?;
 
     // Reports table
+    // tests_metadata and report_results store arbitrary-size JSON — use MEDIUMTEXT
+    // so MySQL does not impose a row-size limit.  They are decoded via row_get_string().
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS reports (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -311,8 +313,8 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
             policy_version TEXT,
             policy_description TEXT,
             submitter_name TEXT,
-            tests_metadata TEXT NOT NULL,
-            report_results TEXT NOT NULL,
+            tests_metadata MEDIUMTEXT NOT NULL,
+            report_results MEDIUMTEXT NOT NULL,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     ))
@@ -320,15 +322,16 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     .await?;
 
     // System Reports table
+    // report_data stores arbitrary-size JSON — use MEDIUMTEXT decoded via row_get_string().
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS system_reports (
-            id               INTEGER PRIMARY KEY AUTOINCREMENT,
-            tenant_id        VARCHAR(191) NOT NULL DEFAULT 'default',
-            submission_date  DATETIME DEFAULT CURRENT_TIMESTAMP,
-            system_id        INTEGER NOT NULL,
-            system_name      TEXT    NOT NULL,
-            submitter_name   TEXT,
-            report_data      TEXT    NOT NULL,
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+            submission_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            system_id INTEGER NOT NULL,
+            system_name TEXT NOT NULL,
+            submitter_name TEXT,
+            report_data MEDIUMTEXT NOT NULL,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     ))
@@ -422,12 +425,12 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
     // Email Verification Tokens (used by SaaS registration; harmless in CE/EE)
     sqlx::query(&db_compat::adapt_sql(
         "CREATE TABLE IF NOT EXISTS email_verifications (
-            id         INTEGER PRIMARY KEY AUTOINCREMENT,
-            user_id    INTEGER NOT NULL,
-            tenant_id  VARCHAR(191) NOT NULL,
-            token      VARCHAR(191) NOT NULL UNIQUE,
-            expires_at TEXT    NOT NULL,
-            created_at TEXT    NOT NULL DEFAULT (datetime('now')),
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            user_id INTEGER NOT NULL,
+            tenant_id VARCHAR(191) NOT NULL,
+            token VARCHAR(191) NOT NULL UNIQUE,
+            expires_at TEXT NOT NULL,
+            created_at TEXT NOT NULL DEFAULT (datetime('now')),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )",
     ))
@@ -592,7 +595,7 @@ pub async fn initialize_database(pool: &AnyPool) -> Result<(), sqlx::Error> {
 // Called by SaaS on every startup; CE/EE deliberately do NOT call this so
 // the table stays empty and the dashboard hides the limit counters.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn seed_plan_limits(pool: &AnyPool) -> Result<(), sqlx::Error> {
+pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for (plan, resource, max_count) in &[
         ("free",       "systems",   5i64),
         ("free",       "groups",    3),
@@ -629,7 +632,7 @@ pub async fn seed_plan_limits(pool: &AnyPool) -> Result<(), sqlx::Error> {
 // Applies incremental schema migrations (v0→v9) to existing installations.
 // Each step is guarded by a version check so it runs exactly once.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
+pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // schema_info sentinel table (no AUTOINCREMENT)
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS schema_info (
@@ -1073,34 +1076,25 @@ pub async fn run_migrations(pool: &AnyPool) -> Result<(), sqlx::Error> {
     if version < 11 {
         info!("Running schema migration v10 → v11 (rename reserved-word columns)...");
 
-        // RENAME COLUMN is supported on SQLite ≥ 3.25 and PostgreSQL ≥ 9.
-        // On MySQL we skip — the tables were never created with the old names.
-        match crate::get_db_backend() {
-            crate::DbBackend::Sqlite | crate::DbBackend::Postgres => {
-                if db_compat::column_exists(pool, "test_conditions", "type").await {
-                    let _ = sqlx::query(
-                        "ALTER TABLE test_conditions RENAME COLUMN \"type\" TO ctype",
-                    ).execute(pool).await;
-                }
-                if db_compat::column_exists(pool, "test_conditions", "condition").await {
-                    let _ = sqlx::query(
-                        "ALTER TABLE test_conditions RENAME COLUMN \"condition\" TO comparison",
-                    ).execute(pool).await;
-                }
-                if db_compat::column_exists(pool, "notify", "type").await {
-                    let _ = sqlx::query(
-                        "ALTER TABLE notify RENAME COLUMN \"type\" TO ntype",
-                    ).execute(pool).await;
-                }
-                if db_compat::column_exists(pool, "notify", "timestamp").await {
-                    let _ = sqlx::query(
-                        "ALTER TABLE notify RENAME COLUMN \"timestamp\" TO nts",
-                    ).execute(pool).await;
-                }
-            }
-            crate::DbBackend::Mysql => {
-                // Tables were never created with the old names on MySQL — nothing to do.
-            }
+        if db_compat::column_exists(pool, "test_conditions", "type").await {
+            let _ = sqlx::query(
+                "ALTER TABLE test_conditions RENAME COLUMN \"type\" TO ctype",
+            ).execute(pool).await;
+        }
+        if db_compat::column_exists(pool, "test_conditions", "condition").await {
+            let _ = sqlx::query(
+                "ALTER TABLE test_conditions RENAME COLUMN \"condition\" TO comparison",
+            ).execute(pool).await;
+        }
+        if db_compat::column_exists(pool, "notify", "type").await {
+            let _ = sqlx::query(
+                "ALTER TABLE notify RENAME COLUMN \"type\" TO ntype",
+            ).execute(pool).await;
+        }
+        if db_compat::column_exists(pool, "notify", "timestamp").await {
+            let _ = sqlx::query(
+                "ALTER TABLE notify RENAME COLUMN \"timestamp\" TO nts",
+            ).execute(pool).await;
         }
 
         sqlx::query("UPDATE schema_info SET version = 11")
