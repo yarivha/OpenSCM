@@ -4,6 +4,17 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.3.1] - 2026-05-15
+
+### Changed
+- **SQLite-only — MySQL and PostgreSQL support dropped** — CE reverts to `sqlx::SqlitePool` exclusively. The multi-backend `AnyPool`, `DbBackend` enum, `set_db_backend`, `MYSQL_SUPPORT`, and `row_get_string` / `row_get_opt_string` helpers have been removed. `db_compat` helpers are retained for SQLite-specific SQL generation but all backend-dispatch logic is gone.
+- **SaaS drops EE dependency** — SaaS (0.2.2) now depends directly on `scmserver` (CE) instead of `openscm-ee`. `create_core_router` replaces `create_ee_router`. The admin→superuser promotion migration is inlined in SaaS `main.rs`. The `sqlx` feature set is trimmed back to `sqlite` only.
+
+### Fixed
+- **Unscanned tests shown as FAIL in system compliance report** — when a policy had never been run, tests with no entry in the `results` table were mapped to `"FAIL"` by `normalize_status()`. Added a `"not_scanned"` arm that preserves `"NOT_SCANNED"` so unrun tests are counted in the N/A bucket and rendered as the grey *Not Scanned* badge, not as failures.
+
+---
+
 ## [0.3.0] - 2026-05-14
 
 ### Added
