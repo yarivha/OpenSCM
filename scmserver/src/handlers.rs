@@ -254,6 +254,7 @@ pub fn normalize_status(raw: &str) -> &'static str {
     match raw.to_lowercase().as_str() {
         "pass" | "true" | "1" => "PASS",
         "na" | "n/a"          => "NA",
+        "not_scanned"         => "NOT_SCANNED",
         _ => "FAIL",
     }
 }
