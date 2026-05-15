@@ -174,7 +174,14 @@ pub async fn install_post(
         hook(target_pool.clone()).await;
     }
 
-    // --- MySQL path: write config and show restart page ---
+    // --- MySQL path: write config then re-exec the process ---
+    // We write the MySQL URL to the config file and immediately schedule a
+    // process restart so the server re-opens its pool against MySQL.  The
+    // spawned task waits long enough for the HTTP response to be flushed, then:
+    //   • Unix   — exec() replaces the process image (zero-downtime swap)
+    //   • Windows — spawns a replacement process then calls exit(0)
+    // The browser page shown polls /login every second; once the restarted
+    // process is up (typically < 2 s) it redirects automatically.
     if is_mysql {
         let mut new_cfg = (*config).clone();
         new_cfg.database.db_type  = Some("mysql".to_string());
@@ -184,11 +191,40 @@ pub async fn install_post(
             return render_error(&tera, "Failed to write configuration file. Check server logs.");
         }
 
+        tokio::spawn(async move {
+            // Give the HTTP layer time to flush the response before we exit.
+            tokio::time::sleep(Duration::from_millis(800)).await;
+
+            let exe = match std::env::current_exe() {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("install: could not find current_exe for restart: {}", e);
+                    std::process::exit(0);
+                }
+            };
+            let args: Vec<String> = std::env::args().skip(1).collect();
+
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                let err = std::process::Command::new(&exe).args(&args).exec();
+                // exec() only returns if it fails.
+                error!("install: exec() failed: {}", err);
+            }
+            #[cfg(not(unix))]
+            {
+                if let Err(e) = std::process::Command::new(&exe).args(&args).spawn() {
+                    error!("install: failed to spawn replacement process: {}", e);
+                }
+            }
+            std::process::exit(0);
+        });
+
         let mut ctx = Context::new();
-        ctx.insert("restart_required", &true);
+        ctx.insert("restarting", &true);
         return match tera.render("install.html", &ctx) {
             Ok(html) => Html(html).into_response(),
-            Err(_)   => Html("<h1>Template error</h1>".to_string()).into_response(),
+            Err(_)   => Html("<h1>Starting…</h1>").into_response(),
         };
     }
 
