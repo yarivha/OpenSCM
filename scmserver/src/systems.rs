@@ -13,7 +13,6 @@ use tera::{Tera, Context};
 use sqlx::SqlitePool;
 use sqlx::Row;
 use std::sync::Arc;
-use crate::db_compat;
 use urlencoding;
 use std::collections::HashMap;
 use tracing::{info, warn, error};
@@ -58,10 +57,10 @@ pub async fn systems(
     .await
     .unwrap_or(3600);
 
-    let gc        = db_compat::group_concat_col("sg.name");
-    let created   = db_compat::format_datetime_col("s.created_date");
-    let last_seen = db_compat::format_datetime_col("s.last_seen");
-    let unix_diff = db_compat::unix_diff_col("s.last_seen");
+    let gc        = "GROUP_CONCAT(sg.name)".to_string();
+    let created   = "COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '')".to_string();
+    let last_seen = "COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen), '')".to_string();
+    let unix_diff = "(CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', s.last_seen) AS INTEGER))".to_string();
 
     let rows_result = match filter.as_deref() {
         Some("active") | Some("pending") => {
@@ -508,9 +507,9 @@ pub async fn systems_pending(
         LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
         WHERE s.status = 'pending' AND s.tenant_id = ?
         GROUP BY s.id"#,
-        gc      = db_compat::group_concat_col("sg.name"),
-        created = db_compat::format_datetime_col("s.created_date"),
-        last_seen = db_compat::format_datetime_col("s.last_seen"),
+        gc      = "GROUP_CONCAT(sg.name)",
+        created = "COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '')",
+        last_seen = "COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.last_seen), '')",
     );
     let rows_result = sqlx::query(&sql)
         .bind(&auth.tenant_id)
@@ -586,7 +585,7 @@ pub async fn system_groups(
          LEFT JOIN systems AS s ON sig.system_id = s.id
          WHERE sg.tenant_id = ?
          GROUP BY sg.id, sg.name, sg.description",
-        gc = db_compat::group_concat_col("s.name"),
+        gc = "GROUP_CONCAT(s.name)",
     );
     let rows_result = sqlx::query(&gc_sql)
         .bind(&auth.tenant_id)
@@ -752,7 +751,7 @@ pub async fn system_groups_add_save(
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
-    let group_id: i64 = match sqlx::query_scalar(db_compat::last_insert_id_sql())
+    let group_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
         .fetch_one(&mut *tx)
         .await
     {
@@ -1344,7 +1343,7 @@ pub async fn fetch_system_report_data(
         "SELECT id, name, os, arch, ip, compliance_score,
                 {last_seen} AS last_seen
          FROM systems WHERE id = ? AND tenant_id = ?",
-        last_seen = db_compat::format_datetime_col("last_seen"),
+        last_seen = "COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', last_seen), '')",
     ))
     .bind(system_id)
     .bind(tenant_id)

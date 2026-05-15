@@ -22,7 +22,6 @@ pub mod users;
 pub mod settings;
 pub mod scheduler;
 pub mod install;
-pub mod db_compat;
 pub mod email;
 
 // 2. Imports needed for the public API

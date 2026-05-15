@@ -13,7 +13,23 @@ use tracing::info;
 use ed25519_dalek::SigningKey;
 use rand::rngs::OsRng;
 use base64::{engine::general_purpose, Engine as _};
-use crate::db_compat;
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: column_exists
+// Returns true if `column` is present in `table`.
+// Uses pragma_table_info which is a virtual table readable via plain SQL.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> bool {
+    let sql = format!(
+        "SELECT COUNT(*) FROM pragma_table_info('{}') WHERE name = '{}'",
+        table, column
+    );
+    let count: i64 = sqlx::query_scalar(&sql)
+        .fetch_one(pool)
+        .await
+        .unwrap_or(0);
+    count > 0
+}
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: create_tables
@@ -596,11 +612,17 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    // Bootstrap admin role protection trigger (SQLite only; application-level
-    // enforcement covers MySQL and PostgreSQL where this trigger is skipped).
-    if let Some(trigger_sql) = db_compat::admin_role_trigger_sql() {
-        sqlx::query(trigger_sql).execute(pool).await?;
-    }
+    // Bootstrap admin role protection trigger.
+    sqlx::query(
+        "CREATE TRIGGER IF NOT EXISTS protect_bootstrap_admin_role
+       BEFORE UPDATE OF role ON users
+       WHEN OLD.id = 1 AND OLD.tenant_id = 'default'
+       BEGIN
+           SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
+       END"
+    )
+    .execute(pool)
+    .await?;
 
     sqlx::query(
         "INSERT OR IGNORE INTO schema_info (id, version) VALUES (1, 11)"
@@ -684,7 +706,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // "no such column: skey" errors can never occur at any schema version.
     // On MySQL the old column never existed, so column_exists returns false
     // and the block is skipped.
-    if db_compat::column_exists(pool, "settings", "key").await {
+    if column_exists(pool, "settings", "key").await {
         let _ = sqlx::query(
             "ALTER TABLE settings RENAME COLUMN \"key\" TO skey"
         ).execute(pool).await;
@@ -730,7 +752,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
         sqlx::query("DROP TABLE IF EXISTS policy_schedules_old")
             .execute(&mut *migration_tx).await?;
-        sqlx::query(&db_compat::rename_table_sql("policy_schedules", "policy_schedules_old"))
+        sqlx::query("ALTER TABLE policy_schedules RENAME TO policy_schedules_old")
             .execute(&mut *migration_tx).await?;
 
         sqlx::query(
@@ -775,10 +797,9 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
         let mut migration_tx = pool.begin().await?;
 
-        // Use db_compat::column_exists so this works on all backends
-        // (replaces the SQLite-only pragma_table_info check).
+        // Check column existence via pragma_table_info.
         // Read-only schema check — safe to run against the pool, not the tx.
-        let has_flat_columns = db_compat::column_exists(pool, "tests", "element_1").await;
+        let has_flat_columns = column_exists(pool, "tests", "element_1").await;
 
         if has_flat_columns {
             info!("Migrating flat condition columns into test_conditions...");
@@ -1016,9 +1037,16 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     if version < 9 {
         info!("Running schema migration v8 → v9 (protect bootstrap admin role)...");
 
-        if let Some(trigger_sql) = db_compat::admin_role_trigger_sql() {
-            sqlx::query(trigger_sql).execute(pool).await?;
-        }
+        sqlx::query(
+            "CREATE TRIGGER IF NOT EXISTS protect_bootstrap_admin_role
+       BEFORE UPDATE OF role ON users
+       WHEN OLD.id = 1 AND OLD.tenant_id = 'default'
+       BEGIN
+           SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
+       END"
+        )
+        .execute(pool)
+        .await?;
 
         sqlx::query("UPDATE schema_info SET version = 9")
             .execute(pool).await?;
@@ -1036,19 +1064,19 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     if version < 10 {
         info!("Running schema migration v9 → v10 (unified base schema backfill)...");
 
-        if !db_compat::column_exists(pool, "users", "email_verified").await {
+        if !column_exists(pool, "users", "email_verified").await {
             let _ = sqlx::query(
                 "ALTER TABLE users ADD COLUMN email_verified INTEGER NOT NULL DEFAULT 1"
             ).execute(pool).await;
         }
 
-        if !db_compat::column_exists(pool, "tenants", "status").await {
+        if !column_exists(pool, "tenants", "status").await {
             let _ = sqlx::query(
                 "ALTER TABLE tenants ADD COLUMN status TEXT NOT NULL DEFAULT 'active'"
             ).execute(pool).await;
         }
 
-        if !db_compat::column_exists(pool, "tenants", "plan").await {
+        if !column_exists(pool, "tenants", "plan").await {
             let _ = sqlx::query(
                 "ALTER TABLE tenants ADD COLUMN plan TEXT NOT NULL DEFAULT 'free'"
             ).execute(pool).await;
@@ -1102,22 +1130,22 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     if version < 11 {
         info!("Running schema migration v10 → v11 (rename reserved-word columns)...");
 
-        if db_compat::column_exists(pool, "test_conditions", "type").await {
+        if column_exists(pool, "test_conditions", "type").await {
             let _ = sqlx::query(
                 "ALTER TABLE test_conditions RENAME COLUMN \"type\" TO ctype",
             ).execute(pool).await;
         }
-        if db_compat::column_exists(pool, "test_conditions", "condition").await {
+        if column_exists(pool, "test_conditions", "condition").await {
             let _ = sqlx::query(
                 "ALTER TABLE test_conditions RENAME COLUMN \"condition\" TO comparison",
             ).execute(pool).await;
         }
-        if db_compat::column_exists(pool, "notify", "type").await {
+        if column_exists(pool, "notify", "type").await {
             let _ = sqlx::query(
                 "ALTER TABLE notify RENAME COLUMN \"type\" TO ntype",
             ).execute(pool).await;
         }
-        if db_compat::column_exists(pool, "notify", "timestamp").await {
+        if column_exists(pool, "notify", "timestamp").await {
             let _ = sqlx::query(
                 "ALTER TABLE notify RENAME COLUMN \"timestamp\" TO nts",
             ).execute(pool).await;

@@ -18,7 +18,6 @@ use tracing::{info, error};
 use bytes::Bytes;
 
 use crate::models::{ErrorQuery, Test, TestWithConditions, TestCondition, Element, SElement, Condition, UserRole, AuthSession};
-use crate::db_compat;
 use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data};
 
@@ -324,7 +323,7 @@ pub async fn tests_add_save(
         tx.rollback().await.ok();
         return Redirect::to(&format!("/tests?error_message={}", encoded)).into_response();
     }
-    let test_id: i64 = match sqlx::query_scalar(db_compat::last_insert_id_sql())
+    let test_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
         .fetch_one(&mut *tx)
         .await
     {

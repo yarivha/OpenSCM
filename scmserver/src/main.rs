@@ -125,7 +125,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     // Detect real initialisation: schema_info table exists and has a row.
     let db_initialized: bool = sqlx::query_scalar::<_, i64>(
-        scmserver::db_compat::schema_info_exists_sql()
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_info'"
     )
     .fetch_one(&pool)
     .await

@@ -13,7 +13,6 @@ use tera::{Tera, Context};
 use sqlx::SqlitePool;
 use std::sync::Arc;
 use tracing::error;
-use crate::db_compat;
 
 use crate::models::{ComplianceHistoryRow, PolicyFailRow, SystemFailRow, AuthSession};
 use crate::handlers::render_template;
@@ -138,7 +137,13 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
 
     // 4. Fetch History including POLICY_SCORE
     
-    let date_col   = db_compat::date_group_col("check_date", range);
+    let date_col: &str = match range {
+        "yearly"  => "strftime('%Y', check_date)",
+        "weekly"  => "strftime('%Y-W%W', check_date)",
+        "monthly" => "strftime('%m-%Y', check_date)",
+        "hourly"  => "strftime('%m-%d %H:00', check_date)",
+        _         => "strftime('%Y-%m-%d', check_date)",
+    };
     let (order_col, limit) = match range {
         "yearly"  => ("check_date", 10i32),
         "weekly"  => ("check_date", 12),
@@ -194,7 +199,7 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     // 5. Optional plan limits — only present when the plan_limits table exists (SaaS).
     //    Silently returns None in CE where the table is absent.
     let plan_limits_exist: i64 = sqlx::query_scalar(
-        &db_compat::table_exists_sql("plan_limits")
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='plan_limits'"
     )
     .fetch_one(&*pool)
     .await

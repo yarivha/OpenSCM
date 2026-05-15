@@ -27,7 +27,6 @@ use crate::models::{
 };
 use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data, normalize_status, is_system_passed};
-use crate::db_compat;
 
 
 
@@ -303,7 +302,7 @@ pub async fn policies_add_save(
         tx.rollback().await.ok();
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
-    let policy_id: i64 = match sqlx::query_scalar(db_compat::last_insert_id_sql())
+    let policy_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
         .fetch_one(&mut *tx)
         .await
     {
@@ -607,7 +606,19 @@ pub async fn policies_edit_save(
     // preserve what the scheduler last wrote so we don't reset a future firing time.
     let scan_explicit_next_run = next_run.filter(|s| !s.is_empty());
     let scan_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
-    if let Err(e) = sqlx::query(&db_compat::upsert_schedule_sql("scan"))
+    if let Err(e) = sqlx::query(&format!(
+        r#"INSERT INTO policy_schedules
+               (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
+           VALUES (?, ?, 'scan', ?, ?, ?, ?)
+           ON CONFLICT(policy_id, schedule_type) DO UPDATE SET
+               enabled          = excluded.enabled,
+               frequency        = excluded.frequency,
+               cron_expression  = excluded.cron_expression,
+               next_run         = CASE
+                                    WHEN excluded.next_run != '' THEN excluded.next_run
+                                    ELSE next_run
+                                  END"#
+    ))
     .bind(&auth.tenant_id)
     .bind(id)
     .bind(schedule_enabled)
@@ -625,7 +636,19 @@ pub async fn policies_edit_save(
     // Same next_run preservation logic as scan schedule above.
     let report_explicit_next_run = report_next_run.filter(|s| !s.is_empty());
     let report_default_next_run = Utc::now().format("%Y-%m-%dT%H:%M").to_string();
-    if let Err(e) = sqlx::query(&db_compat::upsert_schedule_sql("report"))
+    if let Err(e) = sqlx::query(&format!(
+        r#"INSERT INTO policy_schedules
+               (tenant_id, policy_id, schedule_type, enabled, frequency, cron_expression, next_run)
+           VALUES (?, ?, 'report', ?, ?, ?, ?)
+           ON CONFLICT(policy_id, schedule_type) DO UPDATE SET
+               enabled          = excluded.enabled,
+               frequency        = excluded.frequency,
+               cron_expression  = excluded.cron_expression,
+               next_run         = CASE
+                                    WHEN excluded.next_run != '' THEN excluded.next_run
+                                    ELSE next_run
+                                  END"#
+    ))
     .bind(&auth.tenant_id)
     .bind(id)
     .bind(report_schedule_enabled)
