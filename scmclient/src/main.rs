@@ -149,11 +149,23 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
     // Track last applied log level to avoid redundant reloads
     let mut last_log_level = log_level.to_string();
 
+    // Build the HTTP client once and reuse it for every heartbeat. reqwest's
+    // connection pool only kicks in when the same Client instance is reused,
+    // so building per-cycle was throwing away pooled connections and TLS
+    // sessions every interval.
+    let http_client = reqwest::Client::builder()
+        .timeout(Duration::from_secs(15))
+        .build()
+        .map_err(|e| {
+            error!("Failed to build HTTP client: {}", e);
+            e
+        })?;
+
     // 7. Main heartbeat loop
     loop {
         debug!("Starting heartbeat cycle");
 
-        match agent::send_system_info(&mut config).await {
+        match agent::send_system_info(&mut config, &http_client).await {
             Ok(_)  => debug!("Heartbeat completed successfully"),
             Err(e) => warn!("Heartbeat failed: {}", e),
         }

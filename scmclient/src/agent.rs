@@ -270,6 +270,7 @@ async fn process_compliance_tests(
 
 pub async fn send_system_info(
     config: &Config,
+    http_client: &reqwest::Client,
 ) -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Derive namespaced file paths per server URL
@@ -336,10 +337,6 @@ pub async fn send_system_info(
     let base_url   = config.server.url.trim_end_matches('/').to_string();
     let send_url   = format!("{}/send", base_url);
     let result_url = format!("{}/result", base_url);
-
-    let http_client = reqwest::Client::builder()
-        .timeout(std::time::Duration::from_secs(15))
-        .build()?;
 
     // 5. Build and sign payload
     let needs_handshake = current_id == "0" || !server_pub_path.exists();
