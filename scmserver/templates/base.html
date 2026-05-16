@@ -209,7 +209,16 @@
           </li>
           {% endif %}
 
-          {# SaaS-only sidebar entries: Support link + Platform Admin treeview. #}
+          {# SaaS-only sidebar entries: Policy Store, Support, Platform Admin. #}
+          {% if is_saas and is_editor %}
+          <li class="nav-item">
+            <a href="/store" class="nav-link">
+              <i class="nav-icon fas fa-store"></i>
+              <p>Policy Store</p>
+            </a>
+          </li>
+          {% endif %}
+
           {% if is_saas and is_viewer %}
           <li class="nav-item">
             <a href="/support" class="nav-link">

@@ -202,6 +202,17 @@ pub struct PolicyExport {
     pub tests: Vec<PolicyExportTest>,
 }
 
+// Summary returned by apply_policy_import — surfaced in flash messages and
+// re-used by SaaS handlers (e.g. /store/install) that wrap the same logic.
+#[derive(Debug, Clone)]
+pub struct PolicyImportSummary {
+    pub policy_id:      i64,
+    pub action:         &'static str, // "imported" or "updated"
+    pub inserted_tests: usize,
+    pub updated_tests:  usize,
+    pub unlinked_tests: u64,
+}
+
 // An automated scan or report schedule for a policy.
 #[derive(Debug, Clone, Serialize, Deserialize, FromRow)]
 pub struct PolicySchedule {

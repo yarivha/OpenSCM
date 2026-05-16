@@ -4,6 +4,14 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`apply_policy_import(pool, tenant_id, export)` extracted from `policies_import`** — the per-test upsert + conditions-replace + unlink logic now lives in one reusable async fn returning a structured `PolicyImportSummary { policy_id, action, inserted_tests, updated_tests, unlinked_tests }`. The existing multipart `POST /policies/import` is now a thin wrapper around it; SaaS's new Policy Store install/update handler uses the same core so the import semantics stay identical no matter where the file came from.
+- **`is_saas` sidebar entry: Policy Store** — new `base.html` link to `/store` gated on `is_saas and is_editor`. CE renders nothing (flag defaults to false) so behaviour is unchanged for the CE edition.
+
+---
+
 ## [0.3.6] - 2026-05-16
 
 ### Fixed
