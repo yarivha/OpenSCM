@@ -4,6 +4,13 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **`is_saas` template context flag** — new `scmserver::handlers::enable_saas_mode()` lets the SaaS binary flip a process-wide flag at startup. `render_template` exposes it as `{{ is_saas }}` so SaaS-only chrome (tenant chip, Support menu, Platform Admin treeview) can live directly in the shared `base.html` instead of forking the whole template. CE rendering is unchanged (flag defaults to `false`).
+
+---
+
 ## [0.3.4] - 2026-05-16
 
 ### Added

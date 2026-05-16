@@ -12,10 +12,22 @@ use axum::Extension;
 use tera::{Tera, Context};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
+use std::sync::atomic::{AtomicBool, Ordering};
 use urlencoding::decode;
 use tracing::{info,error};
 
 use crate::models::{Notification, UserRole, AuthSession};
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SaaS mode flag
+// Set once at startup by the SaaS binary via `enable_saas_mode()`. Drives
+// the `is_saas` context variable so SaaS-only UI (tenant chip, Support
+// menu, Platform Admin treeview) can live in the shared base.html.
+// ─────────────────────────────────────────────────────────────────────────────
+static SAAS_MODE: AtomicBool = AtomicBool::new(false);
+
+pub fn enable_saas_mode()       { SAAS_MODE.store(true, Ordering::Relaxed); }
+pub fn is_saas_mode() -> bool   { SAAS_MODE.load(Ordering::Relaxed) }
 
 
 // ============================================================
@@ -131,6 +143,9 @@ pub async fn render_template(
         context.insert("is_runner", &false);
         context.insert("is_viewer", &false);
     }
+
+    // Edition marker — drives SaaS-only UI in the shared base.html.
+    context.insert("is_saas", &is_saas_mode());
 
     // Render template
     let rendered = tera.render(template_name, &context).map_err(|e| {
