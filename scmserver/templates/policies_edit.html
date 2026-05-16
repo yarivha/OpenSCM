@@ -67,6 +67,10 @@
                   <label for="description">Description</label>
                   <textarea name="description" class="form-control" rows="2">{{ policy.description | default(value='') }}</textarea>
                 </div>
+                <div class="form-group">
+                  <label for="author">Author</label>
+                  <input type="text" name="author" value="{{ policy.author | default(value='') }}" class="form-control" placeholder="e.g., Security Team">
+                </div>
               </div>
             </div>
           </div>

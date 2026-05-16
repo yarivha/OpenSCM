@@ -4,6 +4,17 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [Unreleased]
+
+### Added
+- **Policy Import / Export** — every policy now has a stable `external_id` (32-char hex) and an optional `author` field. New `GET /policies/export/{id}` downloads a JSON file containing the policy, every linked test, and each test's conditions/applicability rules — ids and tenant references are stripped so files are portable across installations. New `POST /policies/import` (multipart upload) restores a file: if the `external_id` matches an existing policy in the tenant, the policy is updated and its tests are replaced; otherwise it is inserted as a new policy with name-collision handling (`(imported)`, `-2`, `-3`, …). Import button and per-policy export icon added to the policies page; author shown on each policy card and editable from the add / edit forms.
+
+### Changed
+- **Schema version bumped to 14** — adds `policies.author` and `policies.external_id` columns; backfills `external_id` for existing policies; fresh installs are stamped at v14.
+- **axum `multipart` feature enabled** — required by the new policy import endpoint.
+
+---
+
 ## [0.3.3] - 2026-05-15
 
 ### Fixed

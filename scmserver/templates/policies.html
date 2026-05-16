@@ -68,7 +68,12 @@
         <div class="card-header">
           <h3 class="card-title font-weight-bold">Policy Overview</h3>
           <div class="card-tools">
-            <a href="{% if is_editor %}/policies/add{% else %}#{% endif %}" 
+            {% if is_editor %}
+            <button type="button" class="btn btn-secondary btn-sm" data-toggle="modal" data-target="#importPolicyModal">
+              <i class="fas fa-file-import mr-1"></i> Import Policy
+            </button>
+            {% endif %}
+            <a href="{% if is_editor %}/policies/add{% else %}#{% endif %}"
                class="btn btn-primary btn-sm {% if not is_editor %}disabled{% endif %}">
               <i class="fas {% if is_editor %}fa-plus{% else %}fa-lock{% endif %} mr-1"></i> New Policy
             </a>
@@ -95,6 +100,7 @@
                       <ul class="policy-info-list text-muted">
                         <li><i class="fas fa-tasks mr-2"></i> <strong>Checks:</strong> {{ policy.test_count | default(value="0") }}</li>
                         <li><i class="fas fa-server mr-2"></i> <strong>Groups:</strong> {{ policy.system_count | default(value="0") }}</li>
+                        {% if policy.author %}<li><i class="fas fa-user mr-2"></i> <strong>Author:</strong> {{ policy.author }}</li>{% endif %}
                       </ul>
 
                       <div class="mt-auto">
@@ -151,8 +157,15 @@
                       <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                     </a>
 
-                    {# 4. Delete Policy (Editor Role) #}
-                    <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}" 
+                    {# 4. Export Policy (Viewer Role) #}
+                    <a class="btn btn-secondary btn-sm ml-1 {% if not is_viewer %}disabled{% endif %}"
+                       href="{% if is_viewer %}/policies/export/{{ policy.policy_id }}{% else %}#{% endif %}"
+                       title="Export Policy (JSON)">
+                      <i class="fas fa-file-export"></i>
+                    </a>
+
+                    {# 5. Delete Policy (Editor Role) #}
+                    <a class="btn btn-danger btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
                        onclick="{% if is_editor %}return confirm('Delete this policy? This cannot be undone.');{% endif %}"
                        href="{% if is_editor %}/policies/delete/{{ policy.policy_id }}{% else %}#{% endif %}"
                        {% if not is_editor %}style="filter: grayscale(100%);"{% endif %}
@@ -171,6 +184,34 @@
     </div>
   </section>
 </div>
+
+{% if is_editor %}
+<div class="modal fade" id="importPolicyModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog" role="document">
+    <form action="/policies/import" method="post" enctype="multipart/form-data">
+      <div class="modal-content">
+        <div class="modal-header">
+          <h5 class="modal-title"><i class="fas fa-file-import mr-1"></i> Import Policy</h5>
+          <button type="button" class="close" data-dismiss="modal" aria-label="Close"><span aria-hidden="true">&times;</span></button>
+        </div>
+        <div class="modal-body">
+          <p class="text-muted">
+            Select a policy JSON file (exported from OpenSCM).
+            If a policy with the same identifier already exists, it will be updated and its tests replaced.
+          </p>
+          <div class="form-group">
+            <input type="file" class="form-control-file" name="file" accept=".json,application/json" required>
+          </div>
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-default" data-dismiss="modal">Cancel</button>
+          <button type="submit" class="btn btn-primary"><i class="fas fa-upload mr-1"></i> Import</button>
+        </div>
+      </div>
+    </form>
+  </div>
+</div>
+{% endif %}
 {% endblock %}
 
 {% block scripts %}

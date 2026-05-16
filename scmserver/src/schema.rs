@@ -221,6 +221,8 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             name TEXT NOT NULL,
             description TEXT,
             version TEXT,
+            author TEXT,
+            external_id TEXT,
             compliance_score REAL DEFAULT -1.0,
             systems_passed INTEGER DEFAULT 0,
             systems_failed INTEGER DEFAULT 0,
@@ -1194,5 +1196,42 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v12 → v13 complete.");
     }
 
+    // v13 → v14: add policies.author + policies.external_id; backfill external_id for existing rows.
+    if version < 14 {
+        info!("Running schema migration v13 → v14 (policies.author, policies.external_id)...");
+        if !column_exists(pool, "policies", "author").await {
+            sqlx::query("ALTER TABLE policies ADD COLUMN author TEXT").execute(pool).await?;
+        }
+        if !column_exists(pool, "policies", "external_id").await {
+            sqlx::query("ALTER TABLE policies ADD COLUMN external_id TEXT").execute(pool).await?;
+        }
+        // Backfill external_id for existing policies that don't have one.
+        let rows = sqlx::query("SELECT id FROM policies WHERE external_id IS NULL OR external_id = ''")
+            .fetch_all(pool).await?;
+        for row in rows {
+            let id: i64 = row.get("id");
+            sqlx::query("UPDATE policies SET external_id = ? WHERE id = ?")
+                .bind(generate_external_id())
+                .bind(id)
+                .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 14")
+            .execute(pool).await?;
+        info!("Schema migration v13 → v14 complete.");
+    }
+
     Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: generate_external_id
+// Returns a 32-character lowercase hex string (16 random bytes) suitable as
+// a stable identifier for exported/imported policies.  Generated with the
+// thread-safe RNG; collision probability is negligible.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn generate_external_id() -> String {
+    use rand::RngCore;
+    let mut bytes = [0u8; 16];
+    rand::thread_rng().fill_bytes(&mut bytes);
+    bytes.iter().map(|b| format!("{:02x}", b)).collect()
 }

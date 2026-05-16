@@ -149,6 +149,55 @@ pub struct Policy {
     pub name: String,
     pub version: String,
     pub description: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+    #[serde(default)]
+    pub external_id: Option<String>,
+}
+
+// Wire format for a single test inside an export file.  Strips DB-internal
+// fields (id, tenant_id, test_id) — they are regenerated on import.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PolicyExportTestCondition {
+    pub r#type: String,
+    pub element: String,
+    pub input: String,
+    pub selement: String,
+    pub condition: Option<String>,
+    pub sinput: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PolicyExportTest {
+    pub name: String,
+    pub description: Option<String>,
+    pub rational: Option<String>,
+    pub remediation: Option<String>,
+    pub severity: Option<String>,
+    pub filter: Option<String>,
+    pub app_filter: Option<String>,
+    #[serde(default)]
+    pub conditions: Vec<PolicyExportTestCondition>,
+    #[serde(default)]
+    pub applicability: Vec<PolicyExportTestCondition>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PolicyExportPolicy {
+    #[serde(default)]
+    pub external_id: Option<String>,
+    pub name: String,
+    pub version: String,
+    pub description: Option<String>,
+    #[serde(default)]
+    pub author: Option<String>,
+}
+
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct PolicyExport {
+    pub format_version: u32,
+    pub policy: PolicyExportPolicy,
+    pub tests: Vec<PolicyExportTest>,
 }
 
 // An automated scan or report schedule for a policy.
@@ -259,6 +308,7 @@ pub struct PolicyCompliance {
     pub policy_name: String,
     pub policy_version: String,
     pub policy_description: Option<String>,
+    pub author: Option<String>,
     pub compliance: f64,
     pub test_count: i64,
     pub system_count: i64,
