@@ -1238,7 +1238,7 @@ pub async fn policies_export(
     // Fetch all tests linked to this policy.
     let test_rows = match sqlx::query(
         "SELECT t.id, t.name, t.description, t.rational, t.remediation,
-                t.severity, t.filter, t.app_filter
+                t.severity, t.filter, t.app_filter, t.external_id
          FROM tests t
          JOIN tests_in_policy tip ON t.id = tip.test_id
          WHERE tip.policy_id = ? AND tip.tenant_id = ?
@@ -1293,6 +1293,7 @@ pub async fn policies_export(
         }
 
         tests.push(PolicyExportTest {
+            external_id: t.try_get::<Option<String>, _>("external_id").unwrap_or(None),
             name:        t.get("name"),
             description: t.try_get::<Option<String>, _>("description").unwrap_or(None),
             rational:    t.try_get::<Option<String>, _>("rational").unwrap_or(None),
@@ -1305,7 +1306,7 @@ pub async fn policies_export(
         });
     }
 
-    let export = PolicyExport { format_version: 2, policy: policy_export, tests };
+    let export = PolicyExport { format_version: 3, policy: policy_export, tests };
     let body = match serde_json::to_vec_pretty(&export) {
         Ok(b)  => b,
         Err(e) => {
@@ -1371,7 +1372,7 @@ pub async fn policies_import(
             return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
         }
     };
-    if export.format_version < 1 || export.format_version > 2 {
+    if export.format_version < 1 || export.format_version > 3 {
         return Redirect::to("/policies?error_message=Unsupported+format_version").into_response();
     }
 
@@ -1393,7 +1394,7 @@ pub async fn policies_import(
 
     // ── Update path: external_id matched ────────────────────────────────────
     let policy_id: i64 = if let Some(pid) = existing_id {
-        // Update metadata.
+        // Update metadata only — tests are handled by per-test upsert below.
         if let Err(e) = sqlx::query(
             "UPDATE policies SET name = ?, version = ?, description = ?, author = ?
              WHERE id = ? AND tenant_id = ?",
@@ -1407,24 +1408,6 @@ pub async fn policies_import(
             let msg = urlencoding::encode(&format!("Update failed: {}", e)).to_string();
             return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
         }
-
-        // Wipe old tests linked to this policy (and their conditions via ON DELETE CASCADE).
-        // First delete the test rows themselves; tests_in_policy + test_conditions cascade.
-        if let Err(e) = sqlx::query(
-            "DELETE FROM tests WHERE tenant_id = ?
-               AND id IN (SELECT test_id FROM tests_in_policy WHERE policy_id = ? AND tenant_id = ?)",
-        )
-        .bind(&auth.tenant_id).bind(pid).bind(&auth.tenant_id)
-        .execute(&mut *tx).await
-        {
-            tx.rollback().await.ok();
-            let msg = urlencoding::encode(&format!("Cleanup failed: {}", e)).to_string();
-            return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
-        }
-        // Belt-and-braces: also clear any remaining join rows.
-        let _ = sqlx::query("DELETE FROM tests_in_policy WHERE policy_id = ? AND tenant_id = ?")
-            .bind(pid).bind(&auth.tenant_id).execute(&mut *tx).await;
-
         pid
     } else {
         // ── Insert path: new policy ─────────────────────────────────────────
@@ -1473,32 +1456,83 @@ pub async fn policies_import(
         }
     };
 
-    // ── Insert all tests + conditions, then link them to this policy ────────
+    // ── Upsert each test by external_id; replace its conditions; link to policy ───
+    // Imported tests with a matching external_id update the existing row (so
+    // history/results survive). Tests without a match get inserted fresh.
+    let mut imported_test_ids: Vec<i64> = Vec::with_capacity(export.tests.len());
+    let mut updated_count = 0usize;
+    let mut inserted_count = 0usize;
+
     for test in &export.tests {
-        if let Err(e) = sqlx::query(
-            "INSERT INTO tests (tenant_id, name, description, rational, remediation, severity, filter, app_filter)
-             VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
-        )
-        .bind(&auth.tenant_id).bind(&test.name).bind(&test.description).bind(&test.rational)
-        .bind(&test.remediation).bind(&test.severity).bind(&test.filter).bind(&test.app_filter)
-        .execute(&mut *tx).await
-        {
-            tx.rollback().await.ok();
-            let msg = urlencoding::encode(&format!("Test insert failed: {}", e)).to_string();
-            return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
-        }
-        let test_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
-            .fetch_one(&mut *tx).await
-        {
-            Ok(id) => id,
-            Err(e) => {
+        // Look up an existing test by external_id within this tenant.
+        let existing_test_id: Option<i64> = if let Some(ref xid) = test.external_id {
+            sqlx::query_scalar("SELECT id FROM tests WHERE tenant_id = ? AND external_id = ?")
+                .bind(&auth.tenant_id).bind(xid)
+                .fetch_optional(&mut *tx).await
+                .unwrap_or(None)
+        } else { None };
+
+        let test_id: i64 = if let Some(tid) = existing_test_id {
+            // UPDATE existing test row.
+            if let Err(e) = sqlx::query(
+                "UPDATE tests SET name = ?, description = ?, rational = ?, remediation = ?,
+                                  severity = ?, filter = ?, app_filter = ?
+                 WHERE id = ? AND tenant_id = ?",
+            )
+            .bind(&test.name).bind(&test.description).bind(&test.rational).bind(&test.remediation)
+            .bind(&test.severity).bind(&test.filter).bind(&test.app_filter)
+            .bind(tid).bind(&auth.tenant_id)
+            .execute(&mut *tx).await
+            {
+                tx.rollback().await.ok();
+                let msg = urlencoding::encode(&format!("Test update failed: {}", e)).to_string();
+                return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
+            }
+            // Replace conditions: delete old ones (both 'condition' and 'applicability').
+            if let Err(e) = sqlx::query(
+                "DELETE FROM test_conditions WHERE test_id = ? AND tenant_id = ?",
+            )
+            .bind(tid).bind(&auth.tenant_id)
+            .execute(&mut *tx).await
+            {
+                tx.rollback().await.ok();
+                let msg = urlencoding::encode(&format!("Condition cleanup failed: {}", e)).to_string();
+                return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
+            }
+            updated_count += 1;
+            tid
+        } else {
+            // INSERT new test, reusing the imported external_id when provided.
+            let new_xid = test.external_id.clone()
+                .unwrap_or_else(crate::schema::generate_external_id);
+            if let Err(e) = sqlx::query(
+                "INSERT INTO tests (tenant_id, name, description, rational, remediation, severity, filter, app_filter, external_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+            )
+            .bind(&auth.tenant_id).bind(&test.name).bind(&test.description).bind(&test.rational)
+            .bind(&test.remediation).bind(&test.severity).bind(&test.filter).bind(&test.app_filter)
+            .bind(&new_xid)
+            .execute(&mut *tx).await
+            {
                 tx.rollback().await.ok();
                 let msg = urlencoding::encode(&format!("Test insert failed: {}", e)).to_string();
                 return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
             }
+            let new_id: i64 = match sqlx::query_scalar("SELECT last_insert_rowid()")
+                .fetch_one(&mut *tx).await
+            {
+                Ok(id) => id,
+                Err(e) => {
+                    tx.rollback().await.ok();
+                    let msg = urlencoding::encode(&format!("Test insert failed: {}", e)).to_string();
+                    return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
+                }
+            };
+            inserted_count += 1;
+            new_id
         };
 
-        // Conditions + applicability rules share one table; differentiated by `type`.
+        // Insert this test's conditions + applicability rules.
         let all_conds = test.conditions.iter().map(|c| ("condition", c))
             .chain(test.applicability.iter().map(|c| ("applicability", c)));
         for (ctype, c) in all_conds {
@@ -1516,6 +1550,7 @@ pub async fn policies_import(
             }
         }
 
+        // Ensure this policy links to this test.
         if let Err(e) = sqlx::query(
             "INSERT OR IGNORE INTO tests_in_policy (tenant_id, policy_id, test_id) VALUES (?, ?, ?)",
         )
@@ -1526,7 +1561,32 @@ pub async fn policies_import(
             let msg = urlencoding::encode(&format!("Link insert failed: {}", e)).to_string();
             return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
         }
+
+        imported_test_ids.push(test_id);
     }
+
+    // Unlink tests previously linked to this policy that are not in the import.
+    // We do not delete the test rows themselves — they may be linked to other
+    // policies or kept as standalone tests.
+    let unlinked_count = if existing_id.is_some() && !imported_test_ids.is_empty() {
+        let placeholders = imported_test_ids.iter().map(|_| "?").collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "DELETE FROM tests_in_policy
+             WHERE tenant_id = ? AND policy_id = ?
+               AND test_id NOT IN ({})",
+            placeholders,
+        );
+        let mut q = sqlx::query(&sql).bind(&auth.tenant_id).bind(policy_id);
+        for tid in &imported_test_ids { q = q.bind(*tid); }
+        match q.execute(&mut *tx).await {
+            Ok(r)  => r.rows_affected(),
+            Err(e) => {
+                tx.rollback().await.ok();
+                let msg = urlencoding::encode(&format!("Unlink failed: {}", e)).to_string();
+                return Redirect::to(&format!("/policies?error_message={}", msg)).into_response();
+            }
+        }
+    } else { 0 };
 
     if let Err(e) = tx.commit().await {
         let msg = urlencoding::encode(&format!("Commit failed: {}", e)).to_string();
@@ -1534,9 +1594,11 @@ pub async fn policies_import(
     }
 
     let action = if existing_id.is_some() { "updated" } else { "imported" };
-    let msg = urlencoding::encode(&format!(
-        "Policy {} ({} tests)", action, export.tests.len()
-    )).to_string();
+    let mut summary = format!("Policy {}: {} new, {} updated", action, inserted_count, updated_count);
+    if unlinked_count > 0 {
+        summary.push_str(&format!(", {} unlinked", unlinked_count));
+    }
+    let msg = urlencoding::encode(&summary).to_string();
     Redirect::to(&format!("/policies?success_message={}", msg)).into_response()
 }
 

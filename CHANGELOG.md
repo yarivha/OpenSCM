@@ -7,10 +7,11 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
-- **Policy Import / Export** — every policy now has a stable `external_id` (32-char hex) and an optional `author` field. New `GET /policies/export/{id}` downloads a JSON file containing the policy, every linked test, and each test's conditions/applicability rules — ids and tenant references are stripped so files are portable across installations. New `POST /policies/import` (multipart upload) restores a file: if the `external_id` matches an existing policy in the tenant, the policy is updated and its tests are replaced; otherwise it is inserted as a new policy with name-collision handling (`(imported)`, `-2`, `-3`, …). Import button and per-policy export icon added to the policies page; author shown on each policy card and editable from the add / edit forms.
+- **Policy Import / Export** — every policy now has a stable `external_id` (32-char hex) and an optional `author` field. New `GET /policies/export/{id}` downloads a JSON file containing the policy, every linked test, and each test's conditions/applicability rules — ids and tenant references are stripped so files are portable across installations. New `POST /policies/import` (multipart upload) restores a file: if the `external_id` matches an existing policy in the tenant, the policy is updated; otherwise it is inserted as a new policy with name-collision handling (`(imported)`, `-2`, `-3`, …). Import button and per-policy export icon added to the policies page; author shown on each policy card and editable from the add / edit forms.
+- **Per-test stable identity (`tests.external_id`)** — tests now also carry a 32-char hex `external_id`, auto-generated on creation and exported alongside each test. On import, tests are matched by `external_id`: a match updates the existing row in place (preserving results history and any cross-policy links) and replaces its conditions; no match inserts a new test. Tests previously linked to the policy but absent from the imported file are **unlinked** from this policy (but kept in the tests table) so re-imports become non-destructive across policies. Export format bumped to v3; older v1/v2 files still importable (missing test ids are generated).
 
 ### Changed
-- **Schema version bumped to 14** — adds `policies.author` and `policies.external_id` columns; backfills `external_id` for existing policies; fresh installs are stamped at v14.
+- **Schema version bumped to 15** — v13→v14 adds `policies.author` and `policies.external_id` and backfills existing policies; v14→v15 adds `tests.external_id` and backfills existing tests; fresh installs stamp at v15.
 - **axum `multipart` feature enabled** — required by the new policy import endpoint.
 
 ---

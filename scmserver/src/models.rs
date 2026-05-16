@@ -169,6 +169,8 @@ pub struct PolicyExportTestCondition {
 
 #[derive(Debug, Serialize, Deserialize, Clone)]
 pub struct PolicyExportTest {
+    #[serde(default)]
+    pub external_id: Option<String>,
     pub name: String,
     pub description: Option<String>,
     pub rational: Option<String>,

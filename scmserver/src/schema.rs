@@ -183,6 +183,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             severity TEXT,
             app_filter TEXT DEFAULT 'all',
             filter TEXT DEFAULT 'all',
+            external_id TEXT,
             compliance_score REAL DEFAULT -1.0,
             systems_passed INTEGER DEFAULT 0,
             systems_failed INTEGER DEFAULT 0,
@@ -1218,6 +1219,26 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE schema_info SET version = 14")
             .execute(pool).await?;
         info!("Schema migration v13 → v14 complete.");
+    }
+
+    // v14 → v15: add tests.external_id; backfill external_id for existing rows.
+    if version < 15 {
+        info!("Running schema migration v14 → v15 (tests.external_id)...");
+        if !column_exists(pool, "tests", "external_id").await {
+            sqlx::query("ALTER TABLE tests ADD COLUMN external_id TEXT").execute(pool).await?;
+        }
+        let rows = sqlx::query("SELECT id FROM tests WHERE external_id IS NULL OR external_id = ''")
+            .fetch_all(pool).await?;
+        for row in rows {
+            let id: i64 = row.get("id");
+            sqlx::query("UPDATE tests SET external_id = ? WHERE id = ?")
+                .bind(generate_external_id())
+                .bind(id)
+                .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 15")
+            .execute(pool).await?;
+        info!("Schema migration v14 → v15 complete.");
     }
 
     Ok(())

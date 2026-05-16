@@ -307,14 +307,16 @@ pub async fn tests_add_save(
     let app_type = form_data.get("app_type")
         .and_then(|v| v.first()).map(|s| s.as_str()).unwrap_or("always");
 
-    // Insert test
+    // Insert test (with auto-generated external_id for stable cross-system identity).
+    let external_id = crate::schema::generate_external_id();
     let result = sqlx::query(
-        "INSERT INTO tests (tenant_id, name, description, severity, rational, remediation, filter, app_filter)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tests (tenant_id, name, description, severity, rational, remediation, filter, app_filter, external_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&auth.tenant_id)
     .bind(&name).bind(&description).bind(&severity)
     .bind(&rational).bind(&remediation).bind(&filter).bind(&app_filter)
+    .bind(&external_id)
     .execute(&mut *tx)
     .await;
 
