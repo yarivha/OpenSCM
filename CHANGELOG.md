@@ -4,6 +4,13 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.3.6] - 2026-05-16
+
+### Fixed
+- **`init_tera_with_overrides` crashed on startup when an override extended `base.html` and base.html was not itself an override** — Tera 1.x validates `extends` parents at `add_raw_template` time, but the loader added overrides *before* CE templates. As long as `base.html` was in the override list (its previous SaaS use), the order accidentally worked; once SaaS started inheriting CE's `base.html` directly, the first child override (`admin_tenants.html`) failed with `MissingParent { current: "admin_tenants.html", parent: "base.html" }` and `main()` returned `Err`, causing the SaaS service to crash-restart in a tight loop. Reversed the loader order — CE templates load first; overrides replace them by name afterwards.
+
+---
+
 ## [0.3.5] - 2026-05-16
 
 ### Added

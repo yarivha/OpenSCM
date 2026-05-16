@@ -116,18 +116,18 @@ pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
 pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<dyn Error>> {
     let mut tera = Tera::default();
 
-    // Overrides must be registered FIRST: Tera 1.20 validates the parent template
-    // at add_raw_template time, so base templates (like base.html) must already
-    // exist before any child template that extends them is added.
-    for (name, content) in overrides {
-        tera.add_raw_template(name, content)?;
-    }
-
+    // Load CE templates FIRST. Tera 1.x validates `extends` parents at
+    // add_raw_template time, so base templates (notably base.html) must be
+    // present before any child override that extends them can be added.
+    // CE templates include base.html, which is the parent that virtually
+    // every override (e.g. admin_tenants.html) extends.
     for file in TEMPLATES_DIR.files() {
         let path = file.path().to_str()
             .ok_or_else(|| format!("Template path is not valid UTF-8: {:?}", file.path()))?;
 
-        // Skip CE template if the caller supplied an override for this name
+        // Skip the CE version if the caller supplied an override with the
+        // same name — the override is added in the second loop below and
+        // wholly replaces the CE version.
         if overrides.iter().any(|(name, _)| *name == path) {
             continue;
         }
@@ -137,6 +137,12 @@ pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<
             .to_owned();
 
         tera.add_raw_template(path, &content)?;
+    }
+
+    // Overlay overrides on top. Names that match a CE template replace it;
+    // names unique to the overrides are added as new templates.
+    for (name, content) in overrides {
+        tera.add_raw_template(name, content)?;
     }
 
     tera.build_inheritance_chains()?;
