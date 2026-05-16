@@ -371,14 +371,13 @@ fn get_system_domain() -> Option<String> {
 
 #[cfg(windows)]
 fn get_system_domain() -> Option<String> {
-    dns_lookup::get_hostname().ok().and_then(|h| {
-        let fqdn = dns_lookup::getaddrinfo(Some(&h), None, None)
-            .ok()?
-            .next()?
-            .unwrap()
-            .canonname?;
-        fqdn.splitn(2, '.').nth(1).map(|s| s.to_string())
-    })
+    let host = dns_lookup::get_hostname().ok()?;
+    // getaddrinfo yields an iterator of Result<AddrInfo, _>; both layers can
+    // fail. Use `.ok()?` on each rather than `.unwrap()` to keep the function
+    // panic-free when DNS misbehaves.
+    let addr_info = dns_lookup::getaddrinfo(Some(&host), None, None).ok()?.next()?.ok()?;
+    let fqdn = addr_info.canonname?;
+    fqdn.splitn(2, '.').nth(1).map(|s| s.to_string())
 }
 
 

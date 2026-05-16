@@ -1,4 +1,3 @@
-use os_info;
 use tracing::{info, warn, error, debug};
 use ed25519_dalek::{SigningKey, VerifyingKey, Signer, Verifier, Signature};
 use std::fs;
@@ -165,7 +164,15 @@ async fn process_compliance_tests(
     };
 
     for test in tests {
-        let test_id = test.id.unwrap_or(0);
+        // A test with no id is unaddressable — sending test_id=0 would be
+        // silently dropped by the server, so skip with a warning instead.
+        let test_id = match test.id {
+            Some(id) if id > 0 => id,
+            _ => {
+                warn!("Server sent test '{}' with no id — skipping.", test.name);
+                continue;
+            }
+        };
         debug!("Starting evaluation of test ID {}", test_id);
 
         // =====================================================
@@ -173,9 +180,9 @@ async fn process_compliance_tests(
         // =====================================================
         if let Some(app_conditions) = &test.applicability {
             for c in app_conditions {
-        debug!("Applicability condition: element='{}', selement='{}', condition='{}', sinput='{:?}'",
-            c.element, c.selement, c.condition.as_deref().unwrap_or(""), c.sinput);
-    }
+                debug!("Applicability condition: element='{}', selement='{}', condition='{}', sinput='{:?}'",
+                    c.element, c.selement, c.condition.as_deref().unwrap_or(""), c.sinput);
+            }
             if !app_conditions.is_empty() {
                 let app_results: Vec<EvalResult> = app_conditions.iter()
                     .map(|c| evaluate(

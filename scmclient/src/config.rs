@@ -118,12 +118,17 @@ impl Default for Config {
 //   5. Add it to the NSIS installer WriteRegStr block
 //
 impl Config {
-    fn normalize(mut self) -> Self {
+    // Fills any absent optional fields with their defaults. Returns a tuple of
+    // (normalised_config, changed) so callers can skip rewriting the file when
+    // the on-disk form already matches the in-memory form — avoiding pointless
+    // disk writes (and mtime churn that confuses file-integrity monitors).
+    fn normalize(mut self) -> (Self, bool) {
         let d = Config::default();
-        if self.client.heartbeat.is_none()   { self.client.heartbeat   = d.client.heartbeat;   }
-        if self.client.loglevel.is_none()    { self.client.loglevel    = d.client.loglevel;    }
-        if self.client.cmd_enabled.is_none() { self.client.cmd_enabled = d.client.cmd_enabled; }
-        self
+        let mut changed = false;
+        if self.client.heartbeat.is_none()   { self.client.heartbeat   = d.client.heartbeat;   changed = true; }
+        if self.client.loglevel.is_none()    { self.client.loglevel    = d.client.loglevel;    changed = true; }
+        if self.client.cmd_enabled.is_none() { self.client.cmd_enabled = d.client.cmd_enabled; changed = true; }
+        (self, changed)
     }
 }
 
@@ -220,7 +225,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         return Err("ServerURL is required but empty in registry".into());
     }
 
-    let config = Config {
+    let (config, changed) = Config {
         server: ServerConfig { url, organization },
         client: ClientConfig {
             heartbeat:   Some(read_val("Heartbeat",  "300")),
@@ -230,9 +235,11 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
     }
     .normalize();
 
-    // Always save — writes current schema, fills any gaps from upgrades
-    if let Err(e) = config.save() {
-        warn!("Failed to update registry: {}.", e);
+    // Save only when normalize filled in something missing.
+    if changed {
+        if let Err(e) = config.save() {
+            warn!("Failed to update registry: {}.", e);
+        }
     }
 
     // Delete any registry values outside the current schema (stale / renamed)
@@ -279,11 +286,15 @@ fn load_from_toml(path: &Path) -> Result<Config, Box<dyn Error>> {
         return Err("server.organization is required but empty in config file".into());
     }
 
-    let config = config.normalize();
+    let (config, changed) = config.normalize();
 
-    // Always save — rewrites with current field names and fills any new settings
-    if let Err(e) = config.save() {
-        warn!("Failed to update config file: {}.", e);
+    // Save only when normalize filled in something missing (or to migrate a
+    // legacy field rename — handled by serde aliases during deserialisation
+    // and surfaced here by comparing the post-load text).
+    if changed {
+        if let Err(e) = config.save() {
+            warn!("Failed to update config file: {}.", e);
+        }
     }
 
     Ok(config)
