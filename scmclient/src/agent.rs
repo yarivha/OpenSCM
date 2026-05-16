@@ -272,47 +272,59 @@ async fn process_compliance_tests(
 
 
 // ============================================================
-// MAIN AGENT FUNCTION
+// AGENT IDENTITY + SYSTEM INFO + HEARTBEAT
+//
+// The four steps of a heartbeat — load identity, collect host info,
+// post the signed payload, dispatch the server's command — were
+// previously a single 200-line function. Each step is now in its own
+// helper so the top-level send_system_info reads as a flow.
 // ============================================================
 
-pub async fn send_system_info(
-    config: &Config,
-    http_client: &reqwest::Client,
-) -> Result<(), Box<dyn std::error::Error>> {
+// Per-server identity: filesystem paths + loaded signing key + current id.
+struct AgentIdentity {
+    namespace:       String,
+    id_path:         PathBuf,
+    server_pub_path: PathBuf,
+    signing_key:     SigningKey,
+    public_base64:   String,
+    current_id:      String,
+}
 
-    // 1. Derive namespaced file paths per server URL
+// Snapshot of host attributes reported to the server.
+struct SystemInfo {
+    hostname: String,
+    ip:       String,
+    os:       String,
+    arch:     String,
+    ver:      String,
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Load (or create) the per-server agent identity.
+// ─────────────────────────────────────────────────────────────────────────────
+fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std::error::Error>> {
     let namespace = get_url_namespace(&config.server.url);
-    let key_dir = std::path::Path::new(key_path()).parent().expect("Core key directory must have a parent path");
+    let key_dir = std::path::Path::new(key_path())
+        .parent()
+        .expect("Core key directory must have a parent path");
 
-    let id_path         = key_dir.join(format!("client_{}.id", namespace));
+    let id_path         = key_dir.join(format!("client_{}.id",  namespace));
     let priv_path       = key_dir.join(format!("client_{}.key", namespace));
     let pub_path        = key_dir.join(format!("client_{}.pub", namespace));
     let server_pub_path = key_dir.join(format!("server_{}.pub", namespace));
 
-    // 2. Generate client keys if missing for this namespace
+    // Generate keys on first run for this namespace.
     if !priv_path.exists() {
-        info!(
-            "No identity found for namespace '{}'. Generating new Ed25519 keypair...",
-            namespace
-        );
+        info!("No identity found for namespace '{}'. Generating new Ed25519 keypair...", namespace);
         let mut csprng = OsRng;
         let signing_key   = SigningKey::generate(&mut csprng);
         let verifying_key = VerifyingKey::from(&signing_key);
 
-        write_private_file(
-            &priv_path,
-            &general_purpose::STANDARD.encode(signing_key.to_bytes()),
-        )?;
-
-        fs::write(
-            &pub_path,
-            general_purpose::STANDARD.encode(verifying_key.to_bytes()),
-        )?;
-
+        write_private_file(&priv_path, &general_purpose::STANDARD.encode(signing_key.to_bytes()))?;
+        fs::write(&pub_path, general_purpose::STANDARD.encode(verifying_key.to_bytes()))?;
         info!("New keypair generated for namespace '{}'.", namespace);
     }
 
-    // 3. Load identity and keys
     let current_id = if id_path.exists() {
         fs::read_to_string(&id_path)?.trim().to_string()
     } else {
@@ -328,124 +340,150 @@ pub async fn send_system_info(
 
     let public_base64 = fs::read_to_string(&pub_path)?.trim().to_string();
 
-    // 4. Collect system metadata
-    let osinfo       = os_info::get();
-    let my_local_ip  = local_ip_address::local_ip()
+    Ok(AgentIdentity {
+        namespace,
+        id_path,
+        server_pub_path,
+        signing_key,
+        public_base64,
+        current_id,
+    })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Collect host metadata for the heartbeat payload.
+// ─────────────────────────────────────────────────────────────────────────────
+fn collect_system_info() -> SystemInfo {
+    let osinfo = os_info::get();
+    let ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
         .unwrap_or_else(|e| {
             warn!("Could not determine local IP address: {} — reporting 0.0.0.0", e);
             "0.0.0.0".to_string()
         });
-    let my_hostname  = gethostname::gethostname().to_string_lossy().into_owned();
-    let my_os        = format!("{} {}", osinfo.os_type(), osinfo.version());
-    let my_arch      = std::env::consts::ARCH.to_string();
-    let my_ver       = env!("CARGO_PKG_VERSION").to_string();
 
-    let base_url   = config.server.url.trim_end_matches('/').to_string();
-    let send_url   = format!("{}/send", base_url);
-    let result_url = format!("{}/result", base_url);
+    SystemInfo {
+        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
+        ip,
+        os:       format!("{} {}", osinfo.os_type(), osinfo.version()),
+        arch:     std::env::consts::ARCH.to_string(),
+        ver:      env!("CARGO_PKG_VERSION").to_string(),
+    }
+}
 
-    // 5. Build and sign payload
-    let needs_handshake = current_id == "0" || !server_pub_path.exists();
+// ─────────────────────────────────────────────────────────────────────────────
+// Post the signed heartbeat to /send. Returns the parsed SignedResponse on
+// success; Ok(None) on transient/recoverable failures (404 → identity reset,
+// non-2xx → log+skip) so the caller treats them as "this cycle is over".
+// ─────────────────────────────────────────────────────────────────────────────
+async fn post_heartbeat(
+    http_client:   &reqwest::Client,
+    config:        &Config,
+    identity:      &AgentIdentity,
+    sys:           &SystemInfo,
+    send_url:      &str,
+    base_url:      &str,
+) -> Result<Option<SignedResponse>, Box<dyn std::error::Error>> {
+    let needs_handshake = identity.current_id == "0" || !identity.server_pub_path.exists();
 
-    let unsigned_payload = UnsignedPayload {
-        id:         current_id.clone(),
+    let unsigned = UnsignedPayload {
+        id:         identity.current_id.clone(),
         organization: config.server.organization.clone(),
-        hostname:   my_hostname.clone(),
-        ver:        my_ver.clone(),
-        ip:         my_local_ip.clone(),
-        os:         my_os.clone(),
-        arch:       my_arch.clone(),
+        hostname:   sys.hostname.clone(),
+        ver:        sys.ver.clone(),
+        ip:         sys.ip.clone(),
+        os:         sys.os.clone(),
+        arch:       sys.arch.clone(),
         timestamp:  chrono::Utc::now().timestamp().to_string(),
-        public_key: if needs_handshake { Some(public_base64.clone()) } else { None },
+        public_key: if needs_handshake { Some(identity.public_base64.clone()) } else { None },
     };
 
-    let signature = sign_payload(&unsigned_payload, &signing_key)?;
+    let signature = sign_payload(&unsigned, &identity.signing_key)?;
+    let request = SignedRequest { payload: unsigned, signature };
 
-    let request = SignedRequest {
-        payload:   unsigned_payload,
-        signature,
-    };
+    let response = http_client.post(send_url).json(&request).send().await?;
 
-    // 6. Send to server
-    let response = http_client
-        .post(&send_url)
-        .json(&request)
-        .send()
-        .await?;
-
-    // Handle 404 — server lost our identity, reset and re-register next cycle
     if response.status() == reqwest::StatusCode::NOT_FOUND {
         warn!(
             "Server at '{}' rejected ID '{}'. Resetting identity for re-registration.",
-            base_url, current_id
+            base_url, identity.current_id
         );
-        let _ = fs::remove_file(&id_path);
-        let _ = fs::remove_file(&server_pub_path);
-        return Ok(());
+        let _ = fs::remove_file(&identity.id_path);
+        let _ = fs::remove_file(&identity.server_pub_path);
+        return Ok(None);
     }
-
     if !response.status().is_success() {
         error!("Server returned error status: {}", response.status());
-        return Ok(());
+        return Ok(None);
     }
 
-    let signed_res: SignedResponse = response.json().await?;
-    let inner_json = &signed_res.payload;
+    Ok(Some(response.json::<SignedResponse>().await?))
+}
 
-    // 7. Verify server signature (only if we have the server public key)
-    if server_pub_path.exists() {
-        let server_pub_b64 = fs::read_to_string(&server_pub_path)?;
-        match decode_public_key(&server_pub_b64) {
-            Ok(verifier) => {
-                if let Err(e) =
-                    verify_server_response(inner_json, &signed_res.signature, &verifier)
-                {
-                    error!(
-                        "SECURITY ALERT: Invalid server signature from '{}': {}. \
-                         Dropping cached server key — will re-handshake next cycle.",
-                        base_url, e
-                    );
-                    // Remove the stale server public key so the next heartbeat
-                    // includes our public key and triggers a fresh key exchange.
-                    let _ = fs::remove_file(&server_pub_path);
-                    return Ok(());
-                }
-                debug!("Server signature verified for '{}'.", base_url);
-            }
-            Err(e) => {
-                error!("Failed to load server public key: {}", e);
-                return Ok(());
-            }
+// ─────────────────────────────────────────────────────────────────────────────
+// Verify server signature when we have a cached server public key.
+// Returns Ok(true) if verified (or no key cached yet — first handshake),
+// Ok(false) if verification failed (caller should abort this cycle), or
+// Err on I/O failures we cannot recover from.
+// ─────────────────────────────────────────────────────────────────────────────
+fn verify_response(
+    identity:    &AgentIdentity,
+    signed_res:  &SignedResponse,
+    base_url:    &str,
+) -> Result<bool, Box<dyn std::error::Error>> {
+    if !identity.server_pub_path.exists() {
+        return Ok(true);
+    }
+
+    let server_pub_b64 = fs::read_to_string(&identity.server_pub_path)?;
+    let verifier = match decode_public_key(&server_pub_b64) {
+        Ok(v) => v,
+        Err(e) => {
+            error!("Failed to load server public key: {}", e);
+            return Ok(false);
         }
+    };
+
+    if let Err(e) = verify_server_response(&signed_res.payload, &signed_res.signature, &verifier) {
+        error!(
+            "SECURITY ALERT: Invalid server signature from '{}': {}. \
+             Dropping cached server key — will re-handshake next cycle.",
+            base_url, e
+        );
+        let _ = fs::remove_file(&identity.server_pub_path);
+        return Ok(false);
+    }
+    debug!("Server signature verified for '{}'.", base_url);
+    Ok(true)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Dispatch a server response: persist the server public key if included,
+// then act on the embedded command (REGISTER / TEST / NONE / unknown).
+// ─────────────────────────────────────────────────────────────────────────────
+async fn dispatch_server_command(
+    config:      &Config,
+    identity:    &AgentIdentity,
+    http_client: &reqwest::Client,
+    result_url:  &str,
+    base_url:    &str,
+    inner_json:  &serde_json::Value,
+) -> Result<(), Box<dyn std::error::Error>> {
+    // Save server public key if the server included one this cycle.
+    if let Some(server_key) = inner_json.get("server_public_key").and_then(|k| k.as_str()) {
+        fs::write(&identity.server_pub_path, server_key.trim())?;
+        info!("Server public key saved for namespace '{}'.", identity.namespace);
     }
 
-    // 8. Process server response
-
-    // Save server public key if provided
-    if let Some(server_key) = inner_json
-        .get("server_public_key")
-        .and_then(|k| k.as_str())
-    {
-        fs::write(&server_pub_path, server_key.trim())?;
-        info!("Server public key saved for namespace '{}'.", namespace);
-    }
-
-    // Handle commands
     match inner_json.get("command").and_then(|c| c.as_str()) {
         Some("REGISTER") => {
             if let Some(new_id) = inner_json.get("id").and_then(|id| id.as_i64()) {
-                let new_id_str = new_id.to_string();
-                fs::write(&id_path, &new_id_str)?;
-                info!(
-                    "Registered with server '{}' as Agent ID: {}.",
-                    base_url, new_id
-                );
+                fs::write(&identity.id_path, new_id.to_string())?;
+                info!("Registered with server '{}' as Agent ID: {}.", base_url, new_id);
             } else {
                 error!("REGISTER command received but no ID in response.");
             }
         }
-
         Some("TEST") => {
             if let Some(tests_val) = inner_json.get("data") {
                 match serde_json::from_value::<Vec<Test>>(tests_val.clone()) {
@@ -453,32 +491,49 @@ pub async fn send_system_info(
                         let cmd_enabled = config.client.cmd_enabled.unwrap_or(false);
                         process_compliance_tests(
                             tests,
-                            &current_id,
+                            &identity.current_id,
                             &config.server.organization,
-                            &signing_key,
-                            &http_client,
-                            &result_url,
+                            &identity.signing_key,
+                            http_client,
+                            result_url,
                             cmd_enabled,
-                        )
-                        .await;
+                        ).await;
                     }
-                    Err(e) => {
-                        error!("Failed to deserialize test data: {}", e);
-                    }
+                    Err(e) => error!("Failed to deserialize test data: {}", e),
                 }
             } else {
                 warn!("TEST command received but no data in response.");
             }
         }
+        Some("NONE") | None => debug!("Heartbeat OK — no commands pending."),
+        Some(unknown)       => warn!("Unknown command received from server: '{}'.", unknown),
+    }
+    Ok(())
+}
 
-        Some("NONE") | None => {
-            debug!("Heartbeat OK — no commands pending.");
-        }
+// ─────────────────────────────────────────────────────────────────────────────
+// Top-level heartbeat: orchestrates the four steps above. Kept small and
+// readable as a flow; each step is testable in isolation.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn send_system_info(
+    config:      &Config,
+    http_client: &reqwest::Client,
+) -> Result<(), Box<dyn std::error::Error>> {
+    let identity = load_or_create_identity(config)?;
+    let sys      = collect_system_info();
 
-        Some(unknown) => {
-            warn!("Unknown command received from server: '{}'.", unknown);
-        }
+    let base_url   = config.server.url.trim_end_matches('/').to_string();
+    let send_url   = format!("{}/send",   base_url);
+    let result_url = format!("{}/result", base_url);
+
+    let signed_res = match post_heartbeat(http_client, config, &identity, &sys, &send_url, &base_url).await? {
+        Some(r) => r,
+        None    => return Ok(()),  // 404 reset or non-2xx — cycle ends here.
+    };
+
+    if !verify_response(&identity, &signed_res, &base_url)? {
+        return Ok(());
     }
 
-    Ok(())
+    dispatch_server_command(config, &identity, http_client, &result_url, &base_url, &signed_res.payload).await
 }
