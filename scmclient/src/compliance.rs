@@ -19,6 +19,69 @@ pub enum EvalResult {
     Na,
 }
 
+// Tiny sugar — `boolean(check())` reads better than the same if/else everywhere.
+#[inline]
+fn boolean(passed: bool) -> EvalResult {
+    if passed { EvalResult::Pass } else { EvalResult::Fail }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Shared file/directory metadata checks. Both `file/owner|group|permission`
+// and `directory/owner|group|permission` route through these helpers.
+// ─────────────────────────────────────────────────────────────────────────────
+
+#[cfg(unix)]
+fn check_path_owner(path: &str, sinput: &str) -> EvalResult {
+    use std::os::unix::fs::MetadataExt;
+    let uid = match fs::metadata(path) {
+        Ok(m)  => m.uid(),
+        Err(_) => return EvalResult::Fail,
+    };
+    let name_matches = get_user_name_from_uid(uid)
+        .map(|n| n == sinput)
+        .unwrap_or(false);
+    boolean(name_matches || uid.to_string() == sinput)
+}
+
+#[cfg(not(unix))]
+fn check_path_owner(_path: &str, _sinput: &str) -> EvalResult { EvalResult::Na }
+
+#[cfg(unix)]
+fn check_path_group(path: &str, condition: &str, sinput: &str) -> EvalResult {
+    use std::os::unix::fs::MetadataExt;
+    let gid = match fs::metadata(path) {
+        Ok(m)  => m.gid(),
+        Err(_) => return EvalResult::Fail,
+    };
+    let name = get_group_name_from_gid(gid).unwrap_or_default();
+    boolean(
+        apply_string_condition(&name, condition, sinput) ||
+        apply_string_condition(&gid.to_string(), condition, sinput)
+    )
+}
+
+#[cfg(not(unix))]
+fn check_path_group(_p: &str, _c: &str, _s: &str) -> EvalResult { EvalResult::Na }
+
+#[cfg(unix)]
+fn check_path_permission(path: &str, condition: &str, sinput: &str) -> EvalResult {
+    use std::os::unix::fs::PermissionsExt;
+    let mode = fs::metadata(path)
+        .map(|m| m.permissions().mode() & 0o777)
+        .unwrap_or(0);
+    let expected = u32::from_str_radix(sinput, 8).unwrap_or(0);
+    let passed = match condition.trim().to_lowercase().as_str() {
+        "equal" | "equals" => mode == expected,
+        "more than"        => mode >= expected,
+        "less than"        => mode <= expected,
+        _                  => false,
+    };
+    boolean(passed)
+}
+
+#[cfg(not(unix))]
+fn check_path_permission(_p: &str, _c: &str, _s: &str) -> EvalResult { EvalResult::Na }
+
 
 // ============================================================
 // HELPERS
@@ -373,14 +436,16 @@ fn check_file_content(path: &str, condition: &str, expected: &str) -> bool {
 
 
 
-fn calculate_sha1(path: &str) -> Result<String, std::io::Error> {
-    use sha1::{Sha1, Digest};
+// Generic streaming file hash. Used for both SHA1 and SHA256 by binding the
+// type parameter at the call site (`calculate_hash::<Sha1>(...)` etc.).
+// Returns the digest as a lowercase hex string.
+fn calculate_hash<H: sha2::digest::Digest>(path: &str) -> Result<String, std::io::Error> {
     use std::fs::File;
     use std::io::Read;
 
-    let mut file = File::open(path)?;
-    let mut hasher = Sha1::new();
-    let mut buffer = [0; 4096];
+    let mut file   = File::open(path)?;
+    let mut hasher = H::new();
+    let mut buffer = [0u8; 4096];
 
     loop {
         let count = file.read(&mut buffer)?;
@@ -388,26 +453,7 @@ fn calculate_sha1(path: &str) -> Result<String, std::io::Error> {
         hasher.update(&buffer[..count]);
     }
 
-    Ok(format!("{:x}", hasher.finalize()))
-}
-
-
-fn calculate_sha2(path: &str) -> Result<String, std::io::Error> {
-    use sha2::{Sha256, Digest};
-    use std::fs::File;
-    use std::io::Read;
-
-    let mut file = File::open(path)?;
-    let mut hasher = Sha256::new();
-    let mut buffer = [0; 4096];
-
-    loop {
-        let count = file.read(&mut buffer)?;
-        if count == 0 { break; }
-        hasher.update(&buffer[..count]);
-    }
-
-    Ok(format!("{:x}", hasher.finalize()))
+    Ok(hex::encode(hasher.finalize()))
 }
 
 
@@ -541,64 +587,9 @@ pub fn evaluate(
                     .unwrap_or(false);
                 if result { EvalResult::Pass } else { EvalResult::Fail }
             }
-            "owner" => {
-                #[cfg(unix)]
-                {
-                    let metadata = fs::metadata(input).ok();
-                    let uid = metadata.map(|m| std::os::unix::fs::MetadataExt::uid(&m));
-                    if let Some(u) = uid {
-                        let name = get_user_name_from_uid(u).unwrap_or_default();
-                        if name == sinput_trim || u.to_string() == sinput_trim {
-                            EvalResult::Pass
-                        } else {
-                            EvalResult::Fail
-                        }
-                    } else {
-                        EvalResult::Fail
-                    }
-                }
-                #[cfg(not(unix))]
-                { EvalResult::Na }
-            }
-            "group" => {
-                #[cfg(unix)]
-                {
-                    let metadata = fs::metadata(input).ok();
-                    let gid = metadata.map(|m| std::os::unix::fs::MetadataExt::gid(&m));
-                    if let Some(g) = gid {
-                        let name = get_group_name_from_gid(g).unwrap_or_default();
-                        if apply_string_condition(&name, condition, sinput_trim) ||
-                           apply_string_condition(&g.to_string(), condition, sinput_trim) {
-                            EvalResult::Pass
-                        } else {
-                            EvalResult::Fail
-                        }
-                    } else {
-                        EvalResult::Fail
-                    }
-                }
-                #[cfg(not(unix))]
-                { EvalResult::Na }
-            }
-            "permission" | "permissions" => {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mode = fs::metadata(input)
-                        .map(|m| m.permissions().mode() & 0o777)
-                        .unwrap_or(0);
-                    let expected = u32::from_str_radix(sinput_trim, 8).unwrap_or(0);
-                    let result = match condition.trim().to_lowercase().as_str() {
-                        "equal" | "equals" => mode == expected,
-                        "more than"        => mode >= expected,
-                        "less than"        => mode <= expected,
-                        _ => false,
-                    };
-                    if result { EvalResult::Pass } else { EvalResult::Fail }
-                }
-                #[cfg(not(unix))]
-                { EvalResult::Na }
-            }
+            "owner"                       => check_path_owner(input, sinput_trim),
+            "group"                       => check_path_group(input, condition, sinput_trim),
+            "permission" | "permissions"  => check_path_permission(input, condition, sinput_trim),
             _ => {
                 error!("Unsupported directory selement: '{}'", selement);
                 EvalResult::Na
@@ -636,66 +627,11 @@ pub fn evaluate(
                     EvalResult::Fail
                 }
             }
-            "owner" => {
-                #[cfg(unix)]
-                {
-                    let uid = fs::metadata(input)
-                        .map(|m| std::os::unix::fs::MetadataExt::uid(&m))
-                        .ok();
-                    if let Some(u) = uid {
-                        let result = get_user_name_from_uid(u)
-                            .map(|n| n == sinput_trim)
-                            .unwrap_or(u.to_string() == sinput_trim);
-                        if result { EvalResult::Pass } else { EvalResult::Fail }
-                    } else {
-                        EvalResult::Fail
-                    }
-                }
-                #[cfg(not(unix))]
-                { EvalResult::Na }
-            }
-            "group" => {
-                #[cfg(unix)]
-                {
-                    let gid = fs::metadata(input)
-                        .map(|m| std::os::unix::fs::MetadataExt::gid(&m))
-                        .ok();
-                    if let Some(g) = gid {
-                        let name = get_group_name_from_gid(g).unwrap_or_default();
-                        if apply_string_condition(&name, condition, sinput_trim) ||
-                           apply_string_condition(&g.to_string(), condition, sinput_trim) {
-                            EvalResult::Pass
-                        } else {
-                            EvalResult::Fail
-                        }
-                    } else {
-                        EvalResult::Fail
-                    }
-                }
-                #[cfg(not(unix))]
-                { EvalResult::Na }
-            }
-            "permission" | "permissions" => {
-                #[cfg(unix)]
-                {
-                    use std::os::unix::fs::PermissionsExt;
-                    let mode = fs::metadata(input)
-                        .map(|m| m.permissions().mode() & 0o777)
-                        .unwrap_or(0);
-                    let expected = u32::from_str_radix(sinput_trim, 8).unwrap_or(0);
-                    let result = match condition.trim().to_lowercase().as_str() {
-                        "equal" | "equals" => mode == expected,
-                        "more than"        => mode >= expected,
-                        "less than"        => mode <= expected,
-                        _ => false,
-                    };
-                    if result { EvalResult::Pass } else { EvalResult::Fail }
-                }
-                #[cfg(not(unix))]
-                { EvalResult::Na }
-            }
+            "owner"                       => check_path_owner(input, sinput_trim),
+            "group"                       => check_path_group(input, condition, sinput_trim),
+            "permission" | "permissions"  => check_path_permission(input, condition, sinput_trim),
             "sha1" => {
-                match calculate_sha1(input) {
+                match calculate_hash::<sha1::Sha1>(input) {
                     Ok(actual_hash) => {
                         let actual   = actual_hash.to_lowercase();
                         let expected = sinput_trim.to_lowercase();
@@ -713,7 +649,7 @@ pub fn evaluate(
                 }
             }
             "sha2" | "sha256" => {
-                match calculate_sha2(input) {
+                match calculate_hash::<sha2::Sha256>(input) {
                     Ok(actual_hash) => {
                         let actual   = actual_hash.to_lowercase();
                         let expected = sinput_trim.to_lowercase();
