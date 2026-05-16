@@ -6,9 +6,23 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.3.7] - 2026-05-16
+
 ### Added
 - **`apply_policy_import(pool, tenant_id, export)` extracted from `policies_import`** — the per-test upsert + conditions-replace + unlink logic now lives in one reusable async fn returning a structured `PolicyImportSummary { policy_id, action, inserted_tests, updated_tests, unlinked_tests }`. The existing multipart `POST /policies/import` is now a thin wrapper around it; SaaS's new Policy Store install/update handler uses the same core so the import semantics stay identical no matter where the file came from.
 - **`is_saas` sidebar entry: Policy Store** — new `base.html` link to `/store` gated on `is_saas and is_editor`. CE renders nothing (flag defaults to false) so behaviour is unchanged for the CE edition.
+
+### Fixed (scmclient)
+- **Tests with no server-assigned id were silently dropped** — `process_compliance_tests` defaulted to `test_id=0` and POSTed a result the server silently ignored. Now skips the test with a `warn!` so the issue is visible in agent logs.
+- **Panic-free DNS failure in `get_system_domain`** — on Windows the inner `getaddrinfo` iterator called `.unwrap()` on the `AddrInfo` result; replaced with `.ok()?` so a failed DNS lookup returns `None` instead of panicking.
+- **Config file written on every load even when unchanged** — `get_config()` unconditionally re-saved the file after each `normalize()` call, causing pointless disk writes and mtime churn that could confuse file-integrity monitors. `normalize()` now returns `(Config, changed: bool)`; callers save only when `changed` is true.
+
+### Changed (scmclient)
+- **`reqwest::Client` built once and reused across heartbeats** — the HTTP client was reconstructed every heartbeat cycle, discarding reqwest's connection pool and TLS session cache. Client is now built once in `main()` and passed by reference to `send_system_info`, giving persistent TCP+TLS reuse at no behaviour cost.
+- **`send_system_info` decomposed into four named helpers** — the 200-line heartbeat function now delegates to `load_or_create_identity`, `collect_system_info`, `post_heartbeat`, and `dispatch_server_command`; the top-level function reads as a 12-line flow. No behaviour change.
+- **Generic `calculate_hash::<H>` replaces duplicate SHA helpers** — `calculate_sha1` / `calculate_sha2` were byte-for-byte identical loops differing only in hasher type; collapsed into one generic function. `file` and `directory` owner/group/permission arms unified through shared `check_path_owner` / `check_path_group` / `check_path_permission` helpers, eliminating six near-identical 15-line blocks.
 
 ---
 
