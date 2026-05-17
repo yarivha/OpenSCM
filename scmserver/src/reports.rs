@@ -342,6 +342,7 @@ pub async fn reports_view(
     context.insert("system_reports", &system_reports);
     context.insert("fail_count", &fail_count);
     context.insert("live_policy_id", &live_policy_id);
+    context.insert("is_smtp_configured", &is_smtp_configured(&pool).await);
     render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth))
         .await
         .into_response()
@@ -387,53 +388,94 @@ fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
     Box::new(elements::PaddedElement::new(e, Margins::trbl(1.5, 2.0, 1.5, 2.0)))
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helpers shared by the four "Email Me PDF" handlers (reports_email,
+// system_reports_email, policies_report_email, system_report_live_email).
+// Kept tiny and stringly-typed because the flash flow is the same across all
+// four endpoints — flag SMTP missing, missing user email, render failure,
+// SMTP failure, success — and we want the same wording everywhere.
+// ─────────────────────────────────────────────────────────────────────────────
+
+// is_smtp_configured — used by the four report-view handlers to decide
+// whether to render the "Email Me PDF" button on the page.
+pub async fn is_smtp_configured(pool: &SqlitePool) -> bool {
+    let host: String = sqlx::query_scalar(
+        "SELECT value FROM settings WHERE tenant_id = 'default' AND skey = 'smtp_host'",
+    )
+    .fetch_optional(pool).await.unwrap_or(None).unwrap_or_default();
+    !host.trim().is_empty()
+}
+
+// user_email — fetch the logged-in user's email from the users table,
+// returning None for empty/missing values so callers can flash a clear
+// error rather than try to send to "".
+pub(crate) async fn user_email(pool: &SqlitePool, user_id: i32, tenant_id: &str) -> Option<String> {
+    sqlx::query_scalar::<_, Option<String>>(
+        "SELECT email FROM users WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(user_id).bind(tenant_id)
+    .fetch_optional(pool).await
+    .unwrap_or(None).flatten()
+    .filter(|e| !e.trim().is_empty())
+}
+
+// flash_back — redirect to `back` with a flash message. Single helper so
+// every email handler reads the same way. `ok = true` becomes success_message,
+// `ok = false` becomes error_message.
+pub(crate) fn flash_back(back: &str, ok: bool, msg: &str) -> Response {
+    let key = if ok { "success_message" } else { "error_message" };
+    let encoded = urlencoding::encode(msg).to_string();
+    let sep = if back.contains('?') { '&' } else { '?' };
+    Redirect::to(&format!("{}{}{}={}", back, sep, key, encoded)).into_response()
+}
+
+// report_email_body — short HTML wrapper for the report email itself.
+// Kept generic so the same body works for policy-archive, policy-live,
+// system-archive, and system-live reports.
+pub(crate) fn report_email_body(name: &str, version: &str, when: &str) -> String {
+    let version_line = if version.is_empty() {
+        String::new()
+    } else {
+        format!("<p><strong>Version:</strong> {}</p>", version)
+    };
+    format!(
+        r#"<p>The OpenSCM compliance report you requested is attached as a PDF.</p>
+<p><strong>Report:</strong> {name}</p>
+{version_line}
+<p><strong>Generated:</strong> {when}</p>
+<p>This report contains confidential information about your infrastructure
+and should be treated as such.</p>"#
+    )
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
-// GET /reports/download/{id}
-// Generate and stream a PDF of a saved policy compliance report.
-// Role: Viewer
+// Helper: fetch_archive_policy_report
+// Pulls a saved policy report + its system_reports + tests_metadata in the
+// shape the PDF builder wants. Returns None if the row doesn't exist for
+// the caller's tenant. Shared by reports_download and reports_email so the
+// fetch path stays in one place.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn reports_download(
-    auth: AuthSession,
-    Path(id): Path<i64>,
-    Extension(pool): Extension<SqlitePool>,
-) -> impl IntoResponse {
-
-    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
-        return redir;
-    }
-
-    // Fetch the saved report
-    let report = match sqlx::query_as::<_, Report>(
+async fn fetch_archive_policy_report(
+    pool: &SqlitePool,
+    tenant_id: &str,
+    id: i64,
+) -> Result<Option<(Report, Vec<SystemReport>, Vec<TestMeta>)>, sqlx::Error> {
+    let row = sqlx::query_as::<_, Report>(
         "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
                 policy_name, policy_version, policy_description,
                 submitter_name, tests_metadata, report_results
          FROM reports
          WHERE id = ? AND tenant_id = ?",
     )
-    .bind(id)
-    .bind(&auth.tenant_id)
-    .fetch_optional(&pool)
-    .await
-    {
-        Ok(Some(r)) => r,
-        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
-        Err(e) => {
-            error!(error = ?e, report_id = %id, "Failed to fetch report for download");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    .bind(id).bind(tenant_id)
+    .fetch_optional(pool).await?;
 
+    let Some(report) = row else { return Ok(None); };
 
-    let mut system_reports: Vec<SystemReport> = match serde_json::from_str(
+    let mut system_reports: Vec<SystemReport> = serde_json::from_str(
         report.report_results.as_deref().unwrap_or("[]"),
-    ) {
-        Ok(r) => r,
-        Err(e) => {
-            error!(error = ?e, report_id = %id, "Failed to deserialize system reports for download");
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
-    };
+    ).unwrap_or_default();
 
     // Backfill pass_count/fail_count for reports saved before those fields existed.
     for s in &mut system_reports {
@@ -444,17 +486,29 @@ pub async fn reports_download(
         }
     }
 
-    // PDF Generation
-    const FONT_REGULAR: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
-    const FONT_BOLD: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
-    const FONT_ITALIC: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
-    const FONT_BOLD_ITALIC: &[u8] =
-        include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
-    const LOGO_BYTES: &[u8] =
-        include_bytes!("../static/dist/img/Logo_report.jpg");
+    let tests_metadata: Vec<TestMeta> = serde_json::from_str(
+        report.tests_metadata.as_deref().unwrap_or("[]"),
+    ).unwrap_or_default();
+
+    Ok(Some((report, system_reports, tests_metadata)))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: build_archive_policy_pdf
+// Renders a saved-policy compliance report into a PDF byte buffer. The
+// download and email handlers both call into this so there is one canonical
+// place where the PDF layout lives.
+// ─────────────────────────────────────────────────────────────────────────────
+fn build_archive_policy_pdf(
+    report: &Report,
+    system_reports: &[SystemReport],
+    tests_metadata: &[TestMeta],
+) -> Result<Vec<u8>, ()> {
+    const FONT_REGULAR:     &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Regular.ttf");
+    const FONT_BOLD:        &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Bold.ttf");
+    const FONT_ITALIC:      &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-Italic.ttf");
+    const FONT_BOLD_ITALIC: &[u8] = include_bytes!("../static/dist/fonts/LiberationSans-BoldItalic.ttf");
+    const LOGO_BYTES:       &[u8] = include_bytes!("../static/dist/img/Logo_report.jpg");
 
     let font_family = match (
         fonts::FontData::new(FONT_REGULAR.to_vec(), None),
@@ -462,16 +516,9 @@ pub async fn reports_download(
         fonts::FontData::new(FONT_ITALIC.to_vec(), None),
         fonts::FontData::new(FONT_BOLD_ITALIC.to_vec(), None),
     ) {
-        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) => fonts::FontFamily {
-            regular,
-            bold,
-            italic,
-            bold_italic,
-        },
-        _ => {
-            error!("Failed to load PDF fonts for report download {}", id);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        (Ok(regular), Ok(bold), Ok(italic), Ok(bold_italic)) =>
+            fonts::FontFamily { regular, bold, italic, bold_italic },
+        _ => { error!("Failed to load PDF fonts for archive policy report"); return Err(()); }
     };
 
     let mut doc = genpdf::Document::new(font_family);
@@ -479,10 +526,7 @@ pub async fn reports_download(
     let cursor = std::io::Cursor::new(LOGO_BYTES);
     let mut logo = match elements::Image::from_reader(cursor) {
         Ok(img) => img,
-        Err(e) => {
-            error!("Failed to load PDF logo for report {}: {}", id, e);
-            return StatusCode::INTERNAL_SERVER_ERROR.into_response();
-        }
+        Err(e) => { error!("Failed to load PDF logo: {}", e); return Err(()); }
     };
 
     doc.set_title(format!("OpenSCM Compliance Report - {}", report.policy_name));
@@ -494,9 +538,7 @@ pub async fn reports_download(
     let mut title = elements::Paragraph::new("OpenSCM Compliance Report");
     title.set_alignment(genpdf::Alignment::Center);
     doc.push(title.styled(
-        style::Style::new()
-            .with_font_size(30)
-            .bold()
+        style::Style::new().with_font_size(30).bold()
             .with_color(style::Color::Rgb(0, 0, 128)),
     ));
     doc.push(elements::Break::new(2.0));
@@ -529,41 +571,23 @@ pub async fn reports_download(
             report.policy_name,
             report.policy_version.as_deref().unwrap_or(""),
         ))),
-    ]) {
-        error!("Failed to add policy name row to PDF: {}", e);
-    }
+    ]) { error!("Failed to add policy name row to PDF: {}", e); }
 
     if let Err(e) = details_table.push_row(vec![
         cell(elements::Text::new("Description").styled(style::Style::new().bold())),
         cell(elements::Paragraph::new(
             report.policy_description.as_deref().unwrap_or("").to_string(),
         )),
-    ]) {
-        error!("Failed to add description row to PDF: {}", e);
-    }
+    ]) { error!("Failed to add description row to PDF: {}", e); }
 
     doc.push(details_table);
 
-    // ──────────────────────────────────────────────────────────────────────
     // Tests Summary — name + description of every test in the policy.
-    // Pulled from tests_metadata, the same JSON column the HTML view reads.
-    // Reports saved before tests_metadata was populated render no section
-    // (legacy reports remain valid; the block is skipped when the list is
-    // empty rather than rendering an empty bordered box).
-    // ──────────────────────────────────────────────────────────────────────
-    let tests_metadata: Vec<TestMeta> = serde_json::from_str(
-        report.tests_metadata.as_deref().unwrap_or("[]"),
-    )
-    .unwrap_or_default();
-
     if !tests_metadata.is_empty() {
         doc.push(elements::Break::new(1.0));
         doc.push(
-            elements::Text::new(format!(
-                "Tests in this Policy ({})",
-                tests_metadata.len(),
-            ))
-            .styled(style::Style::new().bold().with_font_size(14)),
+            elements::Text::new(format!("Tests in this Policy ({})", tests_metadata.len()))
+                .styled(style::Style::new().bold().with_font_size(14)),
         );
         doc.push(elements::Break::new(0.5));
 
@@ -573,38 +597,28 @@ pub async fn reports_download(
         if let Err(e) = tests_table.push_row(vec![
             cell(elements::Text::new("Test Name").styled(style::Style::new().bold())),
             cell(elements::Text::new("Description").styled(style::Style::new().bold())),
-        ]) {
-            error!("Failed to add tests summary header to PDF: {}", e);
-        }
+        ]) { error!("Failed to add tests summary header to PDF: {}", e); }
 
-        for tm in &tests_metadata {
-            let desc = if tm.description.trim().is_empty() {
-                "—".to_string()
-            } else {
-                tm.description.clone()
-            };
+        for tm in tests_metadata {
+            let desc = if tm.description.trim().is_empty() { "—".to_string() } else { tm.description.clone() };
             if let Err(e) = tests_table.push_row(vec![
                 cell(elements::Paragraph::new(&tm.name)),
                 cell(elements::Paragraph::new(&desc)),
-            ]) {
-                error!("Failed to add tests summary row to PDF: {}", e);
-            }
+            ]) { error!("Failed to add tests summary row to PDF: {}", e); }
         }
-
         doc.push(tests_table);
     }
 
     doc.push(elements::PageBreak::new());
 
     // Per-system audit section
-    for system in &system_reports {
+    for system in system_reports {
         doc.push(
             elements::Text::new(format!("Host Name: {}", system.system_name))
                 .styled(style::Style::new().bold().with_font_size(14)),
         );
         doc.push(elements::Break::new(0.5));
 
-        // M5: Count only FAIL results as violations — NA results are not failures.
         let compliant_count = system.results.iter().filter(|r| r.status == "PASS").count();
         let violation_count = system.results.iter().filter(|r| r.status == "FAIL").count();
 
@@ -615,38 +629,26 @@ pub async fn reports_download(
             cell(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
             cell(elements::Text::new(if system.is_passed { "Compliant" } else { "Non-Compliant" })
                 .styled(style::Style::new()
-                    .with_color(if system.is_passed {
-                        style::Color::Rgb(0, 128, 0)
-                    } else {
-                        style::Color::Rgb(200, 0, 0)
-                    })
+                    .with_color(if system.is_passed { style::Color::Rgb(0, 128, 0) } else { style::Color::Rgb(200, 0, 0) })
                     .bold())),
-        ]) {
-            error!("Failed to add compliance status row to PDF: {}", e);
-        }
+        ]) { error!("Failed to add compliance status row to PDF: {}", e); }
 
         if let Err(e) = summary_table.push_row(vec![
             cell(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
             cell(elements::Text::new(format!("Critical — {}", violation_count))),
-        ]) {
-            error!("Failed to add violation count row to PDF: {}", e);
-        }
+        ]) { error!("Failed to add violation count row to PDF: {}", e); }
 
         if let Err(e) = summary_table.push_row(vec![
             cell(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
             cell(elements::Text::new(format!("{}", compliant_count))),
-        ]) {
-            error!("Failed to add compliant count row to PDF: {}", e);
-        }
+        ]) { error!("Failed to add compliant count row to PDF: {}", e); }
 
         doc.push(summary_table);
         doc.push(elements::Break::new(1.0));
 
         // Rules breakdown
-        doc.push(
-            elements::Text::new("Audit Rules Detailed Breakdown")
-                .styled(style::Style::new().bold().with_font_size(14)),
-        );
+        doc.push(elements::Text::new("Audit Rules Detailed Breakdown")
+            .styled(style::Style::new().bold().with_font_size(14)));
         doc.push(elements::Break::new(0.5));
         let mut rules_table = elements::TableLayout::new(vec![4, 1]);
         rules_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
@@ -654,9 +656,7 @@ pub async fn reports_download(
         if let Err(e) = rules_table.push_row(vec![
             cell(elements::Text::new("Rule Name").styled(style::Style::new().bold())),
             cell(elements::Text::new("Status").styled(style::Style::new().bold())),
-        ]) {
-            error!("Failed to add rules table header to PDF: {}", e);
-        }
+        ]) { error!("Failed to add rules table header to PDF: {}", e); }
 
         for res in &system.results {
             let (status_text, status_color) = match res.status.as_str() {
@@ -665,39 +665,56 @@ pub async fn reports_download(
                 "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
                 _      => ("—",    style::Color::Rgb(150, 150, 150)),
             };
-
             if let Err(e) = rules_table.push_row(vec![
                 cell(elements::Paragraph::new(&res.test_name)),
                 cell(elements::Text::new(status_text)
                     .styled(style::Style::new().with_color(status_color).bold())),
-            ]) {
-                error!("Failed to add rule row to PDF: {}", e);
-            }
+            ]) { error!("Failed to add rule row to PDF: {}", e); }
         }
-
         doc.push(rules_table);
         doc.push(elements::PageBreak::new());
     }
 
     doc.push(elements::Break::new(2.0));
-    doc.push(
-        elements::Paragraph::new(
-            "Note: This report contains confidential information about your infrastructure \
-             and should be treated as such. Unauthorized distribution is strictly prohibited.",
-        )
-        .styled(
-            style::Style::new()
-                .with_font_size(10)
-                .with_color(style::Color::Rgb(100, 100, 100)),
-        ),
-    );
+    doc.push(elements::Paragraph::new(
+        "Note: This report contains confidential information about your infrastructure \
+         and should be treated as such. Unauthorized distribution is strictly prohibited.",
+    ).styled(style::Style::new().with_font_size(10).with_color(style::Color::Rgb(100, 100, 100))));
 
-    // Render PDF
     let mut buffer = Vec::new();
-    if let Err(e) = doc.render(&mut buffer) {
-        error!("Failed to render PDF for report {}: {}", id, e);
-        return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+    doc.render(&mut buffer).map_err(|e| { error!("Failed to render archive policy PDF: {}", e); })?;
+    Ok(buffer)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/download/{id}
+// Generate and stream a PDF of a saved policy compliance report.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn reports_download(
+    auth: AuthSession,
+    Path(id): Path<i64>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
     }
+
+    let (report, system_reports, tests_metadata) =
+        match fetch_archive_policy_report(&pool, &auth.tenant_id, id).await {
+            Ok(Some(tup)) => tup,
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+            Err(e) => {
+                error!(error = ?e, report_id = %id, "Failed to fetch report for download");
+                return StatusCode::INTERNAL_SERVER_ERROR.into_response();
+            }
+        };
+
+    let buffer = match build_archive_policy_pdf(&report, &system_reports, &tests_metadata) {
+        Ok(b) => b,
+        Err(_) => return StatusCode::INTERNAL_SERVER_ERROR.into_response(),
+    };
 
     Response::builder()
         .status(StatusCode::OK)
@@ -711,6 +728,62 @@ pub async fn reports_download(
             error!("Failed to build PDF response for report {}: {}", id, e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         })
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /reports/email/{id}
+// Email the archive-policy report PDF to the logged-in user's address.
+// Role: Viewer (same as download — no information escapes outside the
+// configured mail relay; less privileged than the download itself).
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn reports_email(
+    auth: AuthSession,
+    Path(id): Path<i64>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    let back = format!("/reports/view/{}", id);
+
+    let mailer = match crate::email::Mailer::from_db(&pool).await {
+        Some(m) => m,
+        None => return flash_back(&back, false, "Email is not configured. Configure SMTP in Settings first."),
+    };
+
+    let to = match user_email(&pool, auth.userid, &auth.tenant_id).await {
+        Some(e) => e,
+        None => return flash_back(&back, false, "Your account has no email address. Edit your profile and add one first."),
+    };
+
+    let (report, system_reports, tests_metadata) =
+        match fetch_archive_policy_report(&pool, &auth.tenant_id, id).await {
+            Ok(Some(tup)) => tup,
+            Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+            Err(e) => {
+                error!(error = ?e, report_id = %id, "Failed to fetch report for email");
+                return flash_back(&back, false, "Failed to load report.");
+            }
+        };
+
+    let bytes = match build_archive_policy_pdf(&report, &system_reports, &tests_metadata) {
+        Ok(b) => b,
+        Err(_) => return flash_back(&back, false, "Failed to generate PDF report."),
+    };
+
+    let subject = format!("OpenSCM Compliance Report — {}", report.policy_name);
+    let html_body = report_email_body(
+        &report.policy_name,
+        report.policy_version.as_deref().unwrap_or(""),
+        &report.submission_date,
+    );
+    let filename = format!("OpenSCM_Report_{}.pdf", id);
+
+    match mailer.send_with_attachment(&to, &subject, &html_body, &filename, "application/pdf", bytes).await {
+        Ok(_) => flash_back(&back, true, &format!("Report emailed to {}.", to)),
+        Err(e) => flash_back(&back, false, &format!("SMTP send failed: {}", e)),
+    }
 }
 
 
@@ -911,6 +984,7 @@ pub async fn system_reports_view(
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);
     context.insert("system_exists", &system_exists);
+    context.insert("is_smtp_configured", &is_smtp_configured(&pool).await);
     render_template(&tera, Some(&pool), "system_report_view.html", context, Some(auth))
         .await
         .into_response()
@@ -1256,4 +1330,137 @@ pub async fn system_report_live_download(
         )
         .body(axum::body::Body::from(buffer))
         .unwrap_or_else(|_| StatusCode::INTERNAL_SERVER_ERROR.into_response())
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /reports/system/email/{id}
+// Email the archive system-report PDF to the logged-in user's address.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn system_reports_email(
+    auth: AuthSession,
+    Path(id): Path<i64>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    let back = format!("/reports/system/view/{}", id);
+
+    let mailer = match crate::email::Mailer::from_db(&pool).await {
+        Some(m) => m,
+        None => return flash_back(&back, false, "Email is not configured. Configure SMTP in Settings first."),
+    };
+
+    let to = match user_email(&pool, auth.userid, &auth.tenant_id).await {
+        Some(e) => e,
+        None => return flash_back(&back, false, "Your account has no email address. Edit your profile and add one first."),
+    };
+
+    let row = match sqlx::query_as::<_, SavedSystemReport>(
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                system_id, system_name, submitter_name, report_data
+         FROM system_reports
+         WHERE id = ? AND tenant_id = ?",
+    )
+    .bind(id).bind(&auth.tenant_id)
+    .fetch_optional(&pool).await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return StatusCode::NOT_FOUND.into_response(),
+        Err(e) => {
+            error!(error = ?e, report_id = %id, "Failed to fetch system report for email");
+            return flash_back(&back, false, "Failed to load report.");
+        }
+    };
+
+    let data: SystemReportData = match serde_json::from_str(row.report_data.as_deref().unwrap_or("{}")) {
+        Ok(d) => d,
+        Err(e) => {
+            error!("Failed to deserialize system report data for email: {}", e);
+            return flash_back(&back, false, "Failed to load report data.");
+        }
+    };
+
+    let subtitle = format!(
+        "Saved on {}  ·  by {}",
+        row.submission_date,
+        row.submitter_name.as_deref().unwrap_or("Unknown"),
+    );
+
+    let bytes = match build_system_report_pdf(&data, &subtitle) {
+        Ok(b) => b,
+        Err(_) => return flash_back(&back, false, "Failed to generate PDF report."),
+    };
+
+    let subject = format!("OpenSCM System Report — {}", data.system_name);
+    let html_body = report_email_body(&data.system_name, "", &row.submission_date);
+    let filename = format!("OpenSCM_SystemReport_{}_{}.pdf",
+        data.system_name.replace(' ', "_"), id);
+
+    match mailer.send_with_attachment(&to, &subject, &html_body, &filename, "application/pdf", bytes).await {
+        Ok(_) => flash_back(&back, true, &format!("Report emailed to {}.", to)),
+        Err(e) => flash_back(&back, false, &format!("SMTP send failed: {}", e)),
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/report/{id}/email
+// Email the live system-report PDF (computed against the current state) to
+// the logged-in user's address.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn system_report_live_email(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    let back = format!("/systems/report/{}", id);
+
+    let mailer = match crate::email::Mailer::from_db(&pool).await {
+        Some(m) => m,
+        None => return flash_back(&back, false, "Email is not configured. Configure SMTP in Settings first."),
+    };
+
+    let to = match user_email(&pool, auth.userid, &auth.tenant_id).await {
+        Some(e) => e,
+        None => return flash_back(&back, false, "Your account has no email address. Edit your profile and add one first."),
+    };
+
+    let data = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
+        Ok(d) => d,
+        Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
+            return Redirect::to("/systems?error_message=System+not+found").into_response();
+        }
+        Err(e) => {
+            error!(error = ?e, system_id = %id, "Failed to fetch live system report for email");
+            return flash_back(&back, false, "Failed to load report.");
+        }
+    };
+
+    use chrono::Local;
+    let now = Local::now().format("%Y-%m-%d %H:%M").to_string();
+    let subtitle = format!("Live Report  ·  {}", now);
+
+    let bytes = match build_system_report_pdf(&data, &subtitle) {
+        Ok(b) => b,
+        Err(_) => return flash_back(&back, false, "Failed to generate PDF report."),
+    };
+
+    let subject = format!("OpenSCM System Report — {} (live)", data.system_name);
+    let html_body = report_email_body(&data.system_name, "", &now);
+    let filename = format!("OpenSCM_SystemReport_{}_live.pdf",
+        data.system_name.replace(' ', "_"));
+
+    match mailer.send_with_attachment(&to, &subject, &html_body, &filename, "application/pdf", bytes).await {
+        Ok(_) => flash_back(&back, true, &format!("Report emailed to {}.", to)),
+        Err(e) => flash_back(&back, false, &format!("SMTP send failed: {}", e)),
+    }
 }

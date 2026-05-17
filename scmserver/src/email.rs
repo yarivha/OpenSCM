@@ -9,7 +9,10 @@
 use lettre::{
     AsyncSmtpTransport, AsyncTransport, Message, Tokio1Executor,
     transport::smtp::authentication::Credentials,
-    message::header::ContentType,
+    message::{
+        header::ContentType,
+        Attachment, MultiPart, SinglePart,
+    },
 };
 use sqlx::{SqlitePool, Row};
 use tracing::{error, info};
@@ -88,6 +91,53 @@ impl Mailer {
         })?;
 
         info!("Email sent to {}", to);
+        Ok(())
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // send_with_attachment — HTML body + a single binary attachment.
+    // Used by the "Email Me PDF" buttons on the report view pages. `mime`
+    // should be a parsable Content-Type like "application/pdf".
+    // ─────────────────────────────────────────────────────────────────────────
+    pub async fn send_with_attachment(
+        &self,
+        to: &str,
+        subject: &str,
+        html_body: &str,
+        filename: &str,
+        mime: &str,
+        bytes: Vec<u8>,
+    ) -> Result<(), String> {
+        let mime_parsed: ContentType = mime.parse()
+            .map_err(|e| format!("Invalid attachment MIME '{}': {}", mime, e))?;
+
+        let html_part = SinglePart::builder()
+            .header(ContentType::TEXT_HTML)
+            .body(html_body.to_string());
+
+        // Attachment::new builds a SinglePart with Content-Disposition: attachment
+        // and the filename baked in.
+        let attachment = Attachment::new(filename.to_string())
+            .body(bytes, mime_parsed);
+
+        let multipart = MultiPart::mixed()
+            .singlepart(html_part)
+            .singlepart(attachment);
+
+        let message = Message::builder()
+            .from(self.from.parse().map_err(|e| format!("Invalid from address: {}", e))?)
+            .to(to.parse().map_err(|e| format!("Invalid to address: {}", e))?)
+            .subject(subject)
+            .multipart(multipart)
+            .map_err(|e| format!("Failed to build message: {}", e))?;
+
+        self.transport.send(message).await.map_err(|e| {
+            let msg = format!("SMTP send error: {}", e);
+            error!("{}", msg);
+            msg
+        })?;
+
+        info!("Email with attachment '{}' sent to {}", filename, to);
         Ok(())
     }
 

@@ -227,6 +227,14 @@
           <a class="btn btn-primary btn-sm ml-2" href="/reports/system/download/{{ meta.id }}">
             <i class="fas fa-file-pdf mr-1"></i> Download PDF
           </a>
+          {% if is_smtp_configured %}
+          <form method="post" action="/reports/system/email/{{ meta.id }}" class="d-inline">
+            <button type="submit" class="btn btn-outline-primary btn-sm ml-2"
+                    title="Send the PDF to your account email">
+              <i class="fas fa-envelope mr-1"></i> Email Me PDF
+            </button>
+          </form>
+          {% endif %}
           {% if is_runner %}
             {% if system_exists %}
             <a class="btn btn-outline-primary btn-sm ml-2" href="/systems/report/{{ meta.system_id }}">

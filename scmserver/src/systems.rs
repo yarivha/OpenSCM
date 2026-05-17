@@ -1495,6 +1495,7 @@ pub async fn system_report(
     context.insert("report", &report);
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);
+    context.insert("is_smtp_configured", &crate::reports::is_smtp_configured(&pool).await);
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
     }

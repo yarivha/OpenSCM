@@ -206,6 +206,14 @@
           <a class="btn btn-primary btn-sm ml-2" href="/policies/download/{{ report.policy_id }}">
             <i class="fas fa-file-pdf mr-1"></i> Download PDF
           </a>
+          {% if is_smtp_configured %}
+          <form method="post" action="/policies/email/{{ report.policy_id }}" class="d-inline">
+            <button type="submit" class="btn btn-outline-primary btn-sm ml-2"
+                    title="Send the PDF to your account email">
+              <i class="fas fa-envelope mr-1"></i> Email Me PDF
+            </button>
+          </form>
+          {% endif %}
           <a class="btn btn-success btn-sm ml-2 {% if not is_runner %}disabled{% endif %}"
              href="{% if is_runner %}/reports/save/{{ report.policy_id }}{% else %}#{% endif %}"
              {% if not is_runner %}style="cursor: not-allowed; opacity: 0.6;"{% endif %}>
