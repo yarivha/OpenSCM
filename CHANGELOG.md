@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.3.8] - 2026-05-17
+
 ### Changed
 - **`offline_threshold` setting now stored in minutes (was seconds)** — aligned with `auto_prune_inactive`, which was already minutes, so both fields use the same unit and a quick visual comparison is meaningful (e.g. "mark offline after 60 min, delete after 1440 min"). Default changed from `3600` (s) to `60` (min) — same effective duration. The Admin Settings page label now reads "Offline Threshold (minutes)" with `min="1" max="1440"` on the input. `systems.rs` multiplies by 60 at SQL bind time, matching how `prune_inactive_systems` has always handled `auto_prune_inactive`. Schema migration **v15 → v16** divides every existing tenant's stored value by 60 (integer division, clamped to a minimum of 1) so upgrade is a no-op for the user — the column unit changes but the behaviour stays the same.
 
