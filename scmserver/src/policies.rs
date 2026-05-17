@@ -1119,11 +1119,13 @@ fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
 
     // ──────────────────────────────────────────────────────────────────────
     // Tests Summary — name + description of every test in the policy.
-    // Uses tests_metadata already collected from the live DB above, so the
-    // section always reflects current test definitions for on-demand PDFs.
+    // Renders on its own page so the cover (title + Report Details) and the
+    // test catalog don't compete for space on page 1. tests_metadata is
+    // already collected from the live DB above, so this section always
+    // reflects current test definitions for on-demand PDFs.
     // ──────────────────────────────────────────────────────────────────────
     if !report_data.tests_metadata.is_empty() {
-        doc.push(elements::Break::new(1.0));
+        doc.push(elements::PageBreak::new());
         doc.push(
             elements::Text::new(format!(
                 "Tests in this Policy ({})",

@@ -586,8 +586,10 @@ fn build_archive_policy_pdf(
     doc.push(details_table);
 
     // Tests Summary — name + description of every test in the policy.
+    // Renders on its own page after the Report Details so the cover and
+    // the test catalog don't compete for space on page 1.
     if !tests_metadata.is_empty() {
-        doc.push(elements::Break::new(1.0));
+        doc.push(elements::PageBreak::new());
         doc.push(
             elements::Text::new(format!("Tests in this Policy ({})", tests_metadata.len()))
                 .styled(style::Style::new().bold().with_font_size(14)),
