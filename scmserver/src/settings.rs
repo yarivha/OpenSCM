@@ -93,7 +93,7 @@ pub async fn settings(
 
     let settings = Settings {
         schema_version:    schema_version.to_string(),
-        offline_threshold: map.get("offline_threshold").cloned().unwrap_or_else(|| "3600".to_string()),
+        offline_threshold: map.get("offline_threshold").cloned().unwrap_or_else(|| "60".to_string()),
         auto_prune_inactive: map.get("auto_prune_inactive").cloned().unwrap_or_else(|| "0".to_string()),
         compliance_sat:    map.get("compliance_sat").cloned().unwrap_or_else(|| "80".to_string()),
         compliance_marginal: map.get("compliance_marginal").cloned().unwrap_or_else(|| "60".to_string()),
@@ -106,16 +106,10 @@ pub async fn settings(
         app_url:       map.get("app_url").cloned().unwrap_or_default(),
     };
 
-    
-    let offline_minutes = map.get("offline_threshold")
-        .and_then(|v| v.parse::<i64>().ok())
-        .unwrap_or(600) / 60;
-
     let mut context = Context::new();
     if let Some(msg) = query.error_message { context.insert("error_message", &msg); }
     if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
     context.insert("settings", &settings);
-    context.insert("offline_minutes", &offline_minutes);
 
     render_template(&tera, Some(&pool), "settings.html", context, Some(auth))
         .await
@@ -146,8 +140,8 @@ pub async fn settings_save(
     let raw_marginal     = form_data.get("compliance_marginal").and_then(|v| v.first()).cloned().unwrap_or_default();
 
     let threshold: i64 = match raw_threshold.parse() {
-        Ok(v) if v >= 60 => v,
-        _ => return Redirect::to("/settings?error_message=Offline+threshold+must+be+a+number+%E2%89%A560+seconds").into_response(),
+        Ok(v) if v >= 1 => v,
+        _ => return Redirect::to("/settings?error_message=Offline+threshold+must+be+a+positive+number+of+minutes").into_response(),
     };
 
     let auto_prune: i64 = match raw_auto_prune.parse::<i64>() {

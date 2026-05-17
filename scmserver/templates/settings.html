@@ -72,16 +72,15 @@
                 <div class="form-group">
                   <label for="offline_threshold">
                     <i class="fas fa-clock mr-1 text-muted"></i>
-                    Offline Threshold (seconds)
+                    Offline Threshold (minutes)
                   </label>
                   <input type="number" class="form-control" id="offline_threshold"
                     name="offline_threshold" value="{{ settings.offline_threshold }}"
-                    min="60" max="86400" required>
+                    min="1" max="1440" required>
                   <small class="form-text text-muted">
-                    Time without activity before a system is marked offline.
-                    Current value: <strong>{{ settings.offline_threshold }}s</strong>
-                    ({{ offline_minutes }} minutes)
-		  </small>
+                    Minutes without activity before a system is marked offline.
+                    Current value: <strong>{{ settings.offline_threshold }} min</strong>
+                  </small>
                 </div>
               </div>
               <div class="col-md-6">

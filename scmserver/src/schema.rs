@@ -511,7 +511,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Default settings
     sqlx::query(
         "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
-        ('default', 'offline_threshold', '3600', 'Seconds without activity before system is marked offline'),
+        ('default', 'offline_threshold', '60', 'Minutes without activity before system is marked offline'),
         ('default', 'auto_prune_inactive', '0', 'Minutes without activity before an inactive system is auto-deleted (0 = disabled)'),
         ('default', 'compliance_sat', '80', 'Minimum compliance percentage for SAT status'),
         ('default', 'compliance_marginal', '60', 'Minimum compliance percentage for MARGINAL status'),
@@ -1239,6 +1239,29 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE schema_info SET version = 15")
             .execute(pool).await?;
         info!("Schema migration v14 → v15 complete.");
+    }
+
+    // v15 → v16: convert every tenant's offline_threshold from seconds to minutes.
+    // Before this migration the setting was stored as seconds (default 3600); from
+    // here it is stored as minutes (default 60) so it lines up with the
+    // auto_prune_inactive setting, which was always minutes. We round to whole
+    // minutes by integer division and clamp anything below 1 minute back up to 1
+    // so the column never lands on zero.
+    if version < 16 {
+        info!("Running schema migration v15 → v16 (offline_threshold seconds → minutes)...");
+        sqlx::query(
+            "UPDATE settings
+                SET value = CASE
+                    WHEN CAST(value AS INTEGER) / 60 < 1 THEN '1'
+                    ELSE CAST(CAST(value AS INTEGER) / 60 AS TEXT)
+                END,
+                description = 'Minutes without activity before system is marked offline'
+              WHERE skey = 'offline_threshold'",
+        )
+        .execute(pool).await?;
+        sqlx::query("UPDATE schema_info SET version = 16")
+            .execute(pool).await?;
+        info!("Schema migration v15 → v16 complete.");
     }
 
     Ok(())

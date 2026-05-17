@@ -49,13 +49,16 @@ pub async fn systems(
     let filter = params.get("filter").map(|s| s.to_lowercase());
 
     // Fetch threshold first so we can compute is_offline server-side in SQL.
-    let offline_threshold: i64 = sqlx::query_scalar(
+    // Stored in MINUTES (aligned with auto_prune_inactive); the SQL placeholder
+    // expects seconds, so we multiply by 60 at bind time below.
+    let offline_threshold_min: i64 = sqlx::query_scalar(
         "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'offline_threshold'"
     )
     .bind(&auth.tenant_id)
     .fetch_one(&pool)
     .await
-    .unwrap_or(3600);
+    .unwrap_or(60);
+    let offline_threshold = offline_threshold_min * 60;
 
     let gc        = "GROUP_CONCAT(sg.name)".to_string();
     let created   = "COALESCE(strftime('%Y-%m-%dT%H:%M:%SZ', s.created_date), '')".to_string();
