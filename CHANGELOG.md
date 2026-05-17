@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Database reset is now an Admin action, scoped to the caller's tenant** (was Superuser-only). The reset SQL was already filtering by `auth.tenant_id` end-to-end, so dropping the role gate from Superuser to Admin only widens *who* can invoke it — an Admin can wipe their own tenant's systems / groups / tests / policies / reports / users, and nothing else. Superuser still has every Admin power they used to (`Superuser > Admin`), so the CE single-tenant case and the SaaS platform-admin-of-`default`-tenant case keep working unchanged. Template gates split so the Email tab stays Superuser-only (SMTP is platform-global in SaaS) while the Danger Zone tab / card / confirmation modal move to `is_admin`. UI copy clarified: "Permanently deletes all data **for this tenant**…" / "This will permanently delete **for this tenant only**…" so a tenant Admin doesn't fear wiping the platform.
+
 ---
 
 ## [0.3.8] - 2026-05-17

@@ -366,8 +366,11 @@ pub async fn settings_reset(
     pool: Extension<SqlitePool>,
     Form(form): Form<ResetForm>,
 ) -> impl IntoResponse {
-    // Superuser only
-    if auth::authorize(&auth.role, UserRole::Superuser).is_some() {
+    // Admin or higher. The reset is always scoped to the caller's own tenant
+    // via `auth.tenant_id` below — an Admin can only wipe their own tenant,
+    // and the Superuser-of-default-tenant case (CE single-tenant + SaaS
+    // platform admin) keeps working unchanged because Superuser > Admin.
+    if auth::authorize(&auth.role, UserRole::Admin).is_some() {
         return Redirect::to("/settings?error_message=Access+denied").into_response();
     }
 

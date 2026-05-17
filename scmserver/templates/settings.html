@@ -55,6 +55,8 @@
               <i class="fas fa-envelope mr-1"></i> Email
             </a>
           </li>
+          {% endif %}
+          {% if is_admin %}
           <li class="nav-item">
             <a class="nav-link text-danger" id="danger-tab" data-toggle="tab" href="#danger" role="tab">
               <i class="fas fa-exclamation-triangle mr-1"></i> Danger Zone
@@ -342,8 +344,8 @@
           </div>
           {% endif %}
 
-          <!-- Danger Zone Tab (Superuser only) -->
-          {% if is_superuser %}
+          <!-- Danger Zone Tab (Admin or higher; scoped to caller's tenant) -->
+          {% if is_admin %}
           <div class="tab-pane fade" id="danger" role="tabpanel">
             <div class="row">
               <div class="col-12">
@@ -356,8 +358,9 @@
                       <div>
                         <strong>Clean Database</strong>
                         <p class="text-muted mb-0" style="font-size:0.88rem;">
-                          Permanently deletes all systems, groups, tests, policies, reports, results, and users —
-                          except the primary admin account and its credentials. Settings, SMTP configuration, and the default tenant signing keys are preserved.
+                          Permanently deletes all data <strong>for this tenant</strong> — systems, groups, tests,
+                          policies, reports, results, and users — except the primary admin account and its credentials.
+                          Settings, SMTP configuration, and the default tenant signing keys are preserved.
                           <strong>This cannot be undone.</strong>
                         </p>
                       </div>
@@ -388,7 +391,7 @@
 
       </form>
 
-      {% if is_superuser %}
+      {% if is_admin %}
       <!-- Reset confirmation modal (kept outside main form to avoid nesting) -->
       <div class="modal fade" id="resetModal" tabindex="-1" role="dialog">
         <div class="modal-dialog modal-dialog-centered" role="document">
@@ -399,7 +402,7 @@
             </div>
             <form method="post" action="/settings/reset">
               <div class="modal-body">
-                <p>This will permanently delete:</p>
+                <p>This will permanently delete <strong>for this tenant only</strong>:</p>
                 <ul style="font-size:0.9rem;">
                   <li>All systems and scan results</li>
                   <li>All groups, tests, and policies</li>
