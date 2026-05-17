@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Editing the bootstrap admin's name or email aborted with "The bootstrap admin role cannot be changed"** — the v9 trigger `protect_bootstrap_admin_role` was declared `BEFORE UPDATE OF role`, which in SQLite fires whenever the `role` column appears in the UPDATE statement's SET clause regardless of whether the value actually changes. The user-edit handler always re-passes the current role to keep one canonical UPDATE shape, so editing only name/email of `users.id = 1` (default tenant) tripped the trigger. Trigger rebuilt with an additional `AND NEW.role != OLD.role` guard in its WHEN clause; new schema migration **v16 → v17** drops and recreates it on already-upgraded installs, the fresh-install path and the v8→v9 source both updated to match. The guarantee (you can never *change* the bootstrap admin's role) is preserved.
+
 ### Added
 - **Hook for Policy Store update badge** — new `set_store_update_provider(Arc<dyn Fn(&str) -> u32>)` registration function in `handlers.rs`, mirroring the existing `enable_saas_mode()` pattern. CE itself never registers a provider, so `store_update_count` is always 0 in `render_template` and the new template branch in `base.html` (`{% if store_update_count > 0 %}` red badge on the Policy Store sidebar link) stays hidden — exactly zero behaviour change for CE-only installs. SaaS registers a provider backed by an hourly background refresh so each tenant Admin sees how many of their installed policies have a newer version waiting in the store.
 

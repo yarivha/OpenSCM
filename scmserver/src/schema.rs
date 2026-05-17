@@ -617,10 +617,14 @@ pub async fn initialize_database(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Bootstrap admin role protection trigger.
+    // The NEW.role != OLD.role guard matters: SQLite's `BEFORE UPDATE OF role`
+    // fires whenever `role` appears in the UPDATE statement's SET clause,
+    // not only when the value actually changes — so without it, a routine
+    // edit of name/email that re-passes the current role would abort.
     sqlx::query(
         "CREATE TRIGGER IF NOT EXISTS protect_bootstrap_admin_role
        BEFORE UPDATE OF role ON users
-       WHEN OLD.id = 1 AND OLD.tenant_id = 'default'
+       WHEN OLD.id = 1 AND OLD.tenant_id = 'default' AND NEW.role != OLD.role
        BEGIN
            SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
        END"
@@ -1041,10 +1045,11 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     if version < 9 {
         info!("Running schema migration v8 → v9 (protect bootstrap admin role)...");
 
+        // NEW.role != OLD.role guard — see initialize_database for rationale.
         sqlx::query(
             "CREATE TRIGGER IF NOT EXISTS protect_bootstrap_admin_role
        BEFORE UPDATE OF role ON users
-       WHEN OLD.id = 1 AND OLD.tenant_id = 'default'
+       WHEN OLD.id = 1 AND OLD.tenant_id = 'default' AND NEW.role != OLD.role
        BEGIN
            SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
        END"
@@ -1262,6 +1267,33 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE schema_info SET version = 16")
             .execute(pool).await?;
         info!("Schema migration v15 → v16 complete.");
+    }
+
+    // v16 → v17: rebuild the bootstrap-admin role-protection trigger so it
+    // only fires when NEW.role actually differs from OLD.role. The v9
+    // version of the trigger fired on any UPDATE that mentioned `role` in
+    // its SET clause, which broke routine name/email edits of the bootstrap
+    // admin: the handler always re-passes the current role to keep the SQL
+    // shape uniform, and the trigger then aborted with "The bootstrap admin
+    // role cannot be changed" even though no role was actually changing.
+    // Drop + recreate is safe — both versions cover exactly the same case
+    // (genuine role mutations of users.id=1 in the default tenant).
+    if version < 17 {
+        info!("Running schema migration v16 → v17 (rebuild bootstrap-admin trigger)...");
+        sqlx::query("DROP TRIGGER IF EXISTS protect_bootstrap_admin_role")
+            .execute(pool).await?;
+        sqlx::query(
+            "CREATE TRIGGER protect_bootstrap_admin_role
+       BEFORE UPDATE OF role ON users
+       WHEN OLD.id = 1 AND OLD.tenant_id = 'default' AND NEW.role != OLD.role
+       BEGIN
+           SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
+       END"
+        )
+        .execute(pool).await?;
+        sqlx::query("UPDATE schema_info SET version = 17")
+            .execute(pool).await?;
+        info!("Schema migration v16 → v17 complete.");
     }
 
     Ok(())
