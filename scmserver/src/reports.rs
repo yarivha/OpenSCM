@@ -982,6 +982,12 @@ pub async fn system_reports_view(
     .await
     .unwrap_or(0);
 
+    // Live-DB test metadata so the template can pop a detail modal when a
+    // test row is clicked. Snapshots can be older than the current tests
+    // table — rows whose name no longer matches any live test fall through
+    // to plain text (no link), same as the policy archive view does.
+    let tests_metadata = crate::systems::fetch_tenant_tests_metadata(&auth.tenant_id, &pool).await;
+
     let mut context = Context::new();
     context.insert("meta", &row);
     context.insert("report", &report_data);
@@ -989,6 +995,7 @@ pub async fn system_reports_view(
     context.insert("compliance_marginal", &compliance_marginal);
     context.insert("system_exists", &system_exists);
     context.insert("is_smtp_configured", &is_smtp_configured(&pool).await);
+    context.insert("tests_metadata", &tests_metadata);
     if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
     if let Some(msg) = query.error_message   { context.insert("error_message",   &msg); }
     render_template(&tera, Some(&pool), "system_report_view.html", context, Some(auth))

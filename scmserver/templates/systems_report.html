@@ -168,7 +168,24 @@
             <tbody>
               {% for res in policy.results %}
               <tr>
-                <td style="padding-left: 20px;">{{ res.test_name }}</td>
+                <td style="padding-left: 20px;">
+                  {% set meta = tests_metadata | filter(attribute="name", value=res.test_name) | first %}
+                  {% if meta %}
+                    <span class="test-name-link"
+                      style="cursor: pointer;"
+                      data-toggle="modal"
+                      data-target="#testDetailModal"
+                      data-name="{{ res.test_name }}"
+                      data-description="{{ meta.description }}"
+                      data-rational="{{ meta.rational }}"
+                      data-remediation="{{ meta.remediation }}"
+                      data-status="{{ res.status }}">
+                      <i class="fas fa-info-circle text-muted mr-1 text-xs"></i>{{ res.test_name }}
+                    </span>
+                  {% else %}
+                    {{ res.test_name }}
+                  {% endif %}
+                </td>
                 <td class="text-center">
                   {% if res.status == "PASS" %}
                     <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
@@ -242,4 +259,77 @@
     </div>
   </section>
 </div>
+
+<!-- Test Detail Modal -->
+<div class="modal fade" id="testDetailModal" tabindex="-1" role="dialog" aria-labelledby="testDetailModalLabel" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header">
+        <h5 class="modal-title" id="testDetailModalLabel">
+          <i class="fas fa-clipboard-list mr-2"></i>
+          <span id="modal-test-name"></span>
+        </h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="mb-3">
+          <span id="modal-status-badge"></span>
+        </div>
+        <div class="mb-3">
+          <h6 class="font-weight-bold text-primary"><i class="fas fa-info-circle mr-1"></i> Description</h6>
+          <p class="text-sm" id="modal-description"></p>
+        </div>
+        <hr>
+        <div class="mb-3">
+          <h6 class="font-weight-bold text-warning"><i class="fas fa-search mr-1"></i> Check Procedure</h6>
+          <p class="text-sm" id="modal-rational"></p>
+        </div>
+        <hr>
+        <div class="mb-3">
+          <h6 class="font-weight-bold text-success"><i class="fas fa-wrench mr-1"></i> Remediation</h6>
+          <p class="text-sm" id="modal-remediation"></p>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">
+          <i class="fas fa-times mr-1"></i> Close
+        </button>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  $('#testDetailModal').on('show.bs.modal', function (event) {
+    var trigger = $(event.relatedTarget);
+    var modal = $(this);
+    modal.find('#modal-test-name').text(trigger.data('name'));
+    modal.find('#modal-description').text(trigger.data('description'));
+    modal.find('#modal-rational').text(trigger.data('rational'));
+    modal.find('#modal-remediation').text(trigger.data('remediation'));
+
+    var status = trigger.data('status');
+    if (status === 'PASS') {
+      modal.find('#modal-status-badge').html(
+        '<span class="badge badge-success"><i class="fas fa-check-circle mr-1"></i> PASS</span>'
+      );
+    } else if (status === 'NA') {
+      modal.find('#modal-status-badge').html(
+        '<span class="badge badge-secondary"><i class="fas fa-minus-circle mr-1"></i> NA</span>'
+      );
+    } else if (status === 'NOT_SCANNED') {
+      modal.find('#modal-status-badge').html(
+        '<span class="badge badge-secondary"><i class="fas fa-question-circle mr-1"></i> Not Scanned</span>'
+      );
+    } else {
+      modal.find('#modal-status-badge').html(
+        '<span class="badge badge-danger"><i class="fas fa-times-circle mr-1"></i> FAIL</span>'
+      );
+    }
+  });
+</script>
 {% endblock %}

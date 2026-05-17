@@ -23,7 +23,7 @@ use std::collections::BTreeMap;
 use crate::handlers::{normalize_status, is_system_passed};
 use crate::models::{
     ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
-    IndividualResult, PolicyResultGroup, SystemReportData,
+    IndividualResult, PolicyResultGroup, SystemReportData, TestMeta,
 };
 use crate::auth::{self};
 use crate::handlers::{render_template, parse_form_data};
@@ -1491,11 +1491,18 @@ pub async fn system_report(
     .await
     .unwrap_or(60);
 
+    // Pull live test metadata so the template can pop a detail modal when a
+    // test row is clicked (mirrors the policy-report UX). Looked up by name
+    // in the template; tests deleted/renamed since this report was rendered
+    // simply fall through to plain text — no link.
+    let tests_metadata = fetch_tenant_tests_metadata(&auth.tenant_id, &pool).await;
+
     let mut context = Context::new();
     context.insert("report", &report);
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);
     context.insert("is_smtp_configured", &crate::reports::is_smtp_configured(&pool).await);
+    context.insert("tests_metadata", &tests_metadata);
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
     }
@@ -1505,4 +1512,36 @@ pub async fn system_report(
     render_template(&tera, Some(&pool), "systems_report.html", context, Some(auth))
         .await
         .into_response()
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: fetch_tenant_tests_metadata
+// Pulls every test (name + description + rational + remediation) for the
+// given tenant, used by the system-report views so the template can pop a
+// detail modal when a test row is clicked. Returns an empty vec on DB error
+// — the template just falls back to non-clickable test names. Also re-used
+// by reports.rs::system_reports_view (archive flavour).
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn fetch_tenant_tests_metadata(
+    tenant_id: &str,
+    pool: &SqlitePool,
+) -> Vec<TestMeta> {
+    let rows = sqlx::query(
+        "SELECT name, description, rational, remediation
+         FROM tests WHERE tenant_id = ?",
+    )
+    .bind(tenant_id)
+    .fetch_all(pool)
+    .await
+    .unwrap_or_default();
+
+    rows.into_iter()
+        .map(|row| TestMeta {
+            name:        row.try_get::<String, _>("name").unwrap_or_default(),
+            description: row.try_get::<Option<String>, _>("description").ok().flatten().unwrap_or_default(),
+            rational:    row.try_get::<Option<String>, _>("rational").ok().flatten().unwrap_or_default(),
+            remediation: row.try_get::<Option<String>, _>("remediation").ok().flatten().unwrap_or_default(),
+        })
+        .collect()
 }
