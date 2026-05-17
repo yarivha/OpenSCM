@@ -685,8 +685,31 @@ pub async fn seed_plan_limits(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: run_migrations
-// Applies incremental schema migrations (v0→v9) to existing installations.
-// Each step is guarded by a version check so it runs exactly once.
+// Applies incremental schema migrations to existing installations. Each step
+// is guarded by a version check so it runs exactly once.
+//
+// CONVENTION — multi-statement DDL must use a single connection.
+// `&SqlitePool` is shared across the connection pool; sqlx is free to grab a
+// different pooled connection for each `.execute(pool)`. For DDL that issues
+// two or more statements where a later one depends on the schema effect of
+// an earlier one — e.g. DROP+CREATE of the same object name, ALTER ADD
+// COLUMN followed by an UPDATE that references the new column, or RENAME
+// COLUMN followed by a SELECT on the new name — the schema change on the
+// first connection may not be visible to the second, and the second
+// statement can fail with confusing "X already exists" / "no such column"
+// errors even though the first returned Ok.
+//
+// Choose one of:
+//   (a) `let mut tx = pool.begin().await?;`   — preferred; gives atomic
+//       rollback on failure AND pins to one connection. Use for any step
+//       that mutates user data alongside DDL.
+//   (b) `let mut conn = pool.acquire().await?;` — lighter; pin to one
+//       connection without the all-or-nothing semantics. Use only when
+//       individual statements are idempotent and partial progress is fine.
+//
+// Single-statement migrations (one `INSERT OR IGNORE`, one `ALTER ADD COLUMN`
+// followed only by an unrelated `UPDATE schema_info`, etc.) are safe via
+// the `pool` reference — no cross-connection schema dependency.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // schema_info sentinel table (no AUTOINCREMENT)
@@ -1203,46 +1226,66 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     }
 
     // v13 → v14: add policies.author + policies.external_id; backfill external_id for existing rows.
+    // Wrapped in a transaction so the ALTER ADD COLUMN + per-row backfill +
+    // version stamp all land on one connection (and one atomic commit) — the
+    // backfill UPDATE references the column the ALTER just added, which is
+    // exactly the cross-connection-schema-visibility shape the v16→v17 fix
+    // also addresses. See the convention block at the top of this function.
     if version < 14 {
         info!("Running schema migration v13 → v14 (policies.author, policies.external_id)...");
-        if !column_exists(pool, "policies", "author").await {
-            sqlx::query("ALTER TABLE policies ADD COLUMN author TEXT").execute(pool).await?;
+        // column_exists reads through &pool which is fine — it doesn't depend on
+        // the in-flight transaction's schema state and runs before tx open.
+        let need_author      = !column_exists(pool, "policies", "author").await;
+        let need_external_id = !column_exists(pool, "policies", "external_id").await;
+
+        let mut tx = pool.begin().await?;
+        if need_author {
+            sqlx::query("ALTER TABLE policies ADD COLUMN author TEXT")
+                .execute(&mut *tx).await?;
         }
-        if !column_exists(pool, "policies", "external_id").await {
-            sqlx::query("ALTER TABLE policies ADD COLUMN external_id TEXT").execute(pool).await?;
+        if need_external_id {
+            sqlx::query("ALTER TABLE policies ADD COLUMN external_id TEXT")
+                .execute(&mut *tx).await?;
         }
         // Backfill external_id for existing policies that don't have one.
         let rows = sqlx::query("SELECT id FROM policies WHERE external_id IS NULL OR external_id = ''")
-            .fetch_all(pool).await?;
+            .fetch_all(&mut *tx).await?;
         for row in rows {
             let id: i64 = row.get("id");
             sqlx::query("UPDATE policies SET external_id = ? WHERE id = ?")
                 .bind(generate_external_id())
                 .bind(id)
-                .execute(pool).await?;
+                .execute(&mut *tx).await?;
         }
         sqlx::query("UPDATE schema_info SET version = 14")
-            .execute(pool).await?;
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
         info!("Schema migration v13 → v14 complete.");
     }
 
     // v14 → v15: add tests.external_id; backfill external_id for existing rows.
+    // Wrapped in a transaction for the same reason as v13→v14.
     if version < 15 {
         info!("Running schema migration v14 → v15 (tests.external_id)...");
-        if !column_exists(pool, "tests", "external_id").await {
-            sqlx::query("ALTER TABLE tests ADD COLUMN external_id TEXT").execute(pool).await?;
+        let need_external_id = !column_exists(pool, "tests", "external_id").await;
+
+        let mut tx = pool.begin().await?;
+        if need_external_id {
+            sqlx::query("ALTER TABLE tests ADD COLUMN external_id TEXT")
+                .execute(&mut *tx).await?;
         }
         let rows = sqlx::query("SELECT id FROM tests WHERE external_id IS NULL OR external_id = ''")
-            .fetch_all(pool).await?;
+            .fetch_all(&mut *tx).await?;
         for row in rows {
             let id: i64 = row.get("id");
             sqlx::query("UPDATE tests SET external_id = ? WHERE id = ?")
                 .bind(generate_external_id())
                 .bind(id)
-                .execute(pool).await?;
+                .execute(&mut *tx).await?;
         }
         sqlx::query("UPDATE schema_info SET version = 15")
-            .execute(pool).await?;
+            .execute(&mut *tx).await?;
+        tx.commit().await?;
         info!("Schema migration v14 → v15 complete.");
     }
 
