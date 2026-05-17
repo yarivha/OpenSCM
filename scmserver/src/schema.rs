@@ -1280,8 +1280,15 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // (genuine role mutations of users.id=1 in the default tenant).
     if version < 17 {
         info!("Running schema migration v16 → v17 (rebuild bootstrap-admin trigger)...");
+        // Pin to a single connection so the DROP and CREATE land on the same
+        // SQLite session — running them through `pool` would let sqlx grab
+        // different pooled connections, and the second one's prepared-
+        // statement cache could still see the old trigger and fail the
+        // CREATE with "trigger ... already exists" even though the DROP had
+        // succeeded on the first connection.
+        let mut conn = pool.acquire().await?;
         sqlx::query("DROP TRIGGER IF EXISTS protect_bootstrap_admin_role")
-            .execute(pool).await?;
+            .execute(&mut *conn).await?;
         sqlx::query(
             "CREATE TRIGGER protect_bootstrap_admin_role
        BEFORE UPDATE OF role ON users
@@ -1290,9 +1297,9 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
            SELECT RAISE(ABORT, 'The bootstrap admin role cannot be changed');
        END"
         )
-        .execute(pool).await?;
+        .execute(&mut *conn).await?;
         sqlx::query("UPDATE schema_info SET version = 17")
-            .execute(pool).await?;
+            .execute(&mut *conn).await?;
         info!("Schema migration v16 → v17 complete.");
     }
 
