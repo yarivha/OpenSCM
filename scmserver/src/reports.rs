@@ -543,6 +543,57 @@ pub async fn reports_download(
     }
 
     doc.push(details_table);
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Tests Summary — name + description of every test in the policy.
+    // Pulled from tests_metadata, the same JSON column the HTML view reads.
+    // Reports saved before tests_metadata was populated render no section
+    // (legacy reports remain valid; the block is skipped when the list is
+    // empty rather than rendering an empty bordered box).
+    // ──────────────────────────────────────────────────────────────────────
+    let tests_metadata: Vec<TestMeta> = serde_json::from_str(
+        report.tests_metadata.as_deref().unwrap_or("[]"),
+    )
+    .unwrap_or_default();
+
+    if !tests_metadata.is_empty() {
+        doc.push(elements::Break::new(1.0));
+        doc.push(
+            elements::Text::new(format!(
+                "Tests in this Policy ({})",
+                tests_metadata.len(),
+            ))
+            .styled(style::Style::new().bold().with_font_size(14)),
+        );
+        doc.push(elements::Break::new(0.5));
+
+        let mut tests_table = elements::TableLayout::new(vec![2, 5]);
+        tests_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+        if let Err(e) = tests_table.push_row(vec![
+            cell(elements::Text::new("Test Name").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Description").styled(style::Style::new().bold())),
+        ]) {
+            error!("Failed to add tests summary header to PDF: {}", e);
+        }
+
+        for tm in &tests_metadata {
+            let desc = if tm.description.trim().is_empty() {
+                "—".to_string()
+            } else {
+                tm.description.clone()
+            };
+            if let Err(e) = tests_table.push_row(vec![
+                cell(elements::Paragraph::new(&tm.name)),
+                cell(elements::Paragraph::new(&desc)),
+            ]) {
+                error!("Failed to add tests summary row to PDF: {}", e);
+            }
+        }
+
+        doc.push(tests_table);
+    }
+
     doc.push(elements::PageBreak::new());
 
     // Per-system audit section

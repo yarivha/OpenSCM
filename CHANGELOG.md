@@ -8,6 +8,11 @@ All notable changes to OpenSCM are documented here.
 
 ### Added
 - **Delete Test button on the test edit page** — editors can now delete a test directly from `/tests/edit/{id}` without going back to the list, via a red `Delete Test` button on the left of the card footer. Uses the existing `GET /tests/delete/{id}` route (ON DELETE CASCADE already removes its conditions and unlinks it from policies); confirm dialog warns about the policy-unlink consequence.
+- **PDF report — Tests Summary on the first page** — both policy report PDFs now render a `Tests in this Policy (N)` section directly after the Report Details table, listing every test's name and description in a two-column bordered table:
+  - **Archive PDF** (`GET /reports/download/{id}`) reads the `tests_metadata` JSON already persisted on save — no schema change, every newly-saved report gets it; legacy reports without `tests_metadata` skip the section cleanly.
+  - **Live PDF** (`GET /policies/report/download/{id}`) builds the same section from a fresh DB query, so it always reflects current test definitions.
+
+  The per-system breakdown that follows is unchanged. The system-scoped PDF (`/systems/report/download/{id}`) is unaffected — it shows multiple policies per host and already lists tests per-policy.
 
 ---
 

@@ -1115,6 +1115,50 @@ pub async fn policies_report_download(
         cell(elements::Paragraph::new(report_data.description.clone())),
     ]) { error!("Failed to add description row to PDF: {}", e); }
     doc.push(details_table);
+
+    // ──────────────────────────────────────────────────────────────────────
+    // Tests Summary — name + description of every test in the policy.
+    // Uses tests_metadata already collected from the live DB above, so the
+    // section always reflects current test definitions for on-demand PDFs.
+    // ──────────────────────────────────────────────────────────────────────
+    if !report_data.tests_metadata.is_empty() {
+        doc.push(elements::Break::new(1.0));
+        doc.push(
+            elements::Text::new(format!(
+                "Tests in this Policy ({})",
+                report_data.tests_metadata.len(),
+            ))
+            .styled(style::Style::new().bold().with_font_size(14)),
+        );
+        doc.push(elements::Break::new(0.5));
+
+        let mut tests_table = elements::TableLayout::new(vec![2, 5]);
+        tests_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
+
+        if let Err(e) = tests_table.push_row(vec![
+            cell(elements::Text::new("Test Name").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Description").styled(style::Style::new().bold())),
+        ]) {
+            error!("Failed to add tests summary header to PDF: {}", e);
+        }
+
+        for tm in &report_data.tests_metadata {
+            let desc = if tm.description.trim().is_empty() {
+                "—".to_string()
+            } else {
+                tm.description.clone()
+            };
+            if let Err(e) = tests_table.push_row(vec![
+                cell(elements::Paragraph::new(&tm.name)),
+                cell(elements::Paragraph::new(&desc)),
+            ]) {
+                error!("Failed to add tests summary row to PDF: {}", e);
+            }
+        }
+
+        doc.push(tests_table);
+    }
+
     doc.push(elements::PageBreak::new());
 
     for system in report_data.system_reports {
