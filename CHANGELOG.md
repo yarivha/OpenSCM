@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Delete Test button on the test edit page** — editors can now delete a test directly from `/tests/edit/{id}` without going back to the list, via a red `Delete Test` button on the left of the card footer. Uses the existing `GET /tests/delete/{id}` route (ON DELETE CASCADE already removes its conditions and unlinks it from policies); confirm dialog warns about the policy-unlink consequence.
+
 ---
 
 ## [0.3.7] - 2026-05-16
