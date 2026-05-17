@@ -15,6 +15,7 @@ pub mod auth;
 pub mod client;
 pub mod dashboard;
 pub mod systems;
+pub mod groups;
 pub mod tests;
 pub mod policies;
 pub mod reports;
@@ -267,10 +268,10 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/systems/bulk/approve", post(systems::systems_bulk_approve))
         .route("/systems/bulk/delete", post(systems::systems_bulk_delete))
         .route("/systems/bulk/add_group", post(systems::systems_bulk_add_group))
-        .route("/system_groups", get(systems::system_groups))
-        .route("/system_groups/add", get(systems::system_groups_add).post(systems::system_groups_add_save))
-        .route("/system_groups/delete/{id}", get(systems::system_groups_delete))
-        .route("/system_groups/edit/{id}", get(systems::system_groups_edit).post(systems::system_groups_edit_save))
+        .route("/system_groups", get(groups::system_groups))
+        .route("/system_groups/add", get(groups::system_groups_add).post(groups::system_groups_add_save))
+        .route("/system_groups/delete/{id}", get(groups::system_groups_delete))
+        .route("/system_groups/edit/{id}", get(groups::system_groups_edit).post(groups::system_groups_edit_save))
         .route("/tests", get(tests::tests))
         .route("/tests/add", get(tests::tests_add).post(tests::tests_add_save))
         .route("/tests/delete/{id}", get(tests::tests_delete))

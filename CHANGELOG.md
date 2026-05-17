@@ -6,6 +6,11 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Internal
+- **`systems.rs` split into `systems.rs` + `groups.rs`** — `systems.rs` had grown past 1500 lines after the live-system-report and clickable-test-name features landed. The 6 group functions (`system_groups`, `system_groups_add[_save]`, `system_groups_delete`, `system_groups_edit[_save]`) are now in `scmserver/src/groups.rs`; everything that operates on the `systems` table itself stays in `systems.rs` (including `systems_bulk_add_group`, which is a bulk action that assigns systems to a group id — the action is on systems, the group is just a parameter). `fetch_system_report_data` and `fetch_tenant_tests_metadata` also stay in `systems.rs` since they're report helpers, not group-table operations. `lib.rs` registers the new `pub mod groups;` and reroutes the four `/system_groups/*` routes to `groups::*`; no URL paths change, no behaviour change.
+
+  Result: `systems.rs` is now 983 lines, `groups.rs` is 599 lines.
+
 ---
 
 ## [0.3.9] - 2026-05-17
