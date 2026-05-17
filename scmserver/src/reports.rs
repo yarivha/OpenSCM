@@ -264,6 +264,7 @@ pub async fn reports_save(
 pub async fn reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
+    Query(query): Query<ErrorQuery>,
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
@@ -343,6 +344,8 @@ pub async fn reports_view(
     context.insert("fail_count", &fail_count);
     context.insert("live_policy_id", &live_policy_id);
     context.insert("is_smtp_configured", &is_smtp_configured(&pool).await);
+    if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
+    if let Some(msg) = query.error_message   { context.insert("error_message",   &msg); }
     render_template(&tera, Some(&pool), "reports_view.html", context, Some(auth))
         .await
         .into_response()
@@ -916,6 +919,7 @@ pub async fn system_report_save(
 pub async fn system_reports_view(
     auth: AuthSession,
     Path(id): Path<i32>,
+    Query(query): Query<ErrorQuery>,
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
@@ -985,6 +989,8 @@ pub async fn system_reports_view(
     context.insert("compliance_marginal", &compliance_marginal);
     context.insert("system_exists", &system_exists);
     context.insert("is_smtp_configured", &is_smtp_configured(&pool).await);
+    if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
+    if let Some(msg) = query.error_message   { context.insert("error_message",   &msg); }
     render_template(&tera, Some(&pool), "system_report_view.html", context, Some(auth))
         .await
         .into_response()

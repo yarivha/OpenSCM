@@ -56,6 +56,21 @@
   <section class="content">
     <div class="container-fluid">
 
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Error</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      {% if success_message %}
+      <div class="alert alert-success alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-check"></i> {{ success_message }}</h5>
+      </div>
+      {% endif %}
+
       {# Snapshot notice #}
       <div class="snapshot-badge mb-3 d-inline-flex align-items-center">
         <i class="fas fa-history mr-2"></i>
