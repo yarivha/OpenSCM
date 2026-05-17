@@ -214,7 +214,12 @@
           <li class="nav-item">
             <a href="/store" class="nav-link">
               <i class="nav-icon fas fa-store"></i>
-              <p>Policy Store</p>
+              <p>
+                Policy Store
+                {% if store_update_count and store_update_count > 0 %}
+                <span class="badge badge-danger right" title="{{ store_update_count }} installed policy(ies) have updates available">{{ store_update_count }}</span>
+                {% endif %}
+              </p>
             </a>
           </li>
           {% endif %}

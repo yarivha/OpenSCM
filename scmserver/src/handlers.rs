@@ -13,6 +13,7 @@ use tera::{Tera, Context};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
 use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::{Arc, OnceLock};
 use urlencoding::decode;
 use tracing::{info,error};
 
@@ -28,6 +29,24 @@ static SAAS_MODE: AtomicBool = AtomicBool::new(false);
 
 pub fn enable_saas_mode()       { SAAS_MODE.store(true, Ordering::Relaxed); }
 pub fn is_saas_mode() -> bool   { SAAS_MODE.load(Ordering::Relaxed) }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Policy-store update-count provider
+// Optional callback registered once by the SaaS binary at startup. Given a
+// tenant id, returns the number of installed policies that have a newer
+// version available in the policy store. CE-only installs never set the
+// provider, in which case the count is always 0 and the sidebar badge in
+// base.html stays hidden — zero behaviour change for non-SaaS deployments.
+// ─────────────────────────────────────────────────────────────────────────────
+pub type StoreUpdateProvider = Arc<dyn Fn(&str) -> u32 + Send + Sync>;
+static STORE_UPDATE_PROVIDER: OnceLock<StoreUpdateProvider> = OnceLock::new();
+
+pub fn set_store_update_provider(f: StoreUpdateProvider) {
+    let _ = STORE_UPDATE_PROVIDER.set(f);
+}
+pub fn store_update_count(tenant_id: &str) -> u32 {
+    STORE_UPDATE_PROVIDER.get().map(|f| f(tenant_id)).unwrap_or(0)
+}
 
 
 // ============================================================
@@ -146,6 +165,15 @@ pub async fn render_template(
 
     // Edition marker — drives SaaS-only UI in the shared base.html.
     context.insert("is_saas", &is_saas_mode());
+
+    // Number of installed policies with an update available in the Policy Store.
+    // SaaS registers a provider that fills this from a per-tenant cache; CE-only
+    // installs leave the provider unset and the count is always 0 (template hides
+    // the badge under `{% if store_update_count > 0 %}`).
+    let store_updates = auth.as_ref()
+        .map(|s| store_update_count(&s.tenant_id))
+        .unwrap_or(0);
+    context.insert("store_update_count", &store_updates);
 
     // Render template
     let rendered = tera.render(template_name, &context).map_err(|e| {

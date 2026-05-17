@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Hook for Policy Store update badge** — new `set_store_update_provider(Arc<dyn Fn(&str) -> u32>)` registration function in `handlers.rs`, mirroring the existing `enable_saas_mode()` pattern. CE itself never registers a provider, so `store_update_count` is always 0 in `render_template` and the new template branch in `base.html` (`{% if store_update_count > 0 %}` red badge on the Policy Store sidebar link) stays hidden — exactly zero behaviour change for CE-only installs. SaaS registers a provider backed by an hourly background refresh so each tenant Admin sees how many of their installed policies have a newer version waiting in the store.
+
 ### Changed
 - **Database reset is now an Admin action, scoped to the caller's tenant** (was Superuser-only). The reset SQL was already filtering by `auth.tenant_id` end-to-end, so dropping the role gate from Superuser to Admin only widens *who* can invoke it — an Admin can wipe their own tenant's systems / groups / tests / policies / reports / users, and nothing else. Superuser still has every Admin power they used to (`Superuser > Admin`), so the CE single-tenant case and the SaaS platform-admin-of-`default`-tenant case keep working unchanged. Template gates split so the Email tab stays Superuser-only (SMTP is platform-global in SaaS) while the Danger Zone tab / card / confirmation modal move to `is_admin`. UI copy clarified: "Permanently deletes all data **for this tenant**…" / "This will permanently delete **for this tenant only**…" so a tenant Admin doesn't fear wiping the platform.
 
