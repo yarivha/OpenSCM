@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.3.10] - 2026-05-18
+
 ### Fixed
 - **Scheduler notifications were silently dropped on fresh CE installs** — two places in `scheduler.rs` decided who to notify with a hard-coded `WHERE role = 'admin'` query:
   - `get_policy_owners` — emits the "Scheduled scan completed" / "Scheduled report saved" / "Scheduled X FAILED" notifications when a `policy_schedules` row fires
