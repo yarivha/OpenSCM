@@ -173,6 +173,7 @@ jobs:
         with:
           name: test-${{ matrix.app }}-${{ matrix.target }}
           path: dist/*
+          retention-days: 1
 
 
   # ── FREEBSD (native QEMU VM — zigbuild can't cross-compile sysinfo) ──────
@@ -226,3 +227,4 @@ jobs:
         with:
           name: test-client-freebsd
           path: dist/*
+          retention-days: 1

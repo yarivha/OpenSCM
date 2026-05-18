@@ -101,6 +101,7 @@ jobs:
         with:
           name: linux-${{ matrix.app }}-${{ matrix.target }}
           path: dist/*
+          retention-days: 1
 
 
   # ── WINDOWS (NSIS installer) ───────────────────────────────────────────────
@@ -143,6 +144,7 @@ jobs:
         with:
           name: windows-${{ matrix.app }}
           path: dist/*
+          retention-days: 1
 
 
   # ── MACOS (universal .pkg) ────────────────────────────────────────────────
@@ -206,6 +208,7 @@ jobs:
         with:
           name: macos-client
           path: dist/*
+          retention-days: 1
 
 
   # ── FREEBSD (.pkg) ────────────────────────────────────────────────────────
@@ -261,6 +264,7 @@ jobs:
         with:
           name: freebsd-client
           path: dist/*
+          retention-days: 1
 
 
   # ── DOCKER (amd64 + arm64 → Docker Hub) ──────────────────────────────────
@@ -378,3 +382,26 @@ jobs:
           prerelease: false
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+
+  # ── CLEANUP ──────────────────────────────────────────────────────────────
+  # Delete this workflow run's own artifacts now that they've been duplicated
+  # into the GitHub Release as durable release assets. Release assets are
+  # stored separately and don't count against the artifact-storage quota.
+  cleanup:
+    name: Cleanup build artifacts
+    runs-on: ubuntu-latest
+    needs: [publish]
+    if: success()
+    permissions:
+      actions: write
+    steps:
+      - name: Delete workflow artifacts
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: |
+          gh api --paginate \
+            /repos/${{ github.repository }}/actions/runs/${{ github.run_id }}/artifacts \
+            --jq '.artifacts[].id' \
+          | xargs -r -I{} gh api -X DELETE \
+            /repos/${{ github.repository }}/actions/artifacts/{}
