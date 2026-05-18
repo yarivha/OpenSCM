@@ -40,11 +40,15 @@ fn calculate_next_run(frequency: &str, last_planned_run: &str) -> String {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: get_policy_owners
-// Returns all admin user IDs for a tenant (used to send schedule notifications).
+// Returns all Admin-or-higher user IDs for a tenant (used to send schedule
+// notifications). Matches both `admin` and `superuser` — without superuser
+// the bootstrap admin on a fresh CE install (role = 'superuser', see
+// install.rs) is silently excluded and scheduled-report notifications go
+// nowhere.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
     sqlx::query(
-        "SELECT id FROM users WHERE tenant_id = ? AND role = 'admin'",
+        "SELECT id FROM users WHERE tenant_id = ? AND role IN ('admin', 'superuser')",
     )
     .bind(tenant_id)
     .fetch_all(pool)
@@ -599,9 +603,13 @@ async fn check_for_updates(pool: &SqlitePool) {
         latest_tag, current
     );
 
-    // Notify all admin users in all tenants (skip if already notified about this version)
+    // Notify all admin-or-higher users in all tenants (skip if already
+    // notified about this version). Same caveat as get_policy_owners: the
+    // bootstrap admin on a fresh CE install has role 'superuser', so a
+    // plain role = 'admin' filter silently excludes them and the bell
+    // never lights up.
     let admin_rows = match sqlx::query(
-        "SELECT id, tenant_id FROM users WHERE role = 'admin'",
+        "SELECT id, tenant_id FROM users WHERE role IN ('admin', 'superuser')",
     )
     .fetch_all(pool)
     .await

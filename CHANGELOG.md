@@ -7,6 +7,10 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Fixed
+- **Scheduler notifications were silently dropped on fresh CE installs** — two places in `scheduler.rs` decided who to notify with a hard-coded `WHERE role = 'admin'` query:
+  - `get_policy_owners` — emits the "Scheduled scan completed" / "Scheduled report saved" / "Scheduled X FAILED" notifications when a `policy_schedules` row fires
+  - `check_for_updates` — emits the hourly "OpenSCM vX.Y.Z is available" notification when a newer release is detected on GitHub
+  The bootstrap admin on a fresh CE install is stored with role `'superuser'` (see `install.rs`), so on a typical single-tenant install the queries returned an empty list and **no notification of any kind from the scheduler** ever reached the bell. Both queries now match `role IN ('admin', 'superuser')`. No data migration needed; effective on the next scheduler tick after restart.
 - **Certificate icon floated awkwardly in policy list view** — the policy grid uses an inner `col-7` / `col-5` Bootstrap split inside each card for description vs. the big `fa-certificate` icon. In the 3-up Grid View each card is ~33% wide and the split looks right; switching to List View made each card span the full screen but left the inner column widths untouched, so the cert icon ended up centred in a ~40%-wide empty column halfway across the screen. Fixed by pulling the cert column out of the flex flow in list view and pinning it as a corner badge at the card's upper-right (`position: absolute; top: 8px; right: 12px`), shrinking from `fa-4x` to a 3rem font-size so it reads as a tight badge rather than a poster. The description column then stretches to 100% width with just enough right-padding to clear the badge. Click target preserved.
 
 ### Internal
