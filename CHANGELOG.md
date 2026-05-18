@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Certificate icon floated awkwardly in policy list view** — the policy grid uses an inner `col-7` / `col-5` Bootstrap split inside each card for description vs. the big `fa-certificate` icon. In the 3-up Grid View each card is ~33% wide and the split looks right; switching to List View made each card span the full screen but left the inner column widths untouched, so the cert icon ended up centred in a ~40%-wide empty column halfway across the screen. Fixed by pulling the cert column out of the flex flow in list view and pinning it as a corner badge at the card's upper-right (`position: absolute; top: 8px; right: 12px`), shrinking from `fa-4x` to a 3rem font-size so it reads as a tight badge rather than a poster. The description column then stretches to 100% width with just enough right-padding to clear the badge. Click target preserved.
+
 ### Internal
 - **`systems.rs` split into `systems.rs` + `groups.rs`** — `systems.rs` had grown past 1500 lines after the live-system-report and clickable-test-name features landed. The 6 group functions (`system_groups`, `system_groups_add[_save]`, `system_groups_delete`, `system_groups_edit[_save]`) are now in `scmserver/src/groups.rs`; everything that operates on the `systems` table itself stays in `systems.rs` (including `systems_bulk_add_group`, which is a bulk action that assigns systems to a group id — the action is on systems, the group is just a parameter). `fetch_system_report_data` and `fetch_tenant_tests_metadata` also stay in `systems.rs` since they're report helpers, not group-table operations. `lib.rs` registers the new `pub mod groups;` and reroutes the four `/system_groups/*` routes to `groups::*`; no URL paths change, no behaviour change.
 

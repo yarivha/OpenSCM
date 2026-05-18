@@ -19,9 +19,34 @@
 
   /* List View Logic */
   .list-view .policy-card-item { flex: 0 0 100% !important; max-width: 100% !important; }
-  .list-view .policy-card-content { flex-direction: row !important; align-items: center; }
-  .list-view .cert-icon-col { border-left: 1px solid #dee2e6; margin-left: 15px; padding-left: 20px; }
-  .dark-mode .list-view .cert-icon-col { border-left-color: #4b545c; }
+  .list-view .policy-card-content {
+    flex-direction: row !important;
+    align-items: center;
+    position: relative;     /* anchor for the absolutely-positioned cert */
+  }
+  /* In list view each card is full screen width. The 3-up grid's col-7 /
+     col-5 split leaves the cert icon stranded in a huge empty column, so
+     pull it out of the flex flow entirely and pin it as a corner badge in
+     the card's upper-right. The description column then stretches to fill,
+     reserving just enough right-padding to clear the icon. */
+  .list-view .policy-card-content > .col-7 {
+    flex: 0 0 100% !important;
+    max-width: 100% !important;
+    padding-right: 90px;
+  }
+  .list-view .policy-card-content > .col-5.cert-icon-col {
+    position: absolute;
+    top: 8px;
+    right: 12px;
+    width: auto !important;
+    max-width: none !important;
+    flex: none !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-left: none !important;
+    display: block !important;     /* override the d-flex utility class */
+  }
+  .list-view .cert-icon-col .fa-certificate { font-size: 3rem; }  /* smaller corner badge */
   
   .hover-zoom:hover { transform: scale(1.1); transition: transform 0.2s; }
 </style>
