@@ -39,6 +39,10 @@ pub struct System {
     pub ip: Option<String>,
     pub os: Option<String>,
     pub arch: Option<String>,
+    /// Normalised "{arch}-{os_type}" platform string (e.g. "x86_64-linux").
+    /// Derived server-side from arch + os on every heartbeat; used to match
+    /// the system against the agent_packages table for upgrade availability.
+    pub platform: Option<String>,
     pub status: Option<String>,
     pub groups: Option<String>,
     pub auth_signature: Option<String>,
@@ -50,6 +54,22 @@ pub struct System {
     /// Computed server-side: true when last_seen is older than offline_threshold.
     #[serde(default)]
     pub is_offline: bool,
+    /// Set server-side: true when agent_packages has a newer version for this platform.
+    #[serde(default)]
+    pub upgrade_available: bool,
+    /// The newer version available for this system, if any.
+    pub upgrade_version: Option<String>,
+}
+
+
+// A row from the agent_packages table.
+// One entry per supported client platform, upserted each time the server starts.
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AgentPackage {
+    pub platform: String,
+    pub version:  String,
+    pub sha256:   String,
+    pub url:      String,
 }
 
 // A named group of systems used to link systems to policies.

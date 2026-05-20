@@ -7,6 +7,7 @@ use reqwest;
 use chrono;
 use sha2::{Sha256, Digest};
 use rand::rngs::OsRng;
+use self_replace;
 
 use crate::models::{UnsignedPayload, SignedRequest, SignedResponse, Test, ComplianceResult};
 use crate::config::{Config, key_path};
@@ -503,6 +504,118 @@ async fn dispatch_server_command(
                 }
             } else {
                 warn!("TEST command received but no data in response.");
+            }
+        }
+        Some("UPGRADE") => {
+            let url = inner_json.get("upgrade_url")
+                .and_then(|u| u.as_str())
+                .unwrap_or("");
+            let expected_sha256 = inner_json.get("upgrade_sha256")
+                .and_then(|h| h.as_str())
+                .unwrap_or("");
+            let version = inner_json.get("upgrade_version")
+                .and_then(|v| v.as_str())
+                .unwrap_or("unknown");
+
+            if url.is_empty() || expected_sha256.is_empty() {
+                error!("UPGRADE command missing url or sha256 — ignoring.");
+                return Ok(());
+            }
+
+            info!("Upgrade to v{} requested — downloading from {}", version, url);
+
+            // Build full URL: relative paths are resolved against the server base.
+            let full_url = if url.starts_with("http://") || url.starts_with("https://") {
+                url.to_string()
+            } else {
+                format!("{}{}", base_url, url)
+            };
+
+            let bytes = match http_client.get(&full_url).send().await {
+                Ok(resp) if resp.status().is_success() => {
+                    match resp.bytes().await {
+                        Ok(b) => b,
+                        Err(e) => {
+                            error!("Failed to read upgrade download body: {}", e);
+                            return Ok(());
+                        }
+                    }
+                }
+                Ok(resp) => {
+                    error!("Upgrade download failed with HTTP {}", resp.status());
+                    return Ok(());
+                }
+                Err(e) => {
+                    error!("Upgrade download request failed: {}", e);
+                    return Ok(());
+                }
+            };
+
+            // Verify SHA256 before touching disk.
+            let mut hasher = Sha256::new();
+            hasher.update(&bytes);
+            let actual_sha256 = format!("{:x}", hasher.finalize());
+
+            if actual_sha256 != expected_sha256 {
+                error!(
+                    "Upgrade SHA256 mismatch — expected {} got {}. Aborting.",
+                    expected_sha256, actual_sha256
+                );
+                return Ok(());
+            }
+            info!("SHA256 verified ({}…)", &actual_sha256[..12]);
+
+            // Write to a temp file next to the current binary (same filesystem →
+            // atomic rename). The .new suffix is cleaned up after self_replace.
+            let current_exe = match std::env::current_exe() {
+                Ok(p) => p,
+                Err(e) => {
+                    error!("Cannot determine current executable path: {}", e);
+                    return Ok(());
+                }
+            };
+            let tmp_path = current_exe.with_extension("new");
+
+            if let Err(e) = fs::write(&tmp_path, &bytes) {
+                error!("Failed to write upgrade binary to {:?}: {}", tmp_path, e);
+                return Ok(());
+            }
+
+            // Make the temp file executable on Unix before replacing.
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::PermissionsExt;
+                let _ = fs::set_permissions(&tmp_path, fs::Permissions::from_mode(0o755));
+            }
+
+            // Atomically replace the running binary on disk.
+            if let Err(e) = self_replace::self_replace(&tmp_path) {
+                error!("self_replace failed: {}", e);
+                let _ = fs::remove_file(&tmp_path);
+                return Ok(());
+            }
+            let _ = fs::remove_file(&tmp_path);
+
+            info!("Binary replaced with v{}. Restarting...", version);
+
+            // Restart: exec() replaces the current process image on Unix (systemd
+            // detects the restart cleanly). On Windows we spawn a new process and exit.
+            #[cfg(unix)]
+            {
+                use std::os::unix::process::CommandExt;
+                let err = std::process::Command::new(&current_exe)
+                    .args(std::env::args().skip(1))
+                    .exec();
+                // exec() only returns on error.
+                error!("exec failed after upgrade: {}", err);
+            }
+
+            #[cfg(not(unix))]
+            {
+                let _ = std::process::Command::new(&current_exe)
+                    .args(std::env::args().skip(1))
+                    .spawn();
+                std::process::exit(0);
             }
         }
         Some("NONE") | None => debug!("Heartbeat OK — no commands pending."),

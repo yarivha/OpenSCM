@@ -1,6 +1,6 @@
 [package]
 name = "scmserver"
-version = "0.3.10"
+version = "0.4.0"
 edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "FSL-1.1-ALv2"
@@ -44,6 +44,7 @@ hkdf = "0.12"
 sha2 = "0.10"
 reqwest = { version = "0.11", default-features = false, features = ["rustls-tls", "json"] }
 lettre = { version = "0.11", default-features = false, features = ["tokio1-rustls-tls", "smtp-transport", "builder", "hostname"] }
+tokio-util = { version = "0.7", features = ["io"] }
 
 [target.'cfg(windows)'.dependencies]
 winreg = "0.52"

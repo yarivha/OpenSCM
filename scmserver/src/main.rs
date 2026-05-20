@@ -134,6 +134,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
     if db_initialized {
         sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
         run_migrations(&pool).await?;
+        scmserver::agents::startup_scan(&pool).await;
     } else {
         info!("Fresh install detected — waiting for setup via /install");
     }

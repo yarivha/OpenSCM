@@ -8,6 +8,19 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.4.0] - 2026-05-20
+
+### Added
+- **Agent auto-upgrade** — the server can now push a new client binary to registered systems without manual intervention.
+  - **Server**: a new `agent_packages` table stores the platform, version, SHA-256 hash, and download URL for each available client binary. On startup, `agents::startup_scan` scans `/var/lib/openscm/agents/`, hashes each `scmclient-{arch}-{os}[.exe]` file, and upserts the table. A public (no-auth) HTTP route `/agents/{filename}` streams the files directly from disk for zero-config distribution.
+  - **Systems list UI**: each system row now shows its `platform` (e.g. `x86_64-linux`) and, when a newer agent package is available, an amber **Upgrade → vX.Y.Z** button that queues an upgrade for that system. A new **Bulk Upgrade** action in the selection toolbar queues an upgrade for all selected systems simultaneously.
+  - **Heartbeat protocol**: when `upgrade_requested` is set for a system, the next heartbeat response carries `"command": "UPGRADE"` with `upgrade_url`, `upgrade_sha256`, and `upgrade_version`. The UPGRADE command takes priority over pending TEST commands.
+  - **Client**: handles the `UPGRADE` command by downloading the new binary, verifying the SHA-256 digest, atomically replacing itself via the `self_replace` crate, and then re-execing (Unix) or spawning itself and exiting (Windows).
+  - **DB schema migration v17 → v18**: adds the `agent_packages` table and adds `platform TEXT` and `upgrade_requested INTEGER NOT NULL DEFAULT 0` columns to the `systems` table.
+  - **Build pipeline**: restructured into three phases — `build-*-client` (all platforms in parallel) → `collect-agents` (renames and stages raw binaries + VERSION sentinel) → `build-linux-server` (downloads agent bundle, packages everything into deb/rpm via nfpm). The agents directory `/var/lib/openscm/agents/` is declared in `config/scmserver.yaml` so it is created at install time.
+
+---
+
 ## [0.3.10] - 2026-05-18
 
 ### Fixed

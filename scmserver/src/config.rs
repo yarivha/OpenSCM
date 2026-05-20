@@ -45,9 +45,24 @@ cfg_if! {
     }
 }
 
+// Agents directory — stores scmclient-{platform}[.exe] binaries + a VERSION
+// file; scanned at startup to populate the agent_packages table.
+cfg_if! {
+    if #[cfg(target_os = "linux")] {
+        const AGENTS_PATH: &str = "/var/lib/openscm/agents";
+    } else if #[cfg(target_os = "freebsd")] {
+        const AGENTS_PATH: &str = "/var/db/openscm/agents";
+    } else if #[cfg(target_os = "windows")] {
+        const AGENTS_PATH: &str = r"C:\ProgramData\OpenSCM\Server\agents";
+    } else if #[cfg(target_os = "macos")] {
+        const AGENTS_PATH: &str = "/var/db/openscm/agents";
+    }
+}
+
 pub fn db_path() -> &'static str { DB_PATH }
 pub fn private_key_path() -> &'static str { PRIVATE_KEY_PATH }
 pub fn config_path() -> &'static str { CONFIG_PATH }
+pub fn agents_path() -> &'static str { AGENTS_PATH }
 
 // --- Structs ---
 

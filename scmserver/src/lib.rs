@@ -12,6 +12,7 @@ pub mod handlers;
 pub mod config;
 pub mod schema;
 pub mod auth;
+pub mod agents;
 pub mod client;
 pub mod dashboard;
 pub mod systems;
@@ -219,7 +220,9 @@ async fn init_guard(
     let initialized = is_initialized.load(Ordering::SeqCst);
 
     // Let static assets through unconditionally (needed for the install page CSS/JS)
-    let is_asset = path.starts_with("/static/") || {
+    let is_asset = path.starts_with("/static/")
+        || path.starts_with("/agents/")   // public client-binary downloads
+        || {
         let p = path.as_str();
         p.ends_with(".css") || p.ends_with(".js") || p.ends_with(".png")
             || p.ends_with(".ico") || p.ends_with(".svg") || p.ends_with(".woff2")
@@ -304,6 +307,9 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/settings/save", post(settings::settings_save))
         .route("/settings/test-email", post(settings::settings_test_email))
         .route("/settings/reset", post(settings::settings_reset))
+        .route("/agents/{filename}", get(agents::serve_agent))
+        .route("/systems/upgrade/{id}", post(systems::systems_upgrade))
+        .route("/systems/bulk/upgrade", post(systems::systems_bulk_upgrade))
         .route("/send", post(client::send))
         .route("/result", post(client::receive_result))
         .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {

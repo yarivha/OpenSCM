@@ -18,6 +18,30 @@ use serde_json::value::RawValue;
 use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions, TestPayload};
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: derive_platform
+// Converts the raw arch + os strings from the agent heartbeat into a normalised
+// "{arch}-{os_type}" string (e.g. "x86_64-linux", "aarch64-linux",
+// "x86_64-windows") that matches the filenames in the agents directory.
+// ─────────────────────────────────────────────────────────────────────────────
+fn derive_platform(arch: &str, os: &str) -> String {
+    let os_lower = os.to_lowercase();
+    let os_type = if os_lower.contains("windows") {
+        "windows"
+    } else if os_lower.contains("darwin")
+        || os_lower.contains("macos")
+        || os_lower.contains("apple")
+    {
+        "macos"
+    } else if os_lower.contains("freebsd") {
+        "freebsd"
+    } else {
+        "linux"
+    };
+    format!("{}-{}", arch, os_type)
+}
+
+
 #[derive(sqlx::FromRow)]
 struct AuthCheck {
     pub key: String,
@@ -409,9 +433,10 @@ pub async fn send(
                     }
                 };
 
-                // Update system info
+                // Update system info (including derived platform string).
+                let platform = derive_platform(&payload.arch, &payload.os);
                 if let Err(e) = sqlx::query(
-                    "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, status='active', last_seen=CURRENT_TIMESTAMP
+                    "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, platform=?, status='active', last_seen=CURRENT_TIMESTAMP
                      WHERE id=? AND tenant_id=?",
                 )
                 .bind(&payload.hostname)
@@ -419,6 +444,7 @@ pub async fn send(
                 .bind(&payload.os)
                 .bind(&payload.ip)
                 .bind(&payload.arch)
+                .bind(&platform)
                 .bind(id)
                 .bind(tenant_id)
                 .execute(&mut *tx)
@@ -432,6 +458,33 @@ pub async fn send(
                     )
                         .into_response();
                 }
+
+                // Check whether an upgrade has been queued by an admin for this system.
+                // If upgrade_requested = 1 and agent_packages has a package for this
+                // platform, include an UPGRADE command and clear the flag.
+                let upgrade_requested: i64 = sqlx::query_scalar(
+                    "SELECT upgrade_requested FROM systems WHERE id = ? AND tenant_id = ?",
+                )
+                .bind(id)
+                .bind(tenant_id)
+                .fetch_optional(&pool)
+                .await
+                .ok()
+                .flatten()
+                .unwrap_or(0);
+
+                // Fetch upgrade metadata outside the transaction (read-only).
+                let upgrade_pkg = if upgrade_requested == 1 {
+                    sqlx::query_as::<_, crate::models::AgentPackage>(
+                        "SELECT platform, version, sha256, url FROM agent_packages WHERE platform = ?",
+                    )
+                    .bind(&platform)
+                    .fetch_optional(&pool)
+                    .await
+                    .unwrap_or(None)
+                } else {
+                    None
+                };
 
                 // Fetch pending commands
                 let tests: Vec<Test> = match sqlx::query_as::<_, Test>(
@@ -537,13 +590,41 @@ pub async fn send(
                     .map(TestPayload::from)
                     .collect();
 
-                response_data = serde_json::json!({
-                    "status": "approved",
-                    "id": id,
-                    "tenant_id": tenant_id,
-                    "command": if test_payloads.is_empty() { "NONE" } else { "TEST" },
-                    "data": test_payloads
-                });
+                // UPGRADE takes priority over TEST — the client replaces itself and
+                // restarts; pending tests will be re-queued and dispatched on the
+                // next heartbeat from the new binary.
+                if let Some(pkg) = upgrade_pkg {
+                    // Clear the upgrade_requested flag so it is only sent once.
+                    let _ = sqlx::query(
+                        "UPDATE systems SET upgrade_requested = 0 WHERE id = ? AND tenant_id = ?",
+                    )
+                    .bind(id)
+                    .bind(tenant_id)
+                    .execute(&mut *tx)
+                    .await;
+
+                    response_data = serde_json::json!({
+                        "status": "approved",
+                        "id": id,
+                        "tenant_id": tenant_id,
+                        "command": "UPGRADE",
+                        "upgrade_url":     pkg.url,
+                        "upgrade_sha256":  pkg.sha256,
+                        "upgrade_version": pkg.version,
+                    });
+                    info!(
+                        "UPGRADE command dispatched to Agent ID {} (platform: {}, version: {}).",
+                        id, platform, pkg.version
+                    );
+                } else {
+                    response_data = serde_json::json!({
+                        "status": "approved",
+                        "id": id,
+                        "tenant_id": tenant_id,
+                        "command": if test_payloads.is_empty() { "NONE" } else { "TEST" },
+                        "data": test_payloads
+                    });
+                }
 
                 // Only send the server public key when the client explicitly
                 // requests it — indicated by the client including its own

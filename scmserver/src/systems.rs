@@ -23,9 +23,10 @@ use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
 use std::collections::BTreeMap;
+use semver::Version;
 use crate::handlers::{normalize_status, is_system_passed};
 use crate::models::{
-    ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
+    AgentPackage, ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
     IndividualResult, PolicyResultGroup, SystemReportData, TestMeta,
 };
 use crate::auth::{self};
@@ -78,6 +79,7 @@ pub async fn systems(
                     COALESCE(s.ip,   'NA') AS system_ip,
                     COALESCE(s.os,   'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
+                    s.platform AS system_platform,
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE({gc}, 'none') AS group_names,
                     {created} AS created_date,
@@ -111,6 +113,7 @@ pub async fn systems(
                     COALESCE(s.ip,   'NA') AS system_ip,
                     COALESCE(s.os,   'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
+                    s.platform AS system_platform,
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE({gc}, 'none') AS group_names,
                     {created} AS created_date,
@@ -149,24 +152,61 @@ pub async fn systems(
         }
     };
 
+    // Fetch all agent packages once for upgrade-availability annotation.
+    let agent_pkgs: HashMap<String, AgentPackage> = sqlx::query_as::<_, AgentPackage>(
+        "SELECT platform, version, sha256, url FROM agent_packages",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|p| (p.platform.clone(), p))
+    .collect();
+
     let systems: Vec<System> = rows
         .into_iter()
-        .map(|row| System {
-            id: row.try_get("system_id").unwrap_or(None),
-            name: row.get("system_name"),
-            ver: row.try_get("system_ver").ok(),
-            ip: row.try_get("system_ip").ok(),
-            os: row.try_get("system_os").ok(),
-            arch: row.try_get("system_arch").ok(),
-            status: row.try_get("system_status").ok(),
-            groups: row.try_get("group_names").ok(),
-            auth_signature: None,
-            auth_public_key: None,
-            trust_challenge: None,
-            trust_proof: None,
-            created_date: row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
-            last_seen: row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
-            is_offline: row.try_get::<bool, _>("is_offline").unwrap_or(false),
+        .map(|row| {
+            let ver: Option<String>      = row.try_get("system_ver").ok();
+            let platform: Option<String> = row.try_get("system_platform").ok().flatten();
+
+            // Determine upgrade availability: compare versions with semver.
+            // Silently ignore unparseable version strings (very old agents may
+            // not conform; they simply show no upgrade button).
+            let (upgrade_available, upgrade_version) = if let (Some(pf), Some(ref cv)) = (&platform, &ver) {
+                if let Some(pkg) = agent_pkgs.get(pf) {
+                    let current  = Version::parse(cv).ok();
+                    let available = Version::parse(&pkg.version).ok();
+                    match (current, available) {
+                        (Some(c), Some(a)) if a > c => (true, Some(pkg.version.clone())),
+                        _ => (false, None),
+                    }
+                } else {
+                    (false, None)
+                }
+            } else {
+                (false, None)
+            };
+
+            System {
+                id:               row.try_get("system_id").unwrap_or(None),
+                name:             row.get("system_name"),
+                ver,
+                ip:               row.try_get("system_ip").ok(),
+                os:               row.try_get("system_os").ok(),
+                arch:             row.try_get("system_arch").ok(),
+                platform,
+                status:           row.try_get("system_status").ok(),
+                groups:           row.try_get("group_names").ok(),
+                auth_signature:   None,
+                auth_public_key:  None,
+                trust_challenge:  None,
+                trust_proof:      None,
+                created_date:     row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+                last_seen:        row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
+                is_offline:       row.try_get::<bool, _>("is_offline").unwrap_or(false),
+                upgrade_available,
+                upgrade_version,
+            }
         })
         .collect();
 
@@ -980,4 +1020,113 @@ pub async fn fetch_tenant_tests_metadata(
             remediation: row.try_get::<Option<String>, _>("remediation").ok().flatten().unwrap_or_default(),
         })
         .collect()
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/upgrade/{id}
+// Queue an upgrade for a single active system.  Sets upgrade_requested = 1;
+// the next heartbeat from that agent will receive the UPGRADE command.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn systems_upgrade(
+    auth: AuthSession,
+    Path(id): Path<i32>,
+    Extension(pool): Extension<SqlitePool>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    match sqlx::query(
+        "UPDATE systems SET upgrade_requested = 1
+         WHERE id = ? AND tenant_id = ? AND status = 'active'",
+    )
+    .bind(id)
+    .bind(&auth.tenant_id)
+    .execute(&pool)
+    .await
+    {
+        Ok(res) if res.rows_affected() > 0 => {
+            info!("Upgrade queued for system ID {} by '{}'.", id, auth.username);
+            let msg = urlencoding::encode("Upgrade queued — agent will upgrade on next check-in.").to_string();
+            Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
+        }
+        Ok(_) => {
+            let msg = urlencoding::encode("System not found or not active.").to_string();
+            Redirect::to(&format!("/systems?error_message={}", msg)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to queue upgrade for system {}: {}", id, e);
+            let msg = urlencoding::encode(&format!("Error queuing upgrade: {}", e)).to_string();
+            Redirect::to(&format!("/systems?error_message={}", msg)).into_response()
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/bulk/upgrade
+// Queue upgrades for all selected active systems.
+// Body: repeated `ids` form fields.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn systems_bulk_upgrade(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    raw_form: RawForm,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let bytes: Bytes = raw_form.0;
+    let raw_string = match String::from_utf8(bytes.to_vec()) {
+        Ok(s) => s,
+        Err(_) => return Redirect::to("/systems?error_message=Invalid+form+data").into_response(),
+    };
+
+    let form_data = parse_form_data(&raw_string);
+    let ids: Vec<i32> = form_data
+        .get("ids")
+        .cloned()
+        .unwrap_or_default()
+        .iter()
+        .filter_map(|s| s.parse::<i32>().ok())
+        .collect();
+
+    if ids.is_empty() {
+        let msg = urlencoding::encode("No systems selected.").to_string();
+        return Redirect::to(&format!("/systems?error_message={}", msg)).into_response();
+    }
+
+    let mut queued: usize = 0;
+    for id in &ids {
+        match sqlx::query(
+            "UPDATE systems SET upgrade_requested = 1
+             WHERE id = ? AND tenant_id = ? AND status = 'active'",
+        )
+        .bind(id)
+        .bind(&auth.tenant_id)
+        .execute(&pool)
+        .await
+        {
+            Ok(r) if r.rows_affected() > 0 => queued += 1,
+            Ok(_) => {}
+            Err(e) => error!("Failed to queue upgrade for system {}: {}", id, e),
+        }
+    }
+
+    info!(
+        "Bulk upgrade queued for {}/{} system(s) by '{}'.",
+        queued,
+        ids.len(),
+        auth.username
+    );
+    let msg = urlencoding::encode(&format!(
+        "Upgrade queued for {} system(s) — agents will upgrade on next check-in.",
+        queued
+    ))
+    .to_string();
+    Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
 }

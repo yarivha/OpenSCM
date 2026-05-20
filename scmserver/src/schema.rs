@@ -124,6 +124,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             ip TEXT,
             os TEXT,
             arch TEXT,
+            platform TEXT,
             status VARCHAR(32),
             groups TEXT,
             auth_public_key TEXT,
@@ -136,6 +137,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             tests_passed INTEGER DEFAULT 0,
             tests_failed INTEGER DEFAULT 0,
             total_tests INTEGER DEFAULT 0,
+            upgrade_requested INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
@@ -399,6 +401,22 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR(191) NOT NULL UNIQUE,
             description TEXT
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    // Agent Packages table — one row per supported client platform, upserted on startup.
+    // Used by the auto-upgrade feature: the server scans its agents directory, records
+    // the version + SHA256 of each binary, and surfaces an Upgrade button in the
+    // Systems list when a system's reported version is older than the available one.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS agent_packages (
+            platform   TEXT PRIMARY KEY,
+            version    TEXT NOT NULL,
+            sha256     TEXT NOT NULL,
+            url        TEXT NOT NULL,
+            updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
         )",
     )
     .execute(pool)
@@ -1225,6 +1243,10 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v12 → v13 complete.");
     }
 
+    // v13 → v18 stamp is skipped on this code path (see initialize_database comment above)
+    // so existing installs that were stamped at 13 by an older initialize_database will
+    // run v14 through v18 here on their first upgrade.
+
     // v13 → v14: add policies.author + policies.external_id; backfill external_id for existing rows.
     // Wrapped in a transaction so the ALTER ADD COLUMN + per-row backfill +
     // version stamp all land on one connection (and one atomic commit) — the
@@ -1344,6 +1366,45 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query("UPDATE schema_info SET version = 17")
             .execute(&mut *conn).await?;
         info!("Schema migration v16 → v17 complete.");
+    }
+
+    // v17 → v18: agent auto-upgrade support.
+    //   • agent_packages table  — one row per client platform; upserted on startup.
+    //   • systems.platform      — normalised "{arch}-{os}" derived from heartbeat.
+    //   • systems.upgrade_requested — flag cleared after UPGRADE command is dispatched.
+    if version < 18 {
+        info!("Running schema migration v17 → v18 (agent_packages + systems.platform/upgrade_requested)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS agent_packages (
+                platform   TEXT PRIMARY KEY,
+                version    TEXT NOT NULL,
+                sha256     TEXT NOT NULL,
+                url        TEXT NOT NULL,
+                updated_at DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
+            )",
+        )
+        .execute(pool)
+        .await?;
+
+        if !column_exists(pool, "systems", "platform").await {
+            let _ = sqlx::query("ALTER TABLE systems ADD COLUMN platform TEXT")
+                .execute(pool)
+                .await;
+        }
+
+        if !column_exists(pool, "systems", "upgrade_requested").await {
+            let _ = sqlx::query(
+                "ALTER TABLE systems ADD COLUMN upgrade_requested INTEGER NOT NULL DEFAULT 0",
+            )
+            .execute(pool)
+            .await;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 18")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v17 → v18 complete.");
     }
 
     Ok(())
