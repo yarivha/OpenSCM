@@ -94,6 +94,8 @@ async fn purge_ghost_results(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
 // Must be called inside an active transaction.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+    // The NOT EXISTS clause treats excluded (system, test) pairs as if the
+    // result row didn't exist — matches the live-report rendering.
     sqlx::query(r#"
         UPDATE tests SET
             systems_passed = (
@@ -103,6 +105,7 @@ async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Resu
                   AND r.tenant_id  = tests.tenant_id
                   AND r.result     = 'PASS'
                   AND s.status     = 'active'
+                  AND r.excluded = 0
             ),
             systems_failed = (
                 SELECT COUNT(*) FROM results r
@@ -111,6 +114,7 @@ async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Resu
                   AND r.tenant_id  = tests.tenant_id
                   AND r.result     = 'FAIL'
                   AND s.status     = 'active'
+                  AND r.excluded = 0
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
@@ -122,6 +126,7 @@ async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Resu
                   AND r.tenant_id = tests.tenant_id
                   AND s.status    = 'active'
                   AND r.result    != 'NA'
+                  AND r.excluded = 0
             )
     "#)
     .execute(&mut **tx)
@@ -137,33 +142,39 @@ async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Resu
 // Must be called inside an active transaction, after update_test_stats.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn update_system_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+    // Excluded (system, test) pairs are treated as if their result row didn't
+    // exist — they don't contribute to PASS, FAIL, total, or score.
     sqlx::query(r#"
         UPDATE systems SET
             tests_passed = (
-                SELECT COUNT(*) FROM results
-                WHERE system_id = systems.id
-                  AND tenant_id = systems.tenant_id
-                  AND result    = 'PASS'
+                SELECT COUNT(*) FROM results r
+                WHERE r.system_id = systems.id
+                  AND r.tenant_id = systems.tenant_id
+                  AND r.result    = 'PASS'
+                  AND r.excluded = 0
             ),
             tests_failed = (
-                SELECT COUNT(*) FROM results
-                WHERE system_id = systems.id
-                  AND tenant_id = systems.tenant_id
-                  AND result    = 'FAIL'
+                SELECT COUNT(*) FROM results r
+                WHERE r.system_id = systems.id
+                  AND r.tenant_id = systems.tenant_id
+                  AND r.result    = 'FAIL'
+                  AND r.excluded = 0
             ),
             total_tests = (
-                SELECT COUNT(*) FROM results
-                WHERE system_id = systems.id
-                  AND tenant_id = systems.tenant_id
+                SELECT COUNT(*) FROM results r
+                WHERE r.system_id = systems.id
+                  AND r.tenant_id = systems.tenant_id
+                  AND r.excluded = 0
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
-                ELSE (CAST(SUM(CASE WHEN result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
                 END
-                FROM results
-                WHERE system_id = systems.id
-                  AND tenant_id = systems.tenant_id
-                  AND result != 'NA'
+                FROM results r
+                WHERE r.system_id = systems.id
+                  AND r.tenant_id = systems.tenant_id
+                  AND r.result != 'NA'
+                  AND r.excluded = 0
             )
         WHERE status = 'active'
     "#)
@@ -201,6 +212,7 @@ async fn update_policy_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
                             WHERE policy_id = policies.id
                               AND tenant_id = policies.tenant_id
                         )
+                        AND r.excluded = 0
                     WHERE sip.policy_id = policies.id
                       AND sip.tenant_id = policies.tenant_id
                       AND s.status = 'active'
@@ -225,6 +237,7 @@ async fn update_policy_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
                             WHERE policy_id = policies.id
                               AND tenant_id = policies.tenant_id
                         )
+                        AND r.excluded = 0
                     WHERE sip.policy_id = policies.id
                       AND sip.tenant_id = policies.tenant_id
                       AND s.status = 'active'
@@ -256,6 +269,7 @@ async fn update_policy_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
                             WHERE policy_id = policies.id
                               AND tenant_id = policies.tenant_id
                         )
+                        AND r.excluded = 0
                     WHERE sip.policy_id = policies.id
                       AND sip.tenant_id = policies.tenant_id
                       AND s.status = 'active'

@@ -30,7 +30,7 @@ chrono = "0.4.44"
 sha1 = "0.10"
 sha2 = "0.10"
 regex = "1.10"
-self_replace = "1"
+self-replace = "1"
 
 [target.'cfg(unix)'.dependencies]
 uzers = "0.11"

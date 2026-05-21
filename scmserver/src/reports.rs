@@ -152,11 +152,13 @@ pub async fn save_policy_report_logic(
     }).collect();
 
     // Fetch system results — tenant_id is enforced on every join (M2 tenant isolation fix).
+    // Pull the excluded flag too so the saved snapshot freezes it for the audit trail.
     let raw_results = sqlx::query(r#"
         SELECT
             s.name AS system_name,
             t.name AS test_name,
-            res.result AS status_text
+            res.result AS status_text,
+            res.excluded AS is_excluded
         FROM tests_in_policy tip
         JOIN tests t ON tip.test_id = t.id
         JOIN results res ON t.id = res.test_id AND res.tenant_id = tip.tenant_id
@@ -175,6 +177,7 @@ pub async fn save_policy_report_logic(
         let t_name: String = row.get("test_name");
         let status_raw: String = row.get("status_text");
         let status = normalize_status(&status_raw).to_string();
+        let is_excluded: bool = row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0;
 
         let entry = reports_map.entry(s_name.clone()).or_insert(SystemReport {
             system_name: s_name,
@@ -182,9 +185,16 @@ pub async fn save_policy_report_logic(
             is_passed: false,
             pass_count: 0,
             fail_count: 0,
+            na_count: 0,
+            excluded_count: 0,
         });
 
-        entry.results.push(IndividualResult { test_name: t_name, status: status.clone() });
+        entry.results.push(IndividualResult {
+            test_name: t_name,
+            status: status.clone(),
+            is_excluded,
+            ..Default::default()
+        });
     }
 
     // Recalculate is_passed, pass_count, and fail_count after all results are collected.
@@ -192,8 +202,10 @@ pub async fn save_policy_report_logic(
     // All-NA systems (pass_count == 0 && fail_count == 0) are shown as "NOT APPLICABLE"
     // by the template — is_passed value does not affect their display.
     for entry in reports_map.values_mut() {
-        entry.pass_count = entry.results.iter().filter(|r| r.status == "PASS").count();
-        entry.fail_count = entry.results.iter().filter(|r| r.status == "FAIL").count();
+        entry.pass_count     = entry.results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
+        entry.fail_count     = entry.results.iter().filter(|r| !r.is_excluded && r.status == "FAIL").count();
+        entry.na_count       = entry.results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
+        entry.excluded_count = entry.results.iter().filter(|r| r.is_excluded).count();
         entry.is_passed = is_system_passed(entry.pass_count, entry.fail_count);
     }
 
@@ -315,12 +327,17 @@ pub async fn reports_view(
         }
     };
 
-    // Backfill pass_count/fail_count for reports saved before those fields existed.
+    // Always recompute counts from the saved results array. Older snapshots
+    // may have pass/fail set but lack na/excluded; conditionally backfilling
+    // (the previous approach) left na_count at zero for those. Recomputing is
+    // cheap and idempotent — results are the source of truth in the snapshot.
     for s in &mut system_reports {
-        if s.pass_count == 0 && s.fail_count == 0 && !s.results.is_empty() {
-            s.pass_count = s.results.iter().filter(|r| r.status == "PASS").count();
-            s.fail_count = s.results.iter().filter(|r| r.status == "FAIL").count();
-            s.is_passed  = is_system_passed(s.pass_count, s.fail_count);
+        if !s.results.is_empty() {
+            s.pass_count     = s.results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
+            s.fail_count     = s.results.iter().filter(|r| !r.is_excluded && r.status == "FAIL").count();
+            s.na_count       = s.results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
+            s.excluded_count = s.results.iter().filter(|r| r.is_excluded).count();
+            s.is_passed      = is_system_passed(s.pass_count, s.fail_count);
         }
     }
 
@@ -337,11 +354,40 @@ pub async fn reports_view(
 
     let fail_count = system_reports.iter().filter(|s| s.fail_count > 0).count();
 
+    // Top-card totals (mirror the live report layout). Snapshots saved before
+    // these counters existed get computed on the fly from individual results.
+    let total_pass:     usize = system_reports.iter().map(|s| s.pass_count).sum();
+    let total_fail:     usize = system_reports.iter().map(|s| s.fail_count).sum();
+    let total_na:       usize = system_reports.iter().map(|s| s.na_count).sum();
+    let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
+    let in_scope = system_reports.iter().filter(|s| s.pass_count > 0 || s.fail_count > 0).count();
+    let compliance_score: f64 = if in_scope == 0 { -1.0 } else {
+        let compliant = system_reports.iter().filter(|s| s.fail_count == 0 && s.pass_count > 0).count();
+        (compliant as f64 / in_scope as f64) * 100.0
+    };
+
+    // Compliance thresholds — same source as live policy report / system report.
+    let compliance_sat: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_sat'",
+    )
+    .bind(&auth.tenant_id).fetch_one(&pool).await.unwrap_or(80);
+    let compliance_marginal: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_marginal'",
+    )
+    .bind(&auth.tenant_id).fetch_one(&pool).await.unwrap_or(60);
+
     let mut context = Context::new();
     context.insert("report", &report);
     context.insert("tests_metadata", &tests_metadata);
     context.insert("system_reports", &system_reports);
     context.insert("fail_count", &fail_count);
+    context.insert("total_pass", &total_pass);
+    context.insert("total_fail", &total_fail);
+    context.insert("total_na", &total_na);
+    context.insert("total_excluded", &total_excluded);
+    context.insert("compliance_score", &compliance_score);
+    context.insert("compliance_sat", &compliance_sat);
+    context.insert("compliance_marginal", &compliance_marginal);
     context.insert("live_policy_id", &live_policy_id);
     context.insert("is_smtp_configured", &is_smtp_configured(&pool).await);
     if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
@@ -480,12 +526,17 @@ async fn fetch_archive_policy_report(
         report.report_results.as_deref().unwrap_or("[]"),
     ).unwrap_or_default();
 
-    // Backfill pass_count/fail_count for reports saved before those fields existed.
+    // Always recompute counts from the saved results array. Older snapshots
+    // may have pass/fail set but lack na/excluded; conditionally backfilling
+    // (the previous approach) left na_count at zero for those. Recomputing is
+    // cheap and idempotent — results are the source of truth in the snapshot.
     for s in &mut system_reports {
-        if s.pass_count == 0 && s.fail_count == 0 && !s.results.is_empty() {
-            s.pass_count = s.results.iter().filter(|r| r.status == "PASS").count();
-            s.fail_count = s.results.iter().filter(|r| r.status == "FAIL").count();
-            s.is_passed  = is_system_passed(s.pass_count, s.fail_count);
+        if !s.results.is_empty() {
+            s.pass_count     = s.results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
+            s.fail_count     = s.results.iter().filter(|r| !r.is_excluded && r.status == "FAIL").count();
+            s.na_count       = s.results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
+            s.excluded_count = s.results.iter().filter(|r| r.is_excluded).count();
+            s.is_passed      = is_system_passed(s.pass_count, s.fail_count);
         }
     }
 
@@ -624,29 +675,49 @@ fn build_archive_policy_pdf(
         );
         doc.push(elements::Break::new(0.5));
 
-        let compliant_count = system.results.iter().filter(|r| r.status == "PASS").count();
-        let violation_count = system.results.iter().filter(|r| r.status == "FAIL").count();
+        // Excluded findings are not counted as PASS or FAIL — match the three-way
+        // verdict (Compliant / Non-Compliant / Not Applicable) used on screen.
+        let compliant_count = system.pass_count;
+        let violation_count = system.fail_count;
+        let na_count        = system.na_count;
+        let excluded_count  = system.excluded_count;
+        let exempt = compliant_count == 0 && violation_count == 0;
+        let (status_text, status_color) = if exempt {
+            ("Not Applicable", style::Color::Rgb(120, 120, 120))
+        } else if system.is_passed {
+            ("Compliant", style::Color::Rgb(0, 128, 0))
+        } else {
+            ("Non-Compliant", style::Color::Rgb(200, 0, 0))
+        };
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, true));
 
         if let Err(e) = summary_table.push_row(vec![
             cell(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
-            cell(elements::Text::new(if system.is_passed { "Compliant" } else { "Non-Compliant" })
-                .styled(style::Style::new()
-                    .with_color(if system.is_passed { style::Color::Rgb(0, 128, 0) } else { style::Color::Rgb(200, 0, 0) })
-                    .bold())),
+            cell(elements::Text::new(status_text)
+                .styled(style::Style::new().with_color(status_color).bold())),
         ]) { error!("Failed to add compliance status row to PDF: {}", e); }
 
         if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
-            cell(elements::Text::new(format!("Critical — {}", violation_count))),
-        ]) { error!("Failed to add violation count row to PDF: {}", e); }
+            cell(elements::Text::new("Passed").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", compliant_count))),
+        ]) { error!("Failed to add passed count row to PDF: {}", e); }
 
         if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
-            cell(elements::Text::new(format!("{}", compliant_count))),
-        ]) { error!("Failed to add compliant count row to PDF: {}", e); }
+            cell(elements::Text::new("Failed").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", violation_count))),
+        ]) { error!("Failed to add failed count row to PDF: {}", e); }
+
+        if let Err(e) = summary_table.push_row(vec![
+            cell(elements::Text::new("Not Applicable").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", na_count))),
+        ]) { error!("Failed to add NA count row to PDF: {}", e); }
+
+        if let Err(e) = summary_table.push_row(vec![
+            cell(elements::Text::new("Excluded").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", excluded_count))),
+        ]) { error!("Failed to add excluded count row to PDF: {}", e); }
 
         doc.push(summary_table);
         doc.push(elements::Break::new(1.0));
@@ -664,11 +735,15 @@ fn build_archive_policy_pdf(
         ]) { error!("Failed to add rules table header to PDF: {}", e); }
 
         for res in &system.results {
-            let (status_text, status_color) = match res.status.as_str() {
-                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
-                "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
-                "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
-                _      => ("—",    style::Color::Rgb(150, 150, 150)),
+            let (status_text, status_color) = if res.is_excluded {
+                ("EXCLUDED", style::Color::Rgb(100, 100, 100))
+            } else {
+                match res.status.as_str() {
+                    "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
+                    "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
+                    "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
+                    _      => ("—",    style::Color::Rgb(150, 150, 150)),
+                }
             };
             if let Err(e) = rules_table.push_row(vec![
                 cell(elements::Paragraph::new(&res.test_name)),
@@ -1192,6 +1267,11 @@ fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Ve
         doc.push(elements::Break::new(0.3));
         doc.push(elements::Text::new(format!("Verdict: {}", verdict))
             .styled(style::Style::new().bold().with_color(verdict_color)));
+        doc.push(elements::Break::new(0.2));
+        doc.push(elements::Paragraph::new(format!(
+            "Passed: {}    Failed: {}    Not Applicable: {}    Excluded: {}",
+            policy.pass_count, policy.fail_count, policy.na_count, policy.excluded_count
+        )).styled(style::Style::new().with_font_size(9).with_color(style::Color::Rgb(80, 80, 80))));
         doc.push(elements::Break::new(0.5));
 
         let mut rules_table = elements::TableLayout::new(vec![5, 1]);
@@ -1201,11 +1281,15 @@ fn build_system_report_pdf(data: &SystemReportData, subtitle: &str) -> Result<Ve
             cell(elements::Text::new("Status").styled(style::Style::new().bold())),
         ]);
         for res in &policy.results {
-            let (status_text, color) = match res.status.as_str() {
-                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
-                "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
-                "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
-                _      => ("—",    style::Color::Rgb(150, 150, 150)),
+            let (status_text, color) = if res.is_excluded {
+                ("EXCLUDED", style::Color::Rgb(100, 100, 100))
+            } else {
+                match res.status.as_str() {
+                    "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
+                    "FAIL" => ("FAIL", style::Color::Rgb(200, 0, 0)),
+                    "NA"   => ("NA",   style::Color::Rgb(100, 100, 100)),
+                    _      => ("—",    style::Color::Rgb(150, 150, 150)),
+                }
             };
             let _ = rules_table.push_row(vec![
                 cell(elements::Paragraph::new(&res.test_name)),

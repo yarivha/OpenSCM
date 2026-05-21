@@ -373,6 +373,12 @@ pub struct PolicyResultGroup {
     pub is_passed: bool,
     pub pass_count: usize,
     pub fail_count: usize,
+    /// NA results (status == "NA" or "NOT_SCANNED"; excludes excluded findings).
+    #[serde(default)]
+    pub na_count: usize,
+    /// EXCLUDED results — admin-suppressed findings, treated as NA in scoring.
+    #[serde(default)]
+    pub excluded_count: usize,
 }
 
 // All data needed to render the system live-report page or a saved snapshot.
@@ -441,7 +447,24 @@ pub struct ReportData {
     pub submitter_name: String,
     pub tests_metadata: Vec<TestMeta>,
     pub system_reports: Vec<SystemReport>,
+    /// Totals across all systems — same shape as SystemReportData so the policy
+    /// report's top card can mirror the system report's layout. All four default
+    /// to 0 in older saved snapshots that lack the field.
+    #[serde(default)]
+    pub total_pass: usize,
+    #[serde(default)]
+    pub total_fail: usize,
+    #[serde(default)]
+    pub total_na: usize,
+    #[serde(default)]
+    pub total_excluded: usize,
+    /// % of in-scope systems that are COMPLIANT (pass>0 && fail==0). -1.0 means
+    /// no in-scope systems with any non-excluded results (all-NA, "Not Scanned").
+    #[serde(default = "neg_one")]
+    pub compliance_score: f64,
 }
+
+fn neg_one() -> f64 { -1.0 }
 
 
 
@@ -467,13 +490,34 @@ pub struct SystemReport {
     /// Number of FAIL results — used by templates for the all-NA "exempt" check.
     #[serde(default)]
     pub fail_count: usize,
+    /// Number of NA results (excluded from both numerator and denominator in scoring).
+    #[serde(default)]
+    pub na_count: usize,
+    /// Number of EXCLUDED results — admin-suppressed findings, also treated as NA.
+    #[serde(default)]
+    pub excluded_count: usize,
 }
 
 // A single test result (test name + PASS/FAIL/NA status) inside a report.
-#[derive(Debug, Serialize, Deserialize)]
+//
+// is_excluded mirrors the `results.excluded` column for a (system, test) pair;
+// excluded results render with an "Excluded" badge and
+// are treated as NA in compliance scoring. Default false so deserialising
+// older archive snapshots (saved before the field existed) still works.
+// is_excludable is a render hint — true on the live policy report (right-click
+// menu should appear), false on archived snapshots (frozen, no menu).
+#[derive(Debug, Default, Serialize, Deserialize)]
 pub struct IndividualResult {
     pub test_name: String,
     pub status: String,
+    #[serde(default)]
+    pub is_excluded: bool,
+    #[serde(default, skip_serializing_if = "std::ops::Not::not")]
+    pub is_excludable: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub system_id: Option<i64>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub test_id: Option<i64>,
 }
 
 

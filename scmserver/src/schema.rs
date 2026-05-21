@@ -124,7 +124,6 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             ip TEXT,
             os TEXT,
             arch TEXT,
-            platform TEXT,
             status VARCHAR(32),
             groups TEXT,
             auth_public_key TEXT,
@@ -137,7 +136,6 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             tests_passed INTEGER DEFAULT 0,
             tests_failed INTEGER DEFAULT 0,
             total_tests INTEGER DEFAULT 0,
-            upgrade_requested INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
@@ -286,29 +284,49 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    // Commands table
+    // Commands table — pending agent actions, dispatched on the next heartbeat.
+    //   command_type = 'TEST'    → test_id is the FK into tests, queued by a policy run.
+    //   command_type = 'UPGRADE' → test_id is NULL, queued by an admin from the Systems list.
+    // The compound PK (tenant_id, system_id, test_id) enforces per-test uniqueness for
+    // TEST rows; the partial unique index below enforces at most one UPGRADE per system.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS commands (
-            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
-            system_id INTEGER,
-            test_id INTEGER,
+            tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
+            system_id    INTEGER,
+            test_id      INTEGER,
+            command_type TEXT NOT NULL DEFAULT 'TEST',
             PRIMARY KEY (tenant_id, system_id, test_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
-            FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
+            FOREIGN KEY (test_id)   REFERENCES tests   (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
     .await?;
 
+    sqlx::query(
+        "CREATE UNIQUE INDEX IF NOT EXISTS idx_cmd_upgrade_uniq
+            ON commands(tenant_id, system_id) WHERE command_type = 'UPGRADE'",
+    )
+    .execute(pool)
+    .await?;
+
     // Results table
+    // The excluded* columns are per-(system, test) finding suppression set by
+    // an Editor from the live policy report (right-click → Exclude). Excluded
+    // rows are treated as NA at scoring/render time. The heartbeat UPSERT
+    // only writes `result` + `last_updated`, so re-running the policy never
+    // resets an exclusion. ON DELETE CASCADE on system / test removes them.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS results (
-            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
-            system_id INTEGER,
-            test_id INTEGER,
-            result TEXT,
+            tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
+            system_id    INTEGER,
+            test_id      INTEGER,
+            result       TEXT,
             last_updated TEXT,
+            excluded     INTEGER NOT NULL DEFAULT 0,
+            excluded_by  TEXT,
+            excluded_at  DATETIME,
             PRIMARY KEY (tenant_id, system_id, test_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
@@ -1369,11 +1387,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     }
 
     // v17 → v18: agent auto-upgrade support.
-    //   • agent_packages table  — one row per client platform; upserted on startup.
-    //   • systems.platform      — normalised "{arch}-{os}" derived from heartbeat.
-    //   • systems.upgrade_requested — flag cleared after UPGRADE command is dispatched.
+    //   • agent_packages table       — one row per client platform; upserted on startup.
+    //   • commands.command_type      — extends the existing test-dispatch queue to also
+    //                                  carry UPGRADE rows (test_id = NULL for those).
+    //   • idx_cmd_upgrade_uniq       — partial unique index so each system can have at
+    //                                  most one queued UPGRADE row.
     if version < 18 {
-        info!("Running schema migration v17 → v18 (agent_packages + systems.platform/upgrade_requested)...");
+        info!("Running schema migration v17 → v18 (agent_packages + commands.command_type)...");
 
         sqlx::query(
             "CREATE TABLE IF NOT EXISTS agent_packages (
@@ -1387,24 +1407,55 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool)
         .await?;
 
-        if !column_exists(pool, "systems", "platform").await {
-            let _ = sqlx::query("ALTER TABLE systems ADD COLUMN platform TEXT")
-                .execute(pool)
-                .await;
-        }
-
-        if !column_exists(pool, "systems", "upgrade_requested").await {
-            let _ = sqlx::query(
-                "ALTER TABLE systems ADD COLUMN upgrade_requested INTEGER NOT NULL DEFAULT 0",
+        if !column_exists(pool, "commands", "command_type").await {
+            sqlx::query(
+                "ALTER TABLE commands ADD COLUMN command_type TEXT NOT NULL DEFAULT 'TEST'",
             )
             .execute(pool)
-            .await;
+            .await?;
         }
+
+        sqlx::query(
+            "CREATE UNIQUE INDEX IF NOT EXISTS idx_cmd_upgrade_uniq
+                ON commands(tenant_id, system_id) WHERE command_type = 'UPGRADE'",
+        )
+        .execute(pool)
+        .await?;
 
         sqlx::query("UPDATE schema_info SET version = 18")
             .execute(pool)
             .await?;
         info!("Schema migration v17 → v18 complete.");
+    }
+
+    // v18 → v19: per-finding exclusions.
+    //   • results.excluded / excluded_by / excluded_at — Editor-set suppression
+    //     of a (system, test) result; treated as NA in scoring. The heartbeat
+    //     UPSERT only touches `result` + `last_updated`, so re-running tests
+    //     never clears the flag — it sticks until the system or test is deleted.
+    if version < 19 {
+        info!("Running schema migration v18 → v19 (results.excluded)...");
+
+        if !column_exists(pool, "results", "excluded").await {
+            sqlx::query("ALTER TABLE results ADD COLUMN excluded INTEGER NOT NULL DEFAULT 0")
+                .execute(pool)
+                .await?;
+        }
+        if !column_exists(pool, "results", "excluded_by").await {
+            sqlx::query("ALTER TABLE results ADD COLUMN excluded_by TEXT")
+                .execute(pool)
+                .await?;
+        }
+        if !column_exists(pool, "results", "excluded_at").await {
+            sqlx::query("ALTER TABLE results ADD COLUMN excluded_at DATETIME")
+                .execute(pool)
+                .await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 19")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v18 → v19 complete.");
     }
 
     Ok(())

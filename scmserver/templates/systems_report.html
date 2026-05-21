@@ -16,6 +16,34 @@
     .btn, .main-footer, .breadcrumb { display: none !important; }
     .content-wrapper { margin-left: 0 !important; }
   }
+
+  /* Right-click context menu for exclude / unexclude (mirrors policies_report.html) */
+  .result-row { cursor: context-menu; }
+  #exclude-menu {
+    position: absolute;
+    z-index: 10000;
+    min-width: 180px;
+    background: #fff;
+    border: 1px solid rgba(0,0,0,0.15);
+    border-radius: 4px;
+    box-shadow: 0 6px 12px rgba(0,0,0,0.175);
+    display: none;
+    padding: 4px 0;
+    font-size: 0.9rem;
+  }
+  .dark-mode #exclude-menu { background: #343a40; border-color: rgba(255,255,255,0.15); color: #fff; }
+  #exclude-menu button {
+    display: block;
+    width: 100%;
+    padding: 6px 16px;
+    border: 0;
+    background: transparent;
+    text-align: left;
+    color: inherit;
+    cursor: pointer;
+  }
+  #exclude-menu button:hover { background: rgba(0,0,0,0.05); }
+  .dark-mode #exclude-menu button:hover { background: rgba(255,255,255,0.08); }
 </style>
 {% endblock %}
 
@@ -145,6 +173,18 @@
             <small class="text-muted ml-1">v{{ policy.policy_version }}</small>
           </h3>
           <div class="card-tools">
+            <span class="badge badge-success-soft text-success mr-1" title="Passed">
+              <i class="fas fa-check-circle mr-1"></i>{{ policy.pass_count }}
+            </span>
+            <span class="badge badge-danger-soft text-danger mr-1" title="Failed">
+              <i class="fas fa-times-circle mr-1"></i>{{ policy.fail_count }}
+            </span>
+            <span class="badge badge-light text-secondary mr-1" title="Not Applicable">
+              <i class="fas fa-minus-circle mr-1"></i>{{ policy.na_count }}
+            </span>
+            <span class="badge badge-light text-secondary mr-2" title="Excluded">
+              <i class="fas fa-ban mr-1"></i>{{ policy.excluded_count }}
+            </span>
             <span class="badge {% if exempt %}badge-secondary{% elif policy.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1 mr-1">
               {% if exempt %}NOT APPLICABLE{% elif policy.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
             </span>
@@ -167,7 +207,12 @@
             </thead>
             <tbody>
               {% for res in policy.results %}
-              <tr>
+              <tr {% if res.is_excludable and is_editor and res.system_id and res.test_id and res.status != "NOT_SCANNED" %}
+                  class="result-row"
+                  data-system-id="{{ res.system_id }}"
+                  data-test-id="{{ res.test_id }}"
+                  data-excluded="{{ res.is_excluded }}"
+                  {% endif %}>
                 <td style="padding-left: 20px;">
                   {% set meta = tests_metadata | filter(attribute="name", value=res.test_name) | first %}
                   {% if meta %}
@@ -187,7 +232,9 @@
                   {% endif %}
                 </td>
                 <td class="text-center">
-                  {% if res.status == "PASS" %}
+                  {% if res.is_excluded %}
+                    <span class="badge badge-secondary" title="Excluded — does not affect compliance score"><i class="fas fa-ban mr-1"></i>EXCLUDED</span>
+                  {% elif res.status == "PASS" %}
                     <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
                   {% elif res.status == "NA" %}
                     <span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>
@@ -300,9 +347,59 @@
     </div>
   </div>
 </div>
+
+{# Right-click context menu — only rendered for Editors on the live report #}
+{% if is_editor %}
+<div id="exclude-menu" role="menu">
+  <form id="exclude-menu-form" method="POST" style="margin:0;">
+    <button type="submit"><i class="fas fa-ban mr-2"></i><span id="exclude-menu-label">Exclude</span></button>
+  </form>
+</div>
+{% endif %}
+
 {% endblock %}
 
 {% block scripts %}
+{% if is_editor %}
+<script>
+  // Right-click on a result row → choose Exclude or Unexclude. POST target is
+  // /systems/report/<sid>/{exclude|unexclude}/<tid> so the redirect lands back
+  // on this same system report.
+  (function () {
+    var menu  = document.getElementById('exclude-menu');
+    var form  = document.getElementById('exclude-menu-form');
+    var label = document.getElementById('exclude-menu-label');
+    if (!menu || !form || !label) return;
+
+    function hideMenu() { menu.style.display = 'none'; }
+
+    document.addEventListener('contextmenu', function (e) {
+      var row = e.target.closest('.result-row');
+      if (!row) return;
+      e.preventDefault();
+      var systemId = row.getAttribute('data-system-id');
+      var testId   = row.getAttribute('data-test-id');
+      var excluded = row.getAttribute('data-excluded') === 'true';
+      var action = excluded
+        ? '/systems/report/' + systemId + '/unexclude/' + testId
+        : '/systems/report/' + systemId + '/exclude/' + testId;
+      form.setAttribute('action', action);
+      label.textContent = excluded ? 'Unexclude' : 'Exclude';
+      menu.style.display = 'block';
+      menu.style.left = e.pageX + 'px';
+      menu.style.top  = e.pageY + 'px';
+    });
+
+    document.addEventListener('click', hideMenu);
+    document.addEventListener('scroll', hideMenu, true);
+    window.addEventListener('blur', hideMenu);
+    document.addEventListener('keydown', function (e) {
+      if (e.key === 'Escape') hideMenu();
+    });
+  })();
+</script>
+{% endif %}
+
 <script>
   $('#testDetailModal').on('show.bs.modal', function (event) {
     var trigger = $(event.relatedTarget);

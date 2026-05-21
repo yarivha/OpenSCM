@@ -1,54 +1,57 @@
 // =============================================================================
 // agents.rs — client-agent binary distribution and auto-upgrade support
 //
-// startup_scan
-//   Called once after DB migrations on server startup.  Scans the agents
-//   directory for files matching `scmclient-{platform}[.exe]`, reads the
-//   version from a `VERSION` sentinel file in the same directory, computes
-//   SHA256 for each binary, and upserts agent_packages.  If the directory
-//   or VERSION file is absent the scan is skipped silently — deployments
-//   that don't ship agents simply have no upgrade packages available.
+// Agent binaries are embedded into the server binary at compile time via
+// include_dir! in lib.rs (under `static/agents/`). At runtime they are served
+// by the regular `/static/<file>` route — no separate download handler is
+// needed, and there is no on-disk agents directory to manage. The trade-off
+// is a bigger server binary in exchange for a single-file deployment.
 //
-// serve_agent
-//   Public HTTP handler — GET /agents/:filename streams the binary from the
-//   agents directory without authentication.  Path traversal is prevented by
-//   stripping all directory components before resolving the file path.  The
-//   downloading client verifies the SHA256 independently.
+// startup_scan
+//   Called once after DB migrations on server startup. Iterates the embedded
+//   `static/agents/` directory, computes SHA256 over each binary's in-memory
+//   bytes, and upserts agent_packages. The agent version is the server's own
+//   CARGO_PKG_VERSION — embedded agents are always built alongside the server
+//   in the same release, so the two are guaranteed to match. If the directory
+//   is empty (e.g. a dev build with no bundled agents) the scan is skipped.
 // =============================================================================
 
-use axum::{
-    body::Body,
-    extract::Path,
-    http::{header, StatusCode},
-    response::IntoResponse,
-};
 use sha2::{Digest, Sha256};
 use sqlx::SqlitePool;
-use std::path::Path as FsPath;
-use tokio::fs::File;
-use tokio::io::AsyncReadExt;
-use tokio_util::io::ReaderStream;
-use tracing::{error, info, warn};
+use tracing::{error, info};
 
-use crate::config::agents_path;
+use crate::STATIC_FILES_DIR;
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: sha256_file
-// Reads a file in 64 KiB chunks and returns its lowercase hex SHA256 digest.
+// Helper: derive_platform
+// Converts the raw arch + os strings from the agent heartbeat into a normalised
+// "{arch}-{os_type}" string (e.g. "x86_64-linux", "aarch64-linux",
+// "x86_64-windows") that matches the filenames in the agents directory and the
+// keys in the agent_packages table.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn sha256_file(path: &str) -> Result<String, std::io::Error> {
-    let mut file = File::open(path).await?;
-    let mut hasher = Sha256::new();
-    let mut buf = [0u8; 65536];
-    loop {
-        let n = file.read(&mut buf).await?;
-        if n == 0 {
-            break;
-        }
-        hasher.update(&buf[..n]);
-    }
-    Ok(format!("{:x}", hasher.finalize()))
+pub fn derive_platform(arch: &str, os: &str) -> String {
+    // os_info reports macOS as "Mac OS 14.4.1" (with a space) — collapse all
+    // whitespace before substring matching so "mac os" and "macos" both hit.
+    let os_norm: String = os
+        .to_lowercase()
+        .chars()
+        .filter(|c| !c.is_whitespace())
+        .collect();
+    let os_type = if os_norm.contains("windows") {
+        "windows"
+    } else if os_norm.contains("darwin")
+        || os_norm.contains("macos")
+        || os_norm.contains("osx")
+        || os_norm.contains("apple")
+    {
+        "macos"
+    } else if os_norm.contains("freebsd") {
+        "freebsd"
+    } else {
+        "linux"
+    };
+    format!("{}-{}", arch, os_type)
 }
 
 
@@ -72,65 +75,47 @@ fn platform_from_filename(name: &str) -> Option<String> {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // startup_scan
-// Scans the agents directory and upserts agent_packages for every recognised
-// client binary found there.  The version string is read from a `VERSION`
-// file that the CI build writes alongside the binaries.
+// Walks the embedded `static/agents/` directory and upserts agent_packages
+// for every recognised client binary found there. The version string is read
+// from a `VERSION` file bundled alongside the binaries by the CI workflow.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn startup_scan(pool: &SqlitePool) {
-    let dir = agents_path();
-
-    // Read version from the VERSION sentinel written by the build script.
-    let version_path = format!("{}/VERSION", dir);
-    let version = match tokio::fs::read_to_string(&version_path).await {
-        Ok(v) => v.trim().to_string(),
-        Err(e) => {
-            // Not an error — installations that don't ship client binaries
-            // simply don't have an agents directory.
-            info!(
-                "No agents/VERSION file at '{}': {} — upgrade packages unavailable.",
-                version_path, e
-            );
+    let agents_dir = match STATIC_FILES_DIR.get_dir("agents") {
+        Some(d) => d,
+        None => {
+            // Dev builds typically don't bundle client binaries; the directory
+            // is absent or empty and the upgrade feature is simply unavailable.
+            info!("No bundled agents directory — upgrade packages unavailable.");
             return;
         }
     };
 
-    if version.is_empty() {
-        warn!("agents/VERSION is empty — skipping agent scan.");
-        return;
-    }
-
-    let mut entries = match tokio::fs::read_dir(dir).await {
-        Ok(e) => e,
-        Err(e) => {
-            warn!(
-                "Cannot read agents directory '{}': {} — upgrade packages unavailable.",
-                dir, e
-            );
-            return;
-        }
-    };
+    let version = env!("CARGO_PKG_VERSION");
 
     let mut count: u32 = 0;
 
-    while let Ok(Some(entry)) = entries.next_entry().await {
-        let name = entry.file_name().to_string_lossy().to_string();
+    for file in agents_dir.files() {
+        // file.path() returns "agents/scmclient-x86_64-linux" — we want the
+        // bare filename.
+        let name = match file.path().file_name().and_then(|n| n.to_str()) {
+            Some(n) => n,
+            None => continue,
+        };
 
-        let platform = match platform_from_filename(&name) {
+        let platform = match platform_from_filename(name) {
             Some(p) => p,
-            None => continue, // VERSION file and other non-binary files
+            None => continue, // VERSION file and anything else
         };
 
-        let file_path = format!("{}/{}", dir, name);
-
-        let sha256 = match sha256_file(&file_path).await {
-            Ok(h) => h,
-            Err(e) => {
-                error!("Failed to compute SHA256 for '{}': {}", file_path, e);
-                continue;
-            }
+        let sha256 = {
+            let mut hasher = Sha256::new();
+            hasher.update(file.contents());
+            format!("{:x}", hasher.finalize())
         };
 
-        // URL is intentionally relative so it works behind any reverse proxy.
+        // Relative URL — served by the catch-all route which forwards to
+        // STATIC_FILES_DIR.get_file("agents/<name>"). The client prepends the
+        // server base URL before fetching.
         let url = format!("/agents/{}", name);
 
         match sqlx::query(
@@ -167,45 +152,5 @@ pub async fn startup_scan(pool: &SqlitePool) {
             "Agent scan complete: {} platform(s) registered at v{}.",
             count, version
         );
-    }
-}
-
-
-// ─────────────────────────────────────────────────────────────────────────────
-// GET /agents/:filename  [public — no session auth required]
-// Streams a client binary from the agents directory.  Only files whose names
-// start with `scmclient-` are served; everything else returns 404.  Directory
-// traversal is blocked by using only the bare filename component.
-// ─────────────────────────────────────────────────────────────────────────────
-pub async fn serve_agent(Path(filename): Path<String>) -> impl IntoResponse {
-    // Strip any directory components — no path traversal.
-    let bare_name = FsPath::new(&filename)
-        .file_name()
-        .and_then(|n| n.to_str())
-        .unwrap_or("");
-
-    if bare_name.is_empty() || !bare_name.starts_with("scmclient-") {
-        return (StatusCode::NOT_FOUND, "Not found").into_response();
-    }
-
-    let file_path = format!("{}/{}", agents_path(), bare_name);
-
-    match File::open(&file_path).await {
-        Ok(file) => {
-            let stream = ReaderStream::new(file);
-            (
-                StatusCode::OK,
-                [
-                    (header::CONTENT_TYPE, "application/octet-stream"),
-                    (
-                        header::CONTENT_DISPOSITION,
-                        &format!("attachment; filename=\"{}\"", bare_name) as &str,
-                    ),
-                ],
-                Body::from_stream(stream),
-            )
-                .into_response()
-        }
-        Err(_) => (StatusCode::NOT_FOUND, "Agent binary not found").into_response(),
     }
 }

@@ -169,6 +169,18 @@
             <small class="text-muted ml-1">v{{ policy.policy_version }}</small>
           </h3>
           <div class="card-tools">
+            <span class="badge badge-success-soft text-success mr-1" title="Passed">
+              <i class="fas fa-check-circle mr-1"></i>{{ policy.pass_count }}
+            </span>
+            <span class="badge badge-danger-soft text-danger mr-1" title="Failed">
+              <i class="fas fa-times-circle mr-1"></i>{{ policy.fail_count }}
+            </span>
+            <span class="badge badge-light text-secondary mr-1" title="Not Applicable">
+              <i class="fas fa-minus-circle mr-1"></i>{{ policy.na_count }}
+            </span>
+            <span class="badge badge-light text-secondary mr-2" title="Excluded">
+              <i class="fas fa-ban mr-1"></i>{{ policy.excluded_count }}
+            </span>
             <span class="badge {% if exempt %}badge-secondary{% elif policy.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1 mr-1">
               {% if exempt %}NOT APPLICABLE{% elif policy.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
             </span>
@@ -211,7 +223,9 @@
                   {% endif %}
                 </td>
                 <td class="text-center">
-                  {% if res.status == "PASS" %}
+                  {% if res.is_excluded %}
+                    <span class="badge badge-secondary" title="Excluded — did not affect compliance score"><i class="fas fa-ban mr-1"></i>EXCLUDED</span>
+                  {% elif res.status == "PASS" %}
                     <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
                   {% elif res.status == "NA" %}
                     <span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>

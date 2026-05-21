@@ -128,7 +128,10 @@ pub async fn system_groups_add(
                 trust_proof: None,
                 created_date: None,
                 last_seen: None,
-            is_offline: false,
+                is_offline: false,
+                platform: None,
+                upgrade_available: false,
+                upgrade_version: None,
             })
             .collect(),
         Err(e) => {
@@ -403,6 +406,9 @@ pub async fn system_groups_edit(
                 created_date: None,
                 last_seen: None,
                 is_offline: false,
+                platform: None,
+                upgrade_available: false,
+                upgrade_version: None,
             })
             .collect(),
         Err(e) => {

@@ -18,28 +18,7 @@ use serde_json::value::RawValue;
 use crate::models::{SignedRequest, SignedResult, UnsignedPayload, ComplianceResult, SignedResponse, Test, TestCondition, TestWithConditions, TestPayload};
 
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Helper: derive_platform
-// Converts the raw arch + os strings from the agent heartbeat into a normalised
-// "{arch}-{os_type}" string (e.g. "x86_64-linux", "aarch64-linux",
-// "x86_64-windows") that matches the filenames in the agents directory.
-// ─────────────────────────────────────────────────────────────────────────────
-fn derive_platform(arch: &str, os: &str) -> String {
-    let os_lower = os.to_lowercase();
-    let os_type = if os_lower.contains("windows") {
-        "windows"
-    } else if os_lower.contains("darwin")
-        || os_lower.contains("macos")
-        || os_lower.contains("apple")
-    {
-        "macos"
-    } else if os_lower.contains("freebsd") {
-        "freebsd"
-    } else {
-        "linux"
-    };
-    format!("{}-{}", arch, os_type)
-}
+use crate::agents::derive_platform;
 
 
 #[derive(sqlx::FromRow)]
@@ -433,10 +412,11 @@ pub async fn send(
                     }
                 };
 
-                // Update system info (including derived platform string).
-                let platform = derive_platform(&payload.arch, &payload.os);
+                // Update system info. Platform is derived from arch + os on every read
+                // rather than persisted — keeps the schema simple and means a binary
+                // rebuild can't get out of sync with stale stored data.
                 if let Err(e) = sqlx::query(
-                    "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, platform=?, status='active', last_seen=CURRENT_TIMESTAMP
+                    "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, status='active', last_seen=CURRENT_TIMESTAMP
                      WHERE id=? AND tenant_id=?",
                 )
                 .bind(&payload.hostname)
@@ -444,7 +424,6 @@ pub async fn send(
                 .bind(&payload.os)
                 .bind(&payload.ip)
                 .bind(&payload.arch)
-                .bind(&platform)
                 .bind(id)
                 .bind(tenant_id)
                 .execute(&mut *tx)
@@ -459,22 +438,22 @@ pub async fn send(
                         .into_response();
                 }
 
-                // Check whether an upgrade has been queued by an admin for this system.
-                // If upgrade_requested = 1 and agent_packages has a package for this
-                // platform, include an UPGRADE command and clear the flag.
-                let upgrade_requested: i64 = sqlx::query_scalar(
-                    "SELECT upgrade_requested FROM systems WHERE id = ? AND tenant_id = ?",
+                // Check whether an admin has queued an UPGRADE for this system — that
+                // shows up as a row in the commands table with command_type='UPGRADE'.
+                // The matching agent_packages row gives us the URL / SHA256 / version
+                // to ship in the heartbeat response.
+                let platform = derive_platform(&payload.arch, &payload.os);
+                let has_upgrade: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM commands
+                     WHERE tenant_id = ? AND system_id = ? AND command_type = 'UPGRADE'",
                 )
-                .bind(id)
                 .bind(tenant_id)
-                .fetch_optional(&pool)
+                .bind(id)
+                .fetch_one(&mut *tx)
                 .await
-                .ok()
-                .flatten()
                 .unwrap_or(0);
 
-                // Fetch upgrade metadata outside the transaction (read-only).
-                let upgrade_pkg = if upgrade_requested == 1 {
+                let upgrade_pkg = if has_upgrade > 0 {
                     sqlx::query_as::<_, crate::models::AgentPackage>(
                         "SELECT platform, version, sha256, url FROM agent_packages WHERE platform = ?",
                     )
@@ -486,11 +465,12 @@ pub async fn send(
                     None
                 };
 
-                // Fetch pending commands
+                // Fetch pending test commands. The INNER JOIN on tests.id naturally
+                // skips UPGRADE rows (test_id IS NULL).
                 let tests: Vec<Test> = match sqlx::query_as::<_, Test>(
                     "SELECT t.* FROM commands c
                      JOIN tests t ON c.test_id = t.id
-                     WHERE c.system_id = ? AND c.tenant_id = ?
+                     WHERE c.system_id = ? AND c.tenant_id = ? AND c.command_type = 'TEST'
                      LIMIT 500",
                 )
                 .bind(id)
@@ -550,14 +530,23 @@ pub async fn send(
                     tests_with_conditions.push(TestWithConditions { test, conditions, applicability });
                 }
 
-                // Clear delivered commands
-                if let Err(e) = sqlx::query(
-                    "DELETE FROM commands WHERE system_id = ? AND tenant_id = ?",
-                )
-                .bind(id)
-                .bind(tenant_id)
-                .execute(&mut *tx)
-                .await
+                // Clear only the commands we're about to deliver in this heartbeat:
+                //   • UPGRADE dispatch → wipe the UPGRADE row, KEEP the TEST rows so
+                //     they get re-dispatched after the client restarts on the new
+                //     binary. (Without this, an upgrade silently drops in-flight tests.)
+                //   • Otherwise        → wipe TEST rows as before. Any queued UPGRADE
+                //     row stays put for a future heartbeat once a matching package
+                //     becomes available.
+                let clear_sql = if upgrade_pkg.is_some() {
+                    "DELETE FROM commands WHERE system_id = ? AND tenant_id = ? AND command_type = 'UPGRADE'"
+                } else {
+                    "DELETE FROM commands WHERE system_id = ? AND tenant_id = ? AND command_type = 'TEST'"
+                };
+                if let Err(e) = sqlx::query(clear_sql)
+                    .bind(id)
+                    .bind(tenant_id)
+                    .execute(&mut *tx)
+                    .await
                 {
                     error!("Failed to clear commands for agent {}: {}", id, e);
                     tx.rollback().await.ok();
@@ -590,19 +579,10 @@ pub async fn send(
                     .map(TestPayload::from)
                     .collect();
 
-                // UPGRADE takes priority over TEST — the client replaces itself and
-                // restarts; pending tests will be re-queued and dispatched on the
-                // next heartbeat from the new binary.
+                // UPGRADE takes priority over TEST — the client will replace itself
+                // and restart; pending tests are re-queued on the next heartbeat from
+                // the new binary.
                 if let Some(pkg) = upgrade_pkg {
-                    // Clear the upgrade_requested flag so it is only sent once.
-                    let _ = sqlx::query(
-                        "UPDATE systems SET upgrade_requested = 0 WHERE id = ? AND tenant_id = ?",
-                    )
-                    .bind(id)
-                    .bind(tenant_id)
-                    .execute(&mut *tx)
-                    .await;
-
                     response_data = serde_json::json!({
                         "status": "approved",
                         "id": id,
@@ -819,6 +799,12 @@ pub async fn receive_result(
     );
 
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+    // IMPORTANT: the DO UPDATE clause lists ONLY `result` and `last_updated`.
+    // Per-finding exclusions live in the same row (excluded / excluded_by /
+    // excluded_at) and must NEVER be touched by a client heartbeat — that's
+    // the whole guarantee that re-running a policy cannot clear an exclusion.
+    // Do not change this to `INSERT OR REPLACE` (which would delete + re-insert
+    // and silently wipe the exclusion flag).
     if let Err(e) = sqlx::query(
         "INSERT INTO results (tenant_id, system_id, test_id, result, last_updated)
      VALUES (?, ?, ?, ?, ?)

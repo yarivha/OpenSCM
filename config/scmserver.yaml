@@ -37,14 +37,6 @@ contents:
     type: dir
     file_info:
       mode: 0755
-  - dst: "/var/lib/openscm/agents"  # Agent binaries for auto-upgrade
-    type: dir
-    file_info:
-      mode: 0755
-  - src: "build/agents/*"
-    dst: "/var/lib/openscm/agents/"
-    file_info:
-      mode: 0755
 
 overrides:
   archlinux:

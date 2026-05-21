@@ -362,5 +362,18 @@
 
 {% block scripts %}{% endblock %}
 
+<script>
+  // Strip one-shot flash query params from the URL after render so a browser
+  // refresh doesn't re-display the same success/error banner.
+  (function () {
+    var url = new URL(window.location.href);
+    if (url.searchParams.has('success_message') || url.searchParams.has('error_message')) {
+      url.searchParams.delete('success_message');
+      url.searchParams.delete('error_message');
+      window.history.replaceState({}, document.title, url.pathname + (url.search ? url.search : '') + url.hash);
+    }
+  })();
+</script>
+
 </body>
 </html>

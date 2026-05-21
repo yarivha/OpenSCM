@@ -70,9 +70,11 @@
               <button type="button" class="btn btn-info btn-sm mr-1" id="bulk-add-group-btn" title="Add to Group">
                 <i class="fas fa-layer-group mr-1"></i> Add to Group
               </button>
+              {% if is_admin %}
               <button type="button" class="btn btn-warning btn-sm mr-1" id="bulk-upgrade-btn" title="Upgrade Selected">
                 <i class="fas fa-arrow-up mr-1"></i> Upgrade
               </button>
+              {% endif %}
               <button type="button" class="btn btn-danger btn-sm" id="bulk-delete-btn" title="Delete Selected">
                 <i class="fas fa-trash mr-1"></i> Delete
               </button>
@@ -177,11 +179,10 @@
                           <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                         </a>
 
-                        {% if system.upgrade_available %}
+                        {% if system.upgrade_available and is_admin %}
                         <form method="POST" action="/systems/upgrade/{{ system.id }}" style="display:inline;"
-                              onsubmit="return confirm('Queue upgrade to v{{ system.upgrade_version }} for {{ system.name }}?')">  
-                          <button type="submit" class="btn btn-warning btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
-                                  {% if not is_editor %}disabled{% endif %}
+                              onsubmit="return confirm('Queue upgrade to v{{ system.upgrade_version }} for {{ system.name }}?')">
+                          <button type="submit" class="btn btn-warning btn-sm ml-1"
                                   title="Upgrade to v{{ system.upgrade_version }}">
                             <i class="fas fa-arrow-up mr-1"></i> v{{ system.upgrade_version }}
                           </button>

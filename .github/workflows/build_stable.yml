@@ -122,11 +122,13 @@ jobs:
         with:
           version: 0.16.0
 
-      - name: Download Agent Binaries
+      # Stage agent binaries into the server's static dir BEFORE compiling so
+      # include_dir! embeds them into the resulting scmserver binary.
+      - name: Stage Embedded Agent Binaries
         uses: actions/download-artifact@v4
         with:
           name: agents-bundle
-          path: build/agents
+          path: scmserver/static/agents
 
       - name: Build Binary
         run: |
@@ -204,6 +206,7 @@ jobs:
   build-windows-server:
     name: Windows · server
     runs-on: ubuntu-latest
+    needs: collect-agents
     steps:
       - uses: actions/checkout@v4
 
@@ -216,6 +219,12 @@ jobs:
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
+
+      - name: Stage Embedded Agent Binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: agents-bundle
+          path: scmserver/static/agents
 
       - name: Build and Package
         run: |
@@ -379,8 +388,8 @@ jobs:
   # ── COLLECT AGENTS ────────────────────────────────────────────────────────
   # Gathers all raw client binaries, renames them to the canonical
   # scmclient-{arch}-{os}[.exe] scheme expected by agents::startup_scan,
-  # writes a VERSION sentinel file, and uploads as a single artifact that
-  # the server packaging jobs download before running nfpm.
+  # and uploads as a single artifact that the server build jobs download into
+  # scmserver/static/agents/ before compiling so include_dir! embeds them.
   collect-agents:
     name: Collect · Agent Binaries
     runs-on: ubuntu-latest
@@ -431,9 +440,6 @@ jobs:
                      build/agents/scmclient-x86_64-macos \
                      build/agents/scmclient-x86_64-freebsd
 
-          # VERSION sentinel read by agents::startup_scan on server startup
-          echo "$VERSION" > build/agents/VERSION
-
           echo "Staged agents for v${VERSION}:"
           ls -lh build/agents/
 
@@ -448,6 +454,7 @@ jobs:
   build-docker:
     name: Docker · ${{ matrix.arch }}
     runs-on: ubuntu-latest
+    needs: collect-agents
     strategy:
       fail-fast: false
       matrix:
@@ -469,6 +476,12 @@ jobs:
       - uses: goto-bus-stop/setup-zig@v2
         with:
           version: 0.16.0
+
+      - name: Stage Embedded Agent Binaries
+        uses: actions/download-artifact@v4
+        with:
+          name: agents-bundle
+          path: scmserver/static/agents
 
       - name: Build Server Binary
         run: |

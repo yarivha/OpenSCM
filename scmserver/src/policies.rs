@@ -838,6 +838,120 @@ pub async fn policies_run(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: compute_policy_compliance_score
+// Returns the % of in-scope systems that are COMPLIANT (pass>0 && fail==0)
+// among systems that have at least one non-excluded PASS or FAIL. Returns -1.0
+// when every system is exempt (all-NA / all-excluded / not scanned) so the
+// template can render a "Not Scanned" badge instead of "0% Non-Compliant".
+// ─────────────────────────────────────────────────────────────────────────────
+fn compute_policy_compliance_score(system_reports: &[crate::models::SystemReport]) -> f64 {
+    let in_scope = system_reports.iter()
+        .filter(|s| s.pass_count > 0 || s.fail_count > 0)
+        .count();
+    if in_scope == 0 {
+        return -1.0;
+    }
+    let compliant = system_reports.iter()
+        .filter(|s| s.fail_count == 0 && s.pass_count > 0)
+        .count();
+    (compliant as f64 / in_scope as f64) * 100.0
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /policies/report/{policy_id}/exclude/{system_id}/{test_id}
+// Mark a (system, test) finding as excluded from the live policy report and
+// compliance scoring. Idempotent — repeat clicks are no-ops via INSERT OR IGNORE.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn policies_report_exclude(
+    auth: AuthSession,
+    Path((policy_id, system_id, test_id)): Path<(i32, i32, i32)>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let res = sqlx::query(
+        "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP
+         WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
+    )
+    .bind(&auth.username)
+    .bind(&auth.tenant_id)
+    .bind(system_id)
+    .bind(test_id)
+    .execute(&pool)
+    .await;
+
+    let back = format!("/policies/report/{}", policy_id);
+    match res {
+        Ok(_) => {
+            info!(
+                "Result excluded by '{}' — policy={} system={} test={}",
+                auth.username, policy_id, system_id, test_id
+            );
+            // Compliance scores need to drop the excluded finding.
+            let _ = sync_tx.try_send(());
+            let msg = urlencoding::encode("Finding excluded.").to_string();
+            Redirect::to(&format!("{}?success_message={}", back, msg)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to insert result exclusion: {}", e);
+            let msg = urlencoding::encode("Failed to exclude finding.").to_string();
+            Redirect::to(&format!("{}?error_message={}", back, msg)).into_response()
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /policies/report/{policy_id}/unexclude/{system_id}/{test_id}
+// Remove an exclusion so the finding counts in compliance again.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn policies_report_unexclude(
+    auth: AuthSession,
+    Path((policy_id, system_id, test_id)): Path<(i32, i32, i32)>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let res = sqlx::query(
+        "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL
+         WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
+    )
+    .bind(&auth.tenant_id)
+    .bind(system_id)
+    .bind(test_id)
+    .execute(&pool)
+    .await;
+
+    let back = format!("/policies/report/{}", policy_id);
+    match res {
+        Ok(_) => {
+            info!(
+                "Result un-excluded by '{}' — policy={} system={} test={}",
+                auth.username, policy_id, system_id, test_id
+            );
+            let _ = sync_tx.try_send(());
+            let msg = urlencoding::encode("Finding restored.").to_string();
+            Redirect::to(&format!("{}?success_message={}", back, msg)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to delete result exclusion: {}", e);
+            let msg = urlencoding::encode("Failed to restore finding.").to_string();
+            Redirect::to(&format!("{}?error_message={}", back, msg)).into_response()
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /policies/report/{id}
 // Render the live compliance report for a policy (current results).
 // Role: Viewer
@@ -885,9 +999,12 @@ pub async fn policies_report(
 
     let result_rows = match sqlx::query(r#"
         SELECT
+            s.id   as system_id,
             s.name as system_name,
+            t.id   as test_id,
             t.name as test_name,
-            r.result as status
+            r.result as status,
+            r.excluded as is_excluded
         FROM results r
         JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
         JOIN tests t ON r.test_id = t.id AND r.tenant_id = t.tenant_id
@@ -916,21 +1033,39 @@ pub async fn policies_report(
         let test_name: String = row.get("test_name");
         let status_raw: String = row.get("status");
         let status = normalize_status(&status_raw).to_string();
-        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult { test_name, status });
+        let is_excluded: bool = row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0;
+        let system_id: Option<i64> = row.try_get("system_id").ok();
+        let test_id:   Option<i64> = row.try_get("test_id").ok();
+        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult {
+            test_name,
+            status,
+            is_excluded,
+            is_excludable: true, // live report → right-click menu enabled
+            system_id,
+            test_id,
+        });
     }
 
+    // Excluded findings count as NA: removed from both numerator and denominator.
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
-        let pass_count = results.iter().filter(|r| r.status == "PASS").count();
-        let fail_count = results.iter().filter(|r| r.status == "FAIL").count();
-        // A system passes when it has no FAILs AND at least one PASS.
-        // All-NA systems (pass_count == 0 && fail_count == 0) are shown as
-        // "NOT APPLICABLE" by the template — is_passed value does not matter for them.
+        let pass_count     = results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
+        let fail_count     = results.iter().filter(|r| !r.is_excluded && r.status == "FAIL").count();
+        let na_count       = results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
+        let excluded_count = results.iter().filter(|r| r.is_excluded).count();
         let is_passed = is_system_passed(pass_count, fail_count);
-        SystemReport { system_name: name, results, is_passed, pass_count, fail_count }
+        SystemReport { system_name: name, results, is_passed, pass_count, fail_count, na_count, excluded_count }
     }).collect();
 
     // All-NA systems (exempt) are not counted as failures.
     let fail_count = system_reports.iter().filter(|s| s.fail_count > 0).count();
+
+    // Top-card aggregates: sum per-system counts and compute a policy-level
+    // compliance score (% systems COMPLIANT among non-exempt systems).
+    let total_pass:     usize = system_reports.iter().map(|s| s.pass_count).sum();
+    let total_fail:     usize = system_reports.iter().map(|s| s.fail_count).sum();
+    let total_na:       usize = system_reports.iter().map(|s| s.na_count).sum();
+    let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
+    let compliance_score = compute_policy_compliance_score(&system_reports);
 
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
@@ -941,11 +1076,29 @@ pub async fn policies_report(
         submitter_name: auth.username.clone(),
         tests_metadata,
         system_reports,
+        total_pass,
+        total_fail,
+        total_na,
+        total_excluded,
+        compliance_score,
     };
+
+    // Compliance thresholds for the top-card badge (same source as the
+    // policies list and the system report).
+    let compliance_sat: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_sat'",
+    )
+    .bind(&auth.tenant_id).fetch_one(&*pool).await.unwrap_or(80);
+    let compliance_marginal: i64 = sqlx::query_scalar(
+        "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_marginal'",
+    )
+    .bind(&auth.tenant_id).fetch_one(&*pool).await.unwrap_or(60);
 
     let mut context = Context::new();
     context.insert("report", &report_data);
     context.insert("fail_count", &fail_count);
+    context.insert("compliance_sat", &compliance_sat);
+    context.insert("compliance_marginal", &compliance_marginal);
     context.insert("is_smtp_configured", &crate::reports::is_smtp_configured(&pool).await);
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
@@ -1011,9 +1164,12 @@ async fn fetch_live_policy_report_data(
 
     let result_rows = sqlx::query(r#"
         SELECT DISTINCT
+            s.id   as system_id,
             s.name as system_name,
+            t.id   as test_id,
             t.name as test_name,
-            r.result as status
+            r.result as status,
+            r.excluded as is_excluded
         FROM results r
         JOIN systems s ON r.system_id = s.id
         JOIN tests t ON r.test_id = t.id
@@ -1032,15 +1188,35 @@ async fn fetch_live_policy_report_data(
         let test_name: String = row.get("test_name");
         let status_raw: String = row.get("status");
         let status = normalize_status(&status_raw).to_string();
-        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult { test_name, status });
+        let is_excluded: bool = row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0;
+        let system_id: Option<i64> = row.try_get("system_id").ok();
+        let test_id:   Option<i64> = row.try_get("test_id").ok();
+        system_map.entry(system_name).or_insert_with(Vec::new).push(IndividualResult {
+            test_name,
+            status,
+            is_excluded,
+            // PDF / email / saved snapshot — not interactive; freeze the badge.
+            is_excludable: false,
+            system_id,
+            test_id,
+        });
     }
 
+    // Excluded findings count as NA in pass/fail tallies.
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
-        let pass_count = results.iter().filter(|r| r.status == "PASS").count();
-        let fail_count = results.iter().filter(|r| r.status == "FAIL").count();
+        let pass_count     = results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
+        let fail_count     = results.iter().filter(|r| !r.is_excluded && r.status == "FAIL").count();
+        let na_count       = results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
+        let excluded_count = results.iter().filter(|r| r.is_excluded).count();
         let is_passed = is_system_passed(pass_count, fail_count);
-        SystemReport { system_name: name, results, is_passed, pass_count, fail_count }
+        SystemReport { system_name: name, results, is_passed, pass_count, fail_count, na_count, excluded_count }
     }).collect();
+
+    let total_pass:     usize = system_reports.iter().map(|s| s.pass_count).sum();
+    let total_fail:     usize = system_reports.iter().map(|s| s.fail_count).sum();
+    let total_na:       usize = system_reports.iter().map(|s| s.na_count).sum();
+    let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
+    let compliance_score = compute_policy_compliance_score(&system_reports);
 
     Ok(Some(ReportData {
         policy_id: policy_row.get("id"),
@@ -1051,6 +1227,11 @@ async fn fetch_live_policy_report_data(
         submitter_name: submitter_name.to_string(),
         tests_metadata,
         system_reports,
+        total_pass,
+        total_fail,
+        total_na,
+        total_excluded,
+        compliance_score,
     }))
 }
 
@@ -1168,25 +1349,45 @@ fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
         doc.push(elements::Text::new(format!("Host Name: {}", system.system_name)).styled(style::Style::new().bold().with_font_size(14)));
         doc.push(elements::Break::new(0.5));
 
-        let compliant_count = system.results.iter().filter(|r| r.status == "PASS").count();
-        let violation_count = system.results.iter().filter(|r| r.status == "FAIL").count();
+        // Excluded findings don't count as PASS or FAIL — match the on-screen
+        // tallies and the three-way verdict (Compliant / Non-Compliant / Not Applicable).
+        let compliant_count = system.pass_count;
+        let violation_count = system.fail_count;
+        let na_count        = system.na_count;
+        let excluded_count  = system.excluded_count;
+        let exempt = compliant_count == 0 && violation_count == 0;
+        let (status_text, status_color) = if exempt {
+            ("Not Applicable", style::Color::Rgb(120, 120, 120))
+        } else if system.is_passed {
+            ("Compliant", style::Color::Rgb(0, 128, 0))
+        } else {
+            ("Non-Compliant", style::Color::Rgb(200, 0, 0))
+        };
 
         let mut summary_table = elements::TableLayout::new(vec![1, 1]);
         summary_table.set_cell_decorator(elements::FrameCellDecorator::new(true, true, false));
         if let Err(e) = summary_table.push_row(vec![
             cell(elements::Text::new("Compliance Status").styled(style::Style::new().bold())),
-            cell(elements::Text::new(if system.is_passed { "Compliant" } else { "Non-Compliant" }).styled(
-                style::Style::new().with_color(if system.is_passed { style::Color::Rgb(0, 128, 0) } else { style::Color::Rgb(200, 0, 0) }).bold(),
+            cell(elements::Text::new(status_text).styled(
+                style::Style::new().with_color(status_color).bold(),
             )),
         ]) { error!("Failed to add compliance status row to PDF: {}", e); }
         if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Violation Rule Count").styled(style::Style::new().bold())),
-            cell(elements::Text::new(format!("Critical — {}", violation_count))),
-        ]) { error!("Failed to add violation count row to PDF: {}", e); }
-        if let Err(e) = summary_table.push_row(vec![
-            cell(elements::Text::new("Compliant Rule Count").styled(style::Style::new().bold())),
+            cell(elements::Text::new("Passed").styled(style::Style::new().bold())),
             cell(elements::Text::new(format!("{}", compliant_count))),
-        ]) { error!("Failed to add compliant count row to PDF: {}", e); }
+        ]) { error!("Failed to add passed count row to PDF: {}", e); }
+        if let Err(e) = summary_table.push_row(vec![
+            cell(elements::Text::new("Failed").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", violation_count))),
+        ]) { error!("Failed to add failed count row to PDF: {}", e); }
+        if let Err(e) = summary_table.push_row(vec![
+            cell(elements::Text::new("Not Applicable").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", na_count))),
+        ]) { error!("Failed to add NA count row to PDF: {}", e); }
+        if let Err(e) = summary_table.push_row(vec![
+            cell(elements::Text::new("Excluded").styled(style::Style::new().bold())),
+            cell(elements::Text::new(format!("{}", excluded_count))),
+        ]) { error!("Failed to add excluded count row to PDF: {}", e); }
         doc.push(summary_table);
         doc.push(elements::Break::new(1.0));
 
@@ -1200,10 +1401,14 @@ fn build_live_policy_pdf(report_data: &ReportData) -> Result<Vec<u8>, ()> {
         ]) { error!("Failed to add rules table header to PDF: {}", e); }
 
         for res in &system.results {
-            let (status_text, status_color) = match res.status.as_str() {
-                "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
-                "NA"   => ("N/A",  style::Color::Rgb(120, 120, 120)),
-                _      => ("FAIL", style::Color::Rgb(200, 0, 0)),
+            let (status_text, status_color) = if res.is_excluded {
+                ("EXCLUDED", style::Color::Rgb(120, 120, 120))
+            } else {
+                match res.status.as_str() {
+                    "PASS" => ("PASS", style::Color::Rgb(0, 128, 0)),
+                    "NA"   => ("N/A",  style::Color::Rgb(120, 120, 120)),
+                    _      => ("FAIL", style::Color::Rgb(200, 0, 0)),
+                }
             };
             if let Err(e) = rules_table.push_row(vec![
                 cell(elements::Paragraph::new(&res.test_name)),

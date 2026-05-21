@@ -24,6 +24,7 @@ use chrono::{DateTime, Utc};
 
 use std::collections::BTreeMap;
 use semver::Version;
+use crate::agents::derive_platform;
 use crate::handlers::{normalize_status, is_system_passed};
 use crate::models::{
     AgentPackage, ErrorQuery, System, SystemGroup, SystemInsideGroup, UserRole, AuthSession,
@@ -79,7 +80,6 @@ pub async fn systems(
                     COALESCE(s.ip,   'NA') AS system_ip,
                     COALESCE(s.os,   'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
-                    s.platform AS system_platform,
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE({gc}, 'none') AS group_names,
                     {created} AS created_date,
@@ -113,7 +113,6 @@ pub async fn systems(
                     COALESCE(s.ip,   'NA') AS system_ip,
                     COALESCE(s.os,   'NA') AS system_os,
                     COALESCE(s.arch, 'NA') AS system_arch,
-                    s.platform AS system_platform,
                     COALESCE(s.status, 'NA') AS system_status,
                     COALESCE({gc}, 'none') AS group_names,
                     {created} AS created_date,
@@ -166,13 +165,22 @@ pub async fn systems(
     let systems: Vec<System> = rows
         .into_iter()
         .map(|row| {
-            let ver: Option<String>      = row.try_get("system_ver").ok();
-            let platform: Option<String> = row.try_get("system_platform").ok().flatten();
+            let ver:  Option<String> = row.try_get("system_ver").ok();
+            let arch: Option<String> = row.try_get("system_arch").ok();
+            let os:   Option<String> = row.try_get("system_os").ok();
+
+            // Derive platform on read from arch + os instead of persisting it,
+            // so a server upgrade can change the normalisation rules without a
+            // backfill migration.
+            let platform = match (&arch, &os) {
+                (Some(a), Some(o)) if a != "NA" && o != "NA" => Some(derive_platform(a, o)),
+                _ => None,
+            };
 
             // Determine upgrade availability: compare versions with semver.
             // Silently ignore unparseable version strings (very old agents may
             // not conform; they simply show no upgrade button).
-            let (upgrade_available, upgrade_version) = if let (Some(pf), Some(ref cv)) = (&platform, &ver) {
+            let (upgrade_available, upgrade_version) = if let (Some(pf), Some(cv)) = (&platform, &ver) {
                 if let Some(pkg) = agent_pkgs.get(pf) {
                     let current  = Version::parse(cv).ok();
                     let available = Version::parse(&pkg.version).ok();
@@ -192,8 +200,8 @@ pub async fn systems(
                 name:             row.get("system_name"),
                 ver,
                 ip:               row.try_get("system_ip").ok(),
-                os:               row.try_get("system_os").ok(),
-                arch:             row.try_get("system_arch").ok(),
+                os,
+                arch,
                 platform,
                 status:           row.try_get("system_status").ok(),
                 groups:           row.try_get("group_names").ok(),
@@ -357,6 +365,9 @@ pub async fn systems_edit(
         created_date: None,
         last_seen: None,
         is_offline: false,
+        platform: None,
+        upgrade_available: false,
+        upgrade_version: None,
     };
 
     let groups_result = sqlx::query(
@@ -593,6 +604,9 @@ pub async fn systems_pending(
             created_date: row.try_get::<String, _>("created_date").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
             last_seen: row.try_get::<String, _>("last_seen").ok().and_then(|s| s.parse::<DateTime<Utc>>().ok()),
             is_offline: false,
+            platform: None,
+            upgrade_available: false,
+            upgrade_version: None,
         })
         .collect();
 
@@ -835,8 +849,10 @@ pub async fn fetch_system_report_data(
             p.name        AS policy_name,
             p.version     AS policy_version,
             p.description AS policy_description,
+            t.id          AS test_id,
             t.name        AS test_name,
-            COALESCE(r.result, 'NOT_SCANNED') AS status
+            COALESCE(r.result, 'NOT_SCANNED') AS status,
+            COALESCE(r.excluded, 0) AS is_excluded
         FROM systems_in_groups sig
         JOIN systems_in_policy sip
             ON sig.group_id = sip.group_id AND sig.tenant_id = sip.tenant_id
@@ -864,9 +880,11 @@ pub async fn fetch_system_report_data(
         let policy_name: String                = row.get("policy_name");
         let policy_version: String             = row.get("policy_version");
         let policy_description: Option<String> = row.try_get("policy_description").ok();
+        let test_id: Option<i64>               = row.try_get("test_id").ok();
         let test_name: String                  = row.get("test_name");
         let status_raw: String                 = row.get("status");
         let status = normalize_status(&status_raw).to_string();
+        let is_excluded: bool = row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0;
 
         let entry = policy_map.entry(policy_id).or_insert_with(|| PolicyResultGroup {
             policy_id,
@@ -877,14 +895,30 @@ pub async fn fetch_system_report_data(
             is_passed: false,
             pass_count: 0,
             fail_count: 0,
+            na_count: 0,
+            excluded_count: 0,
         });
 
-        match status.as_str() {
-            "PASS" => entry.pass_count += 1,
-            "FAIL" => entry.fail_count += 1,
-            _ => {}
+        // Excluded findings are treated as NA — they don't bump pass or fail counts.
+        if is_excluded {
+            entry.excluded_count += 1;
+        } else {
+            match status.as_str() {
+                "PASS"                       => entry.pass_count += 1,
+                "FAIL"                       => entry.fail_count += 1,
+                "NA" | "NOT_SCANNED"         => entry.na_count   += 1,
+                _ => {}
+            }
         }
-        entry.results.push(IndividualResult { test_name, status });
+        entry.results.push(IndividualResult {
+            test_name,
+            status,
+            is_excluded,
+            // System report is read-only; no right-click menu, but show the badge.
+            is_excludable: false,
+            system_id: Some(system_id as i64),
+            test_id,
+        });
     }
 
     let mut policy_groups: Vec<PolicyResultGroup> = policy_map.into_values().collect();
@@ -894,9 +928,11 @@ pub async fn fetch_system_report_data(
 
     let total_pass: usize = policy_groups.iter().map(|p| p.pass_count).sum();
     let total_fail: usize = policy_groups.iter().map(|p| p.fail_count).sum();
+    // Excluded results are tallied alongside NA so the three counters add up
+    // to total results without double-counting.
     let total_na: usize = policy_groups.iter()
         .flat_map(|p| p.results.iter())
-        .filter(|r| r.status == "NA" || r.status == "NOT_SCANNED")
+        .filter(|r| r.is_excluded || r.status == "NA" || r.status == "NOT_SCANNED")
         .count();
 
     let last_seen: Option<String> = sys_row
@@ -940,7 +976,7 @@ pub async fn system_report(
         return redir;
     }
 
-    let report = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
+    let mut report = match fetch_system_report_data(id, &auth.tenant_id, &pool).await {
         Ok(r) => r,
         Err(e) if matches!(e, sqlx::Error::RowNotFound) => {
             return Redirect::to("/systems?error_message=System+not+found").into_response();
@@ -950,6 +986,15 @@ pub async fn system_report(
             return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    // Live system report — enable the right-click Exclude / Unexclude menu.
+    // fetch_system_report_data marks rows non-excludable so save / PDF / archive
+    // paths freeze the badge; we override that here for the interactive page only.
+    for policy in &mut report.policy_groups {
+        for r in &mut policy.results {
+            r.is_excludable = true;
+        }
+    }
 
     let compliance_sat: i64 = sqlx::query_scalar(
         "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_sat'"
@@ -992,6 +1037,98 @@ pub async fn system_report(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/report/{system_id}/exclude/{test_id}
+// Same effect as the policy-report exclude: flips the `excluded` flag on the
+// matching `results` row. Distinct endpoint so the redirect lands back on the
+// system report instead of a policy report.
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn system_report_exclude(
+    auth: AuthSession,
+    Path((system_id, test_id)): Path<(i32, i32)>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let res = sqlx::query(
+        "UPDATE results SET excluded = 1, excluded_by = ?, excluded_at = CURRENT_TIMESTAMP
+         WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
+    )
+    .bind(&auth.username)
+    .bind(&auth.tenant_id)
+    .bind(system_id)
+    .bind(test_id)
+    .execute(&pool)
+    .await;
+
+    let back = format!("/systems/report/{}", system_id);
+    match res {
+        Ok(_) => {
+            info!(
+                "Result excluded by '{}' from system view — system={} test={}",
+                auth.username, system_id, test_id
+            );
+            let _ = sync_tx.try_send(());
+            let msg = urlencoding::encode("Finding excluded.").to_string();
+            Redirect::to(&format!("{}?success_message={}", back, msg)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to insert result exclusion: {}", e);
+            let msg = urlencoding::encode("Failed to exclude finding.").to_string();
+            Redirect::to(&format!("{}?error_message={}", back, msg)).into_response()
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/report/{system_id}/unexclude/{test_id}
+// Role: Editor
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn system_report_unexclude(
+    auth: AuthSession,
+    Path((system_id, test_id)): Path<(i32, i32)>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<mpsc::Sender<()>>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+        return redir;
+    }
+
+    let res = sqlx::query(
+        "UPDATE results SET excluded = 0, excluded_by = NULL, excluded_at = NULL
+         WHERE tenant_id = ? AND system_id = ? AND test_id = ?",
+    )
+    .bind(&auth.tenant_id)
+    .bind(system_id)
+    .bind(test_id)
+    .execute(&pool)
+    .await;
+
+    let back = format!("/systems/report/{}", system_id);
+    match res {
+        Ok(_) => {
+            info!(
+                "Result un-excluded by '{}' from system view — system={} test={}",
+                auth.username, system_id, test_id
+            );
+            let _ = sync_tx.try_send(());
+            let msg = urlencoding::encode("Finding restored.").to_string();
+            Redirect::to(&format!("{}?success_message={}", back, msg)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to delete result exclusion: {}", e);
+            let msg = urlencoding::encode("Failed to restore finding.").to_string();
+            Redirect::to(&format!("{}?error_message={}", back, msg)).into_response()
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: fetch_tenant_tests_metadata
 // Pulls every test (name + description + rational + remediation) for the
 // given tenant, used by the system-report views so the template can pop a
@@ -1025,8 +1162,10 @@ pub async fn fetch_tenant_tests_metadata(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // POST /systems/upgrade/{id}
-// Queue an upgrade for a single active system.  Sets upgrade_requested = 1;
-// the next heartbeat from that agent will receive the UPGRADE command.
+// Queue an upgrade for a single active system. Inserts a row into commands
+// with command_type='UPGRADE'; the next heartbeat from that agent dispatches
+// the UPGRADE and deletes the row. The partial unique index makes a repeat
+// click idempotent — second insert is silently ignored.
 // Role: Editor
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn systems_upgrade(
@@ -1034,27 +1173,39 @@ pub async fn systems_upgrade(
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
 ) -> impl IntoResponse {
-    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
 
-    match sqlx::query(
-        "UPDATE systems SET upgrade_requested = 1
-         WHERE id = ? AND tenant_id = ? AND status = 'active'",
+    // Verify the system exists and is active before queueing.
+    let is_active: Option<i64> = sqlx::query_scalar(
+        "SELECT 1 FROM systems WHERE id = ? AND tenant_id = ? AND status = 'active'",
     )
     .bind(id)
     .bind(&auth.tenant_id)
+    .fetch_optional(&pool)
+    .await
+    .ok()
+    .flatten();
+
+    if is_active.is_none() {
+        let msg = urlencoding::encode("System not found or not active.").to_string();
+        return Redirect::to(&format!("/systems?error_message={}", msg)).into_response();
+    }
+
+    match sqlx::query(
+        "INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id, command_type)
+         VALUES (?, ?, NULL, 'UPGRADE')",
+    )
+    .bind(&auth.tenant_id)
+    .bind(id)
     .execute(&pool)
     .await
     {
-        Ok(res) if res.rows_affected() > 0 => {
+        Ok(_) => {
             info!("Upgrade queued for system ID {} by '{}'.", id, auth.username);
             let msg = urlencoding::encode("Upgrade queued — agent will upgrade on next check-in.").to_string();
             Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
-        }
-        Ok(_) => {
-            let msg = urlencoding::encode("System not found or not active.").to_string();
-            Redirect::to(&format!("/systems?error_message={}", msg)).into_response()
         }
         Err(e) => {
             error!("Failed to queue upgrade for system {}: {}", id, e);
@@ -1076,7 +1227,7 @@ pub async fn systems_bulk_upgrade(
     Extension(pool): Extension<SqlitePool>,
     raw_form: RawForm,
 ) -> impl IntoResponse {
-    if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
     }
 
@@ -1100,10 +1251,14 @@ pub async fn systems_bulk_upgrade(
         return Redirect::to(&format!("/systems?error_message={}", msg)).into_response();
     }
 
+    // INSERT...SELECT FROM systems WHERE active in one query per id — same
+    // result as a verify-then-insert but with half the round-trips.
     let mut queued: usize = 0;
     for id in &ids {
         match sqlx::query(
-            "UPDATE systems SET upgrade_requested = 1
+            "INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id, command_type)
+             SELECT tenant_id, id, NULL, 'UPGRADE'
+             FROM systems
              WHERE id = ? AND tenant_id = ? AND status = 'active'",
         )
         .bind(id)
