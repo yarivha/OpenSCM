@@ -104,6 +104,22 @@
             <div class="row">
               <div class="col-md-6">
                 <div class="form-group">
+                  <label for="audit_log_retention_days">
+                    <i class="fas fa-clipboard-list mr-1 text-muted"></i>
+                    Audit Log Retention (days)
+                  </label>
+                  <input type="number" class="form-control" id="audit_log_retention_days"
+                    name="audit_log_retention_days" value="{{ settings.audit_log_retention_days }}"
+                    min="0" max="10000">
+                  <small class="form-text text-muted">
+                    How long to keep entries in the <a href="/admin/audit-log">audit log</a>.
+                    Set to <strong>0</strong> to keep forever. Default is <strong>730</strong> (≈ 2 years)
+                    which covers most regulatory minimums.
+                  </small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-group">
                   <label for="schema_version">
                     <i class="fas fa-database mr-1 text-muted"></i>
                     Schema Version

@@ -29,6 +29,7 @@ pub struct Settings {
     pub auto_prune_inactive: String,
     pub compliance_sat: String,
     pub compliance_marginal: String,
+    pub audit_log_retention_days: String,
     pub smtp_host:     String,
     pub smtp_port:     String,
     pub smtp_username: String,
@@ -97,6 +98,7 @@ pub async fn settings(
         auto_prune_inactive: map.get("auto_prune_inactive").cloned().unwrap_or_else(|| "0".to_string()),
         compliance_sat:    map.get("compliance_sat").cloned().unwrap_or_else(|| "80".to_string()),
         compliance_marginal: map.get("compliance_marginal").cloned().unwrap_or_else(|| "60".to_string()),
+        audit_log_retention_days: map.get("audit_log_retention_days").cloned().unwrap_or_else(|| "730".to_string()),
         smtp_host:     map.get("smtp_host").cloned().unwrap_or_default(),
         smtp_port:     map.get("smtp_port").cloned().unwrap_or_else(|| "587".to_string()),
         smtp_username: map.get("smtp_username").cloned().unwrap_or_default(),
@@ -138,6 +140,7 @@ pub async fn settings_save(
     let raw_auto_prune   = form_data.get("auto_prune_inactive").and_then(|v| v.first()).cloned().unwrap_or_default();
     let raw_sat          = form_data.get("compliance_sat").and_then(|v| v.first()).cloned().unwrap_or_default();
     let raw_marginal     = form_data.get("compliance_marginal").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_audit_keep   = form_data.get("audit_log_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
 
     let threshold: i64 = match raw_threshold.parse() {
         Ok(v) if v >= 1 => v,
@@ -164,11 +167,21 @@ pub async fn settings_save(
         return Redirect::to("/settings?error_message=Marginal+threshold+must+be+less+than+Satisfied+threshold").into_response();
     }
 
+    // 0 = retain forever; otherwise must be a positive day count. Cap at
+    // ~27 years (10,000 days) so a typo can't accidentally lock a tenant
+    // into "audit log too big to query" territory.
+    let audit_keep: i64 = match raw_audit_keep.parse::<i64>() {
+        Ok(0) => 0,
+        Ok(v) if (1..=10000).contains(&v) => v,
+        _ => return Redirect::to("/settings?error_message=Audit+log+retention+must+be+0+(forever)+or+1-10000+days").into_response(),
+    };
+
     let mut updates: Vec<(&str, String)> = vec![
-        ("offline_threshold",   threshold.to_string()),
-        ("auto_prune_inactive", auto_prune.to_string()),
-        ("compliance_sat",      sat.to_string()),
-        ("compliance_marginal", marginal.to_string()),
+        ("offline_threshold",        threshold.to_string()),
+        ("auto_prune_inactive",      auto_prune.to_string()),
+        ("compliance_sat",           sat.to_string()),
+        ("compliance_marginal",      marginal.to_string()),
+        ("audit_log_retention_days", audit_keep.to_string()),
     ];
 
     // Email settings — superuser only
