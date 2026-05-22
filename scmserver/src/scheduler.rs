@@ -9,7 +9,7 @@
 
 use sqlx::{SqlitePool, Row};
 use tokio::time::{self, Duration};
-use chrono::{Utc, Timelike};
+use chrono::{Utc, Timelike, Datelike};
 use tracing::{info, error};
 use reqwest::Client;
 
@@ -414,6 +414,10 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 
     tokio::spawn(async move {
         let mut last_snapshot_hour: i32 = Utc::now().hour() as i32;
+        // Track the last calendar day on which audit-log pruning ran so
+        // the daily tick fires exactly once per UTC day regardless of
+        // when the server started.
+        let mut last_audit_prune_day: i32 = -1;
 
         loop {
             interval.tick().await;
@@ -421,6 +425,10 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             let now = Utc::now();
             let now_str = now.format("%Y-%m-%dT%H:%M").to_string();
             let current_hour = now.hour() as i32;
+            // ordinal0() = 0-based day-of-year. Wraparound (year change) is
+            // handled fine because last_audit_prune_day starts at -1 and any
+            // change != prior value triggers one prune, then re-syncs.
+            let current_day  = now.ordinal0() as i32;
 
             // --- TASK A: POLICY SCHEDULER (scan + report) ---
             let due_schedules = match sqlx::query_as::<_, PolicySchedule>(
@@ -519,6 +527,16 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 
                 // --- TASK D: VERSION UPDATE CHECK ---
                 check_for_updates(&loop_pool).await;
+            }
+
+            // --- TASK E: DAILY AUDIT-LOG PRUNE ---
+            // Runs once per UTC day at the first tick that lands on a new
+            // day. Per-tenant retention is read from settings inside
+            // crate::audit::prune; tenants with retention = 0 (forever)
+            // are skipped there.
+            if current_day != last_audit_prune_day {
+                crate::audit::prune(&loop_pool).await;
+                last_audit_prune_day = current_day;
             }
         }
     });

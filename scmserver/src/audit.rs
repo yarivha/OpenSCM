@@ -164,3 +164,72 @@ pub async fn audit_log_view(
         .await
         .into_response()
 }
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// prune
+// Per-tenant cleanup of audit_log rows older than the tenant's
+// audit_log_retention_days setting. Tenants whose retention is 0 (or missing)
+// are skipped — 0 means "keep forever" per the settings UI.
+//
+// The prune itself records one audit_log row per tenant that had rows
+// deleted (action "audit.prune") so the cleanup is itself auditable. If a
+// tenant's prune SQL fails the loop continues to the next tenant — one
+// noisy tenant must not break maintenance for the rest.
+//
+// Called once per day from the scheduler's main heartbeat loop.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn prune(pool: &SqlitePool) {
+    let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
+        "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
+         WHERE skey = 'audit_log_retention_days' AND CAST(value AS INTEGER) > 0",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => {
+            error!("audit prune: failed to fetch retention settings: {}", e);
+            return;
+        }
+    };
+
+    for (tenant_id, days) in tenants {
+        let res = sqlx::query(
+            "DELETE FROM audit_log
+             WHERE tenant_id = ?
+               AND created_at < datetime('now', '-' || ? || ' days')",
+        )
+        .bind(&tenant_id)
+        .bind(days)
+        .execute(pool)
+        .await;
+
+        match res {
+            Ok(r) if r.rows_affected() > 0 => {
+                let removed = r.rows_affected();
+                tracing::info!(
+                    "audit prune: removed {} row(s) older than {} day(s) for tenant '{}'.",
+                    removed, days, tenant_id
+                );
+                // Record the cleanup itself so auditors can answer
+                // "why did the audit log get shorter overnight?".
+                record_raw(
+                    pool, &tenant_id,
+                    None, "system",
+                    None,
+                    "audit.prune",
+                    Some("audit_log"), None,
+                    Some(&format!(
+                        "{{\"removed\":{},\"retention_days\":{}}}",
+                        removed, days
+                    )),
+                ).await;
+            }
+            Ok(_) => {}  // nothing to prune today
+            Err(e) => error!(
+                "audit prune: delete failed for tenant '{}': {}", tenant_id, e
+            ),
+        }
+    }
+}
