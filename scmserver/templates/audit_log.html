@@ -14,6 +14,14 @@
   .audit-table td.target { color: #495057; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
   .audit-table td.details { color: #6c757d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-width: 350px; word-break: break-all; }
   .audit-table td.ip { color: #6c757d; font-variant-numeric: tabular-nums; }
+  .audit-table td.tenant code {
+    background: rgba(13,110,253,0.08);
+    color: #0d6efd;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.78rem;
+  }
+  .dark-mode .audit-table td.tenant code { background: rgba(13,110,253,0.18); color: #6ea8fe; }
   .audit-table tr.audit-failure td.action code { background: rgba(220,53,69,0.12); color: #c82333; }
   .audit-table tr.audit-delete  td.action code { background: rgba(220,53,69,0.08); }
   .audit-table tr.audit-create  td.action code { background: rgba(40,167,69,0.10); color: #1c7430; }
@@ -48,6 +56,11 @@
           <h3 class="card-title">
             <i class="fas fa-history mr-1"></i>
             {{ total }} event{% if total != 1 %}s{% endif %} recorded
+            {% if cross_tenant %}
+              <span class="badge badge-warning ml-2" title="Superuser view — events across every tenant">
+                <i class="fas fa-globe mr-1"></i>All tenants
+              </span>
+            {% endif %}
             {% if retention_days > 0 %}
               <small class="text-muted ml-2">— retained for {{ retention_days }} days</small>
             {% else %}
@@ -64,6 +77,7 @@
               <thead class="thead-light">
                 <tr>
                   <th style="padding-left: 1rem;">Time (UTC)</th>
+                  {% if cross_tenant %}<th>Tenant</th>{% endif %}
                   <th>Actor</th>
                   <th>Action</th>
                   <th>Target</th>
@@ -75,6 +89,9 @@
                 {% for e in entries %}
                 <tr class="{% if 'failure' in e.action %}audit-failure{% elif 'delete' in e.action %}audit-delete{% elif 'create' in e.action %}audit-create{% endif %}">
                   <td class="ts" style="padding-left: 1rem;">{{ e.created_at }}</td>
+                  {% if cross_tenant %}
+                  <td class="tenant"><code>{{ e.tenant_id }}</code></td>
+                  {% endif %}
                   <td class="actor">
                     {{ e.actor_username }}
                     {% if e.actor_user_id %}
@@ -89,7 +106,7 @@
                   <td class="ip">{{ e.ip_address | default(value="—") }}</td>
                 </tr>
                 {% else %}
-                <tr><td colspan="6" class="text-center text-muted py-4">No audit events recorded yet.</td></tr>
+                <tr><td colspan="{% if cross_tenant %}7{% else %}6{% endif %}" class="text-center text-muted py-4">No audit events recorded yet.</td></tr>
                 {% endfor %}
               </tbody>
             </table>

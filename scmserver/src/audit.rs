@@ -118,28 +118,49 @@ pub async fn audit_log_view(
     let page     = q.page.unwrap_or(1).max(1);
     let offset   = (page - 1) * per_page;
 
-    let entries: Vec<AuditEntry> = sqlx::query_as(
-        "SELECT id, tenant_id, actor_user_id, actor_username, action,
-                target_type, target_id, details, ip_address, created_at
-         FROM audit_log
-         WHERE tenant_id = ?
-         ORDER BY id DESC
-         LIMIT ? OFFSET ?",
-    )
-    .bind(&auth.tenant_id)
-    .bind(per_page as i64)
-    .bind(offset as i64)
-    .fetch_all(&pool)
-    .await
-    .unwrap_or_default();
+    // Superusers see across all tenants — needed in SaaS where the platform
+    // admin debugs customer incidents from the `default` tenant and would
+    // otherwise have no visibility into customer-tenant events. Regular
+    // Admins stay scoped to their own tenant.
+    let cross_tenant = UserRole::from(auth.role.as_str()) >= UserRole::Superuser;
 
-    let total: i64 = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM audit_log WHERE tenant_id = ?",
-    )
-    .bind(&auth.tenant_id)
-    .fetch_one(&pool)
-    .await
-    .unwrap_or(0);
+    let entries: Vec<AuditEntry> = if cross_tenant {
+        sqlx::query_as(
+            "SELECT id, tenant_id, actor_user_id, actor_username, action,
+                    target_type, target_id, details, ip_address, created_at
+             FROM audit_log
+             ORDER BY id DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(per_page as i64)
+        .bind(offset as i64)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default()
+    } else {
+        sqlx::query_as(
+            "SELECT id, tenant_id, actor_user_id, actor_username, action,
+                    target_type, target_id, details, ip_address, created_at
+             FROM audit_log
+             WHERE tenant_id = ?
+             ORDER BY id DESC
+             LIMIT ? OFFSET ?",
+        )
+        .bind(&auth.tenant_id)
+        .bind(per_page as i64)
+        .bind(offset as i64)
+        .fetch_all(&pool)
+        .await
+        .unwrap_or_default()
+    };
+
+    let total: i64 = if cross_tenant {
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log")
+            .fetch_one(&pool).await.unwrap_or(0)
+    } else {
+        sqlx::query_scalar("SELECT COUNT(*) FROM audit_log WHERE tenant_id = ?")
+            .bind(&auth.tenant_id).fetch_one(&pool).await.unwrap_or(0)
+    };
 
     let retention_days: i64 = sqlx::query_scalar(
         "SELECT CAST(value AS INTEGER) FROM settings
@@ -159,6 +180,7 @@ pub async fn audit_log_view(
     ctx.insert("per_page",       &per_page);
     ctx.insert("total_pages",    &total_pages);
     ctx.insert("retention_days", &retention_days);
+    ctx.insert("cross_tenant",   &cross_tenant);
 
     render_template(&tera, Some(&pool), "audit_log.html", ctx, Some(auth))
         .await
