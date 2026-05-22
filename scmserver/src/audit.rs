@@ -38,7 +38,28 @@ pub async fn record(
         Some(s) => (Some(s.userid), s.username.as_str()),
         None    => (None,           "system"),
     };
+    record_raw(pool, tenant_id, actor_user_id, actor_username,
+               ip_address, action, target_type, target_id, details).await;
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// record_raw
+// Lower-level primitive for events where there is no AuthSession yet —
+// e.g. a failed login attempt that still needs to record the attempted
+// username, or a background scheduler event with no human actor at all.
+// Pass actor_user_id=None + actor_username="system" for daemon-originated.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn record_raw(
+    pool:           &SqlitePool,
+    tenant_id:      &str,
+    actor_user_id:  Option<i32>,
+    actor_username: &str,
+    ip_address:     Option<&str>,
+    action:         &str,
+    target_type:    Option<&str>,
+    target_id:      Option<&str>,
+    details:        Option<&str>,
+) {
     let res = sqlx::query(
         "INSERT INTO audit_log
             (tenant_id, actor_user_id, actor_username, action,
@@ -57,7 +78,6 @@ pub async fn record(
     .await;
 
     if let Err(e) = res {
-        // Never propagate — audit failure must not abort the underlying op.
         error!(
             "audit_log write failed (action={}, tenant={}, target={:?}): {}",
             action, tenant_id, target_id, e

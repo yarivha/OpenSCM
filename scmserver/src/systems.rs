@@ -274,6 +274,13 @@ pub async fn systems_approve(
     }
 
     info!("System ID {} approved by '{}'.", id, auth.username);
+    crate::audit::record(
+        &pool, &auth.tenant_id,
+        Some(&auth), None,
+        "system.approve",
+        Some("system"), Some(&id.to_string()),
+        None,
+    ).await;
     Redirect::to("/systems").into_response()
 }
 
@@ -308,6 +315,13 @@ pub async fn systems_delete(
 
     let _ = sync_tx.send(()).await;
     info!("System ID {} deleted by '{}'. Compliance update signaled.", id, auth.username);
+    crate::audit::record(
+        &pool, &auth.tenant_id,
+        Some(&auth), None,
+        "system.delete",
+        Some("system"), Some(&id.to_string()),
+        None,
+    ).await;
     Redirect::to("/systems").into_response()
 }
 
@@ -1204,6 +1218,13 @@ pub async fn systems_upgrade(
     {
         Ok(_) => {
             info!("Upgrade queued for system ID {} by '{}'.", id, auth.username);
+            crate::audit::record(
+                &pool, &auth.tenant_id,
+                Some(&auth), None,
+                "system.upgrade_queued",
+                Some("system"), Some(&id.to_string()),
+                None,
+            ).await;
             let msg = urlencoding::encode("Upgrade queued — agent will upgrade on next check-in.").to_string();
             Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
         }
@@ -1278,6 +1299,14 @@ pub async fn systems_bulk_upgrade(
         ids.len(),
         auth.username
     );
+    let id_list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    crate::audit::record(
+        &pool, &auth.tenant_id,
+        Some(&auth), None,
+        "system.upgrade_queued_bulk",
+        Some("system"), Some(&format!("ids:{}", id_list)),
+        Some(&format!("{{\"requested\":{},\"queued\":{}}}", ids.len(), queued)),
+    ).await;
     let msg = urlencoding::encode(&format!(
         "Upgrade queued for {} system(s) — agents will upgrade on next check-in.",
         queued

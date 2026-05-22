@@ -7,7 +7,15 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
-- **Audit log foundation** — new `audit_log` table (DB migration v19 → v20) plus `crate::audit::record()` helper used by every state-changing handler to record `(actor, action, target, ip, details)`. Retention is governed by `settings.audit_log_retention_days` (default 730 days; 0 = forever); the background cleanup tick that consumes that value will land with Task #9. The write call is fire-and-forget — DB errors are logged via `tracing::error!` and never propagated, so an audit-side failure can't abort the operation being audited. This commit lays the foundation only; call-site wiring (login, user-role-change, policy delete, exclude/unexclude, system upgrade, settings save) ships in the next commit, and the Admin viewer (`/admin/audit-log`) in the one after that.
+- **Audit log foundation** — new `audit_log` table (DB migration v19 → v20) plus `crate::audit::record()` helper used by every state-changing handler to record `(actor, action, target, ip, details)`. Retention is governed by `settings.audit_log_retention_days` (default 730 days; 0 = forever); the background cleanup tick that consumes that value will land with Task #9. The write call is fire-and-forget — DB errors are logged via `tracing::error!` and never propagated, so an audit-side failure can't abort the operation being audited.
+
+- **Audit-log call sites wired up across the first batch of handlers**:
+  - `auth.rs` — `auth.login_success`, `auth.login_failure` (with `bad_password` or `unknown_user` details so brute-force patterns are visible), `auth.logout`
+  - `policies.rs` — `policy.result_exclude`, `policy.result_unexclude`
+  - `systems.rs` — `system.approve`, `system.delete`, `system.upgrade_queued`, `system.upgrade_queued_bulk` (single row per bulk action recording requested-vs-queued counts)
+  - `users.rs` — `user.create`, `user.delete`, `user.edit_self`, `user.edit_by_admin` (distinct so auditors can filter promotions vs self-profile edits)
+
+  IP-address capture is not yet plumbed — every call passes `None` for the IP column. Adding it requires an `axum::extract::ConnectInfo<SocketAddr>` parameter on every handler that wants to record it, plus X-Forwarded-For parsing for reverse-proxy deploys. Will ride along with the REST API task (#4) which has the same requirement.
 
 ---
 

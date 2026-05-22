@@ -234,6 +234,13 @@ pub async fn users_add_save(
     }
 
     info!("User '{}' created by '{}' (Tenant: {}).", username, auth.username, auth.tenant_id);
+    crate::audit::record(
+        &pool, &auth.tenant_id,
+        Some(&auth), None,
+        "user.create",
+        Some("user"), Some(&username),
+        Some(&format!("{{\"role\":\"{}\"}}", role)),
+    ).await;
     Redirect::to("/users").into_response()
 }
 
@@ -271,6 +278,13 @@ pub async fn users_delete(
     }
 
     info!("User ID {} deleted by '{}' (Tenant: {}).", id, auth.username, auth.tenant_id);
+    crate::audit::record(
+        &*pool, &auth.tenant_id,
+        Some(&auth), None,
+        "user.delete",
+        Some("user"), Some(&id.to_string()),
+        None,
+    ).await;
     Redirect::to("/users").into_response()
 }
 
@@ -474,6 +488,17 @@ pub async fn users_edit_save(
     }
 
     info!("User ID {} updated by '{}' (Tenant: {}).", id, auth.username, auth.tenant_id);
+    // Record at the per-user-edit grain. Bootstrap edits can't change role
+    // so action stays user.edit; for admins editing others with potentially
+    // a role change we use a distinct action so auditors can filter cleanly.
+    let action = if is_admin && !is_owner { "user.edit_by_admin" } else { "user.edit_self" };
+    crate::audit::record(
+        &*pool, &auth.tenant_id,
+        Some(&auth), None,
+        action,
+        Some("user"), Some(&id.to_string()),
+        Some(&format!("{{\"new_role\":\"{}\"}}", role)),
+    ).await;
 
     let target = if is_admin { "/users" } else { "/" };
     Redirect::to(&format!("{}?success_message=Settings+saved+successfully", target)).into_response()

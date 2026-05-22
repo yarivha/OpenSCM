@@ -892,6 +892,14 @@ pub async fn policies_report_exclude(
                 "Result excluded by '{}' — policy={} system={} test={}",
                 auth.username, policy_id, system_id, test_id
             );
+            crate::audit::record(
+                &pool, &auth.tenant_id,
+                Some(&auth), None,
+                "policy.result_exclude",
+                Some("result"),
+                Some(&format!("policy:{}/sys:{}/test:{}", policy_id, system_id, test_id)),
+                None,
+            ).await;
             // Compliance scores need to drop the excluded finding.
             let _ = sync_tx.try_send(());
             let msg = urlencoding::encode("Finding excluded.").to_string();
@@ -938,6 +946,14 @@ pub async fn policies_report_unexclude(
                 "Result un-excluded by '{}' — policy={} system={} test={}",
                 auth.username, policy_id, system_id, test_id
             );
+            crate::audit::record(
+                &pool, &auth.tenant_id,
+                Some(&auth), None,
+                "policy.result_unexclude",
+                Some("result"),
+                Some(&format!("policy:{}/sys:{}/test:{}", policy_id, system_id, test_id)),
+                None,
+            ).await;
             let _ = sync_tx.try_send(());
             let msg = urlencoding::encode("Finding restored.").to_string();
             Redirect::to(&format!("{}?success_message={}", back, msg)).into_response()

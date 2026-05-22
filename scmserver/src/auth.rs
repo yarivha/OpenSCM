@@ -235,6 +235,14 @@ pub async fn login_submit(
             cookie.set_secure(false);
 
             info!("User '{}' logged in successfully for tenant '{}'", username, tenant_id);
+            crate::audit::record_raw(
+                &pool, &tenant_id,
+                Some(userid), &username,
+                None,
+                "auth.login_success",
+                Some("user"), Some(&userid.to_string()),
+                None,
+            ).await;
             return (jar.add(cookie), Redirect::to("/"));
         }
     } else {
@@ -253,6 +261,26 @@ pub async fn login_submit(
                 userid_raw,
                 &format!("Failed login attempt for user '{}'", form.username),
             ).await;
+
+            crate::audit::record_raw(
+                &pool, &tenant_id,
+                Some(userid_raw), &form.username,
+                None,
+                "auth.login_failure",
+                Some("user"), Some(&userid_raw.to_string()),
+                Some("bad_password"),
+            ).await;
+        } else {
+            // No matching user — record the attempt against the default tenant
+            // so platform admins can still see brute-force patterns.
+            crate::audit::record_raw(
+                &pool, "default",
+                None, &form.username,
+                None,
+                "auth.login_failure",
+                Some("user"), None,
+                Some("unknown_user"),
+            ).await;
         }
 
 
@@ -269,7 +297,18 @@ pub async fn login_submit(
 // Remove the session cookie and redirect to /login.
 // Role: Viewer (any authenticated user)
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn logout(jar: SignedCookieJar) -> (SignedCookieJar, Redirect) {
+pub async fn logout(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    jar: SignedCookieJar,
+) -> (SignedCookieJar, Redirect) {
+    crate::audit::record(
+        &pool, &auth.tenant_id,
+        Some(&auth), None,
+        "auth.logout",
+        Some("user"), Some(&auth.userid.to_string()),
+        None,
+    ).await;
     (jar.remove(Cookie::from("session")), Redirect::to("/login"))
 }
 
