@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Systems list — "Upgrade All" one-click action** — when at least one system in the tenant has a newer agent bundled in the server, an amber **Upgrade All** button appears next to the "Managed Systems" page title (Admin role only). Clicking it queues an UPGRADE row in the commands table for every eligible system in one POST. Eligibility uses the same semver-aware platform-match logic the per-row Upgrade button uses — systems on platforms the server doesn't ship binaries for are skipped silently. INSERT OR IGNORE means re-clicking the button on a fleet that's already mid-upgrade is idempotent (no duplicate queue rows). One `system.upgrade_queued_all` audit row records the eligible-vs-queued count and the full id list for traceability. Implementation: new `POST /systems/upgrade_all` handler, `has_upgradable: bool` computed server-side on `/systems` render so the button only appears when meaningful.
+
 ### Fixed
 - **Systems list — per-row Upgrade icon wrapped to a second line** — the Actions column was 180px and the View button (the only text-bearing one in the row) took ~70px on its own, so when the Upgrade icon appeared the row pushed past the column width and the icon dropped to a new line. Widened Actions to 240px and added `white-space:nowrap` on the cell. Paid for the extra width by constraining three columns that were greedy: OS & Architecture → 160px, Agent → 70px, Last Seen → 120px. Name / IP / Groups keep their flex behaviour.
 

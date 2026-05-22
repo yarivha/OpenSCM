@@ -238,7 +238,9 @@ pub async fn systems(
     if let Some(success_message) = params.get("success_message") {
         context.insert("success_message", success_message);
     }
+    let has_upgradable = systems.iter().any(|s| s.upgrade_available);
     context.insert("systems", &systems);
+    context.insert("has_upgradable", &has_upgradable);
     render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
         .await
         .into_response()
@@ -1316,5 +1318,133 @@ pub async fn systems_bulk_upgrade(
         queued
     ))
     .to_string();
+    Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/upgrade_all
+// Queue an upgrade for every active system that has a newer agent_packages
+// row available for its platform. One-click "upgrade the fleet" — same
+// semver-aware availability check as the per-row buttons, but applied to the
+// whole tenant in a single transaction.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn systems_upgrade_all(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
+        return redir;
+    }
+
+    // Fetch every active system's (id, ver, arch, os) so we can derive each
+    // platform and compare against agent_packages by semver — same logic the
+    // /systems page applies at render time when it decides whether to show
+    // the per-row Upgrade button.
+    let rows = match sqlx::query(
+        "SELECT id,
+                COALESCE(ver,  '') AS ver,
+                COALESCE(arch, '') AS arch,
+                COALESCE(os,   '') AS os
+         FROM systems
+         WHERE tenant_id = ? AND status = 'active'",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&pool)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            error!("upgrade_all: failed to fetch systems: {}", e);
+            let msg = urlencoding::encode(&format!("Database error: {}", e)).to_string();
+            return Redirect::to(&format!("/systems?error_message={}", msg)).into_response();
+        }
+    };
+
+    let agent_pkgs: HashMap<String, AgentPackage> = sqlx::query_as::<_, AgentPackage>(
+        "SELECT platform, version, sha256, url FROM agent_packages",
+    )
+    .fetch_all(&pool)
+    .await
+    .unwrap_or_default()
+    .into_iter()
+    .map(|p| (p.platform.clone(), p))
+    .collect();
+
+    // Find every system whose bundled agent_packages row is strictly newer
+    // (by semver) than the system's reported version. Systems on platforms
+    // we don't ship binaries for are skipped silently.
+    let mut targets: Vec<i64> = Vec::new();
+    for row in &rows {
+        let id:   i64    = row.try_get("id").unwrap_or(0);
+        let ver:  String = row.try_get("ver").unwrap_or_default();
+        let arch: String = row.try_get("arch").unwrap_or_default();
+        let os:   String = row.try_get("os").unwrap_or_default();
+
+        if arch.is_empty() || os.is_empty() || ver.is_empty() {
+            continue;
+        }
+        let platform = crate::agents::derive_platform(&arch, &os);
+        let pkg = match agent_pkgs.get(&platform) {
+            Some(p) => p,
+            None    => continue,
+        };
+        let current   = Version::parse(&ver).ok();
+        let available = Version::parse(&pkg.version).ok();
+        if let (Some(c), Some(a)) = (current, available) {
+            if a > c {
+                targets.push(id);
+            }
+        }
+    }
+
+    if targets.is_empty() {
+        let msg = urlencoding::encode("No systems are eligible for upgrade.").to_string();
+        return Redirect::to(&format!("/systems?error_message={}", msg)).into_response();
+    }
+
+    // Queue the UPGRADE row per system. INSERT OR IGNORE means a system that
+    // already has an upgrade pending stays at one row, so re-clicking
+    // "Upgrade All" is idempotent.
+    let mut queued: usize = 0;
+    for id in &targets {
+        match sqlx::query(
+            "INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id, command_type)
+             VALUES (?, ?, NULL, 'UPGRADE')",
+        )
+        .bind(&auth.tenant_id)
+        .bind(id)
+        .execute(&pool)
+        .await
+        {
+            Ok(r) if r.rows_affected() > 0 => queued += 1,
+            Ok(_) => {}  // already had a pending UPGRADE row
+            Err(e) => error!("upgrade_all: queue failed for system {}: {}", id, e),
+        }
+    }
+
+    info!(
+        "Upgrade All queued for {}/{} eligible system(s) by '{}'.",
+        queued,
+        targets.len(),
+        auth.username
+    );
+    let id_list = targets.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
+    crate::audit::record(
+        &pool, &auth.tenant_id,
+        Some(&auth), Some(ip.as_str()),
+        "system.upgrade_queued_all",
+        Some("system"), Some(&format!("ids:{}", id_list)),
+        Some(&format!(
+            "{{\"eligible\":{},\"queued\":{}}}",
+            targets.len(), queued
+        )),
+    ).await;
+    let msg = urlencoding::encode(&format!(
+        "Upgrade queued for {} system(s) — agents will upgrade on next check-in.",
+        queued
+    )).to_string();
     Redirect::to(&format!("/systems?success_message={}", msg)).into_response()
 }

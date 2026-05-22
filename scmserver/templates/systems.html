@@ -14,7 +14,16 @@
     <div class="container-fluid">
       <div class="row mb-2">
         <div class="col-sm-6">
-          <h1>Managed Systems</h1>
+          <h1 class="d-inline-block mr-3">Managed Systems</h1>
+          {% if has_upgradable and is_admin %}
+          <form method="POST" action="/systems/upgrade_all" class="d-inline-block"
+                onsubmit="return confirm('Queue an upgrade for every eligible system in this tenant?')">
+            <button type="submit" class="btn btn-warning btn-sm"
+                    title="Queue upgrade for every system with a newer agent available">
+              <i class="fas fa-arrow-up mr-1"></i> Upgrade All
+            </button>
+          </form>
+          {% endif %}
         </div>
         <div class="col-sm-6">
           <ol class="breadcrumb float-sm-right">

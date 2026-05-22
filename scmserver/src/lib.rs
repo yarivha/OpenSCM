@@ -327,6 +327,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/settings/reset", post(settings::settings_reset))
         .route("/systems/upgrade/{id}", post(systems::systems_upgrade))
         .route("/systems/bulk/upgrade", post(systems::systems_bulk_upgrade))
+        .route("/systems/upgrade_all",  post(systems::systems_upgrade_all))
         .route("/send", post(client::send))
         .route("/result", post(client::receive_result))
         .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {
