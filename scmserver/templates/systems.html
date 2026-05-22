@@ -91,12 +91,12 @@
                     </th>
                     <th style="width: 10px">ID</th>
                     <th>Name</th>
-                    <th>OS & Architecture</th>
+                    <th style="width: 160px;">OS & Architecture</th>
                     <th>IP Address</th>
                     <th>Groups</th>
-                    <th>Agent</th>
-                    <th>Last Seen</th>
-                    <th class="text-center" style="width: 180px">Actions</th>
+                    <th style="width: 70px;">Agent</th>
+                    <th style="width: 120px; white-space: nowrap;">Last Seen</th>
+                    <th class="text-center" style="width: 240px; white-space: nowrap;">Actions</th>
                   </tr>
                 </thead>
                 <tbody>
@@ -139,7 +139,7 @@
                       {% if system.is_offline %}<span class="badge badge-secondary ml-1">Offline</span>{% endif %}
                     </td>
 
-                    <td class="text-right">
+                    <td class="text-right" style="white-space: nowrap;">
                       {% if system.status == "pending" %}
                         <a class="btn btn-success btn-sm ml-1 {% if not is_editor %}disabled{% endif %}"
 		           onclick="{% if is_editor %}return confirm('Approve this system?'){% else %}return false;{% endif %}"
