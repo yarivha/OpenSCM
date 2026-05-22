@@ -254,6 +254,7 @@ pub async fn systems_approve(
     auth: AuthSession,
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -276,7 +277,7 @@ pub async fn systems_approve(
     info!("System ID {} approved by '{}'.", id, auth.username);
     crate::audit::record(
         &pool, &auth.tenant_id,
-        Some(&auth), None,
+        Some(&auth), Some(ip.as_str()),
         "system.approve",
         Some("system"), Some(&id.to_string()),
         None,
@@ -295,6 +296,7 @@ pub async fn systems_delete(
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
@@ -317,7 +319,7 @@ pub async fn systems_delete(
     info!("System ID {} deleted by '{}'. Compliance update signaled.", id, auth.username);
     crate::audit::record(
         &pool, &auth.tenant_id,
-        Some(&auth), None,
+        Some(&auth), Some(ip.as_str()),
         "system.delete",
         Some("system"), Some(&id.to_string()),
         None,
@@ -1186,6 +1188,7 @@ pub async fn systems_upgrade(
     auth: AuthSession,
     Path(id): Path<i32>,
     Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir;
@@ -1220,7 +1223,7 @@ pub async fn systems_upgrade(
             info!("Upgrade queued for system ID {} by '{}'.", id, auth.username);
             crate::audit::record(
                 &pool, &auth.tenant_id,
-                Some(&auth), None,
+                Some(&auth), Some(ip.as_str()),
                 "system.upgrade_queued",
                 Some("system"), Some(&id.to_string()),
                 None,
@@ -1246,6 +1249,7 @@ pub async fn systems_upgrade(
 pub async fn systems_bulk_upgrade(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
     raw_form: RawForm,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
@@ -1302,7 +1306,7 @@ pub async fn systems_bulk_upgrade(
     let id_list = ids.iter().map(|i| i.to_string()).collect::<Vec<_>>().join(",");
     crate::audit::record(
         &pool, &auth.tenant_id,
-        Some(&auth), None,
+        Some(&auth), Some(ip.as_str()),
         "system.upgrade_queued_bulk",
         Some("system"), Some(&format!("ids:{}", id_list)),
         Some(&format!("{{\"requested\":{},\"queued\":{}}}", ids.len(), queued)),

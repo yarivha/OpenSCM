@@ -119,6 +119,7 @@ pub async fn users_add(
 pub async fn users_add_save(
     auth: AuthSession,
     pool: Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -236,7 +237,7 @@ pub async fn users_add_save(
     info!("User '{}' created by '{}' (Tenant: {}).", username, auth.username, auth.tenant_id);
     crate::audit::record(
         &pool, &auth.tenant_id,
-        Some(&auth), None,
+        Some(&auth), Some(ip.as_str()),
         "user.create",
         Some("user"), Some(&username),
         Some(&format!("{{\"role\":\"{}\"}}", role)),
@@ -254,6 +255,7 @@ pub async fn users_delete(
     auth: AuthSession,
     Path(id): Path<i32>,
     pool: Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
 
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
@@ -280,7 +282,7 @@ pub async fn users_delete(
     info!("User ID {} deleted by '{}' (Tenant: {}).", id, auth.username, auth.tenant_id);
     crate::audit::record(
         &*pool, &auth.tenant_id,
-        Some(&auth), None,
+        Some(&auth), Some(ip.as_str()),
         "user.delete",
         Some("user"), Some(&id.to_string()),
         None,
@@ -375,6 +377,7 @@ pub async fn users_edit_save(
     auth: AuthSession,
     Path(id): Path<i32>,
     pool: Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
     raw_form: RawForm,
 ) -> impl IntoResponse {
 
@@ -494,7 +497,7 @@ pub async fn users_edit_save(
     let action = if is_admin && !is_owner { "user.edit_by_admin" } else { "user.edit_self" };
     crate::audit::record(
         &*pool, &auth.tenant_id,
-        Some(&auth), None,
+        Some(&auth), Some(ip.as_str()),
         action,
         Some("user"), Some(&id.to_string()),
         Some(&format!("{{\"new_role\":\"{}\"}}", role)),

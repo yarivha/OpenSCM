@@ -132,6 +132,7 @@ pub async fn login(Query(query): Query<ErrorQuery>, tera: Extension<Arc<Tera>>) 
 pub async fn login_submit(
     jar: SignedCookieJar,
     Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
     Form(form): Form<LoginForm>,
 ) -> (SignedCookieJar, Redirect) {
 
@@ -238,7 +239,7 @@ pub async fn login_submit(
             crate::audit::record_raw(
                 &pool, &tenant_id,
                 Some(userid), &username,
-                None,
+                Some(ip.as_str()),
                 "auth.login_success",
                 Some("user"), Some(&userid.to_string()),
                 None,
@@ -265,7 +266,7 @@ pub async fn login_submit(
             crate::audit::record_raw(
                 &pool, &tenant_id,
                 Some(userid_raw), &form.username,
-                None,
+                Some(ip.as_str()),
                 "auth.login_failure",
                 Some("user"), Some(&userid_raw.to_string()),
                 Some("bad_password"),
@@ -276,7 +277,7 @@ pub async fn login_submit(
             crate::audit::record_raw(
                 &pool, "default",
                 None, &form.username,
-                None,
+                Some(ip.as_str()),
                 "auth.login_failure",
                 Some("user"), None,
                 Some("unknown_user"),
@@ -300,11 +301,12 @@ pub async fn login_submit(
 pub async fn logout(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
     jar: SignedCookieJar,
 ) -> (SignedCookieJar, Redirect) {
     crate::audit::record(
         &pool, &auth.tenant_id,
-        Some(&auth), None,
+        Some(&auth), Some(ip.as_str()),
         "auth.logout",
         Some("user"), Some(&auth.userid.to_string()),
         None,

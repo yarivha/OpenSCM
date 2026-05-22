@@ -869,6 +869,7 @@ pub async fn policies_report_exclude(
     Path((policy_id, system_id, test_id)): Path<(i32, i32, i32)>,
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
@@ -894,7 +895,7 @@ pub async fn policies_report_exclude(
             );
             crate::audit::record(
                 &pool, &auth.tenant_id,
-                Some(&auth), None,
+                Some(&auth), Some(ip.as_str()),
                 "policy.result_exclude",
                 Some("result"),
                 Some(&format!("policy:{}/sys:{}/test:{}", policy_id, system_id, test_id)),
@@ -924,6 +925,7 @@ pub async fn policies_report_unexclude(
     Path((policy_id, system_id, test_id)): Path<(i32, i32, i32)>,
     Extension(pool): Extension<SqlitePool>,
     Extension(sync_tx): Extension<mpsc::Sender<()>>,
+    ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Editor) {
         return redir;
@@ -948,7 +950,7 @@ pub async fn policies_report_unexclude(
             );
             crate::audit::record(
                 &pool, &auth.tenant_id,
-                Some(&auth), None,
+                Some(&auth), Some(ip.as_str()),
                 "policy.result_unexclude",
                 Some("result"),
                 Some(&format!("policy:{}/sys:{}/test:{}", policy_id, system_id, test_id)),

@@ -184,9 +184,12 @@ async fn main() -> Result<(), Box<dyn Error>> {
     let app = create_core_router(state, cookie_key);
 
     // 9. Start the Server
+    // into_make_service_with_connect_info::<SocketAddr> propagates the
+    // peer address into request extensions so the ClientIp extractor can
+    // fall back to it when no X-Forwarded-For / X-Real-IP is present.
     info!("OpenSCM Community Server listening on http://{}", addr);
     axum_server::bind(addr)
-        .serve(app.into_make_service())
+        .serve(app.into_make_service_with_connect_info::<std::net::SocketAddr>())
         .await?;
 
     Ok(())

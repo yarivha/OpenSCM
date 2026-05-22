@@ -6,9 +6,10 @@
 // =============================================================================
 
 use axum::response::{Html, Redirect, Response, IntoResponse};
-use axum::http::{StatusCode, header};
+use axum::http::{StatusCode, header, request::Parts};
 use axum::body::Body;
-use axum::Extension;
+use axum::extract::{ConnectInfo, Extension, FromRequestParts};
+use std::net::SocketAddr;
 use tera::{Tera, Context};
 use sqlx::SqlitePool;
 use std::collections::HashMap;
@@ -329,4 +330,61 @@ pub async fn not_found() -> impl IntoResponse {
             error!("Failed to build 404 response: {}", e);
             StatusCode::INTERNAL_SERVER_ERROR.into_response()
         })
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// ClientIp — extractor for the requesting client's IP address.
+//
+// Resolution order (first hit wins):
+//   1. X-Forwarded-For        — leftmost entry, typical reverse-proxy header
+//   2. X-Real-IP              — nginx's other common forwarding header
+//   3. ConnectInfo<SocketAddr> — direct peer when no proxy is in front
+//   4. "unknown"              — fallback if axum was started without
+//                                into_make_service_with_connect_info
+//
+// Used by audit-log call sites. Never fails — always extracts cleanly so
+// adding it to a handler signature can't accidentally take the handler off
+// the happy path.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Clone, Debug)]
+pub struct ClientIp(pub String);
+
+impl ClientIp {
+    pub fn as_str(&self) -> &str { &self.0 }
+}
+
+impl<S> FromRequestParts<S> for ClientIp
+where
+    S: Send + Sync,
+{
+    type Rejection = std::convert::Infallible;
+
+    async fn from_request_parts(parts: &mut Parts, _state: &S) -> Result<Self, Self::Rejection> {
+        // X-Forwarded-For: "client, proxy1, proxy2" — leftmost is the real client.
+        if let Some(v) = parts.headers.get("x-forwarded-for") {
+            if let Ok(s) = v.to_str() {
+                if let Some(first) = s.split(',').next() {
+                    let ip = first.trim();
+                    if !ip.is_empty() {
+                        return Ok(ClientIp(ip.to_string()));
+                    }
+                }
+            }
+        }
+        // X-Real-IP: single value.
+        if let Some(v) = parts.headers.get("x-real-ip") {
+            if let Ok(s) = v.to_str() {
+                let ip = s.trim();
+                if !ip.is_empty() {
+                    return Ok(ClientIp(ip.to_string()));
+                }
+            }
+        }
+        // Direct peer address (requires into_make_service_with_connect_info).
+        if let Some(ConnectInfo(addr)) = parts.extensions.get::<ConnectInfo<SocketAddr>>() {
+            return Ok(ClientIp(addr.ip().to_string()));
+        }
+        Ok(ClientIp("unknown".to_string()))
+    }
 }
