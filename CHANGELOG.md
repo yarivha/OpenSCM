@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Systems list — per-row Upgrade icon wrapped to a second line** — the Actions column was 180px and the View button (the only text-bearing one in the row) took ~70px on its own, so when the Upgrade icon appeared the row pushed past the column width and the icon dropped to a new line. Widened Actions to 240px and added `white-space:nowrap` on the cell. Paid for the extra width by constraining three columns that were greedy: OS & Architecture → 160px, Agent → 70px, Last Seen → 120px. Name / IP / Groups keep their flex behaviour.
+
 ---
 
 ## [0.4.1] - 2026-05-22
