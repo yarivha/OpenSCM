@@ -334,6 +334,66 @@ pub async fn not_found() -> impl IntoResponse {
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /health  [public, unauthenticated, init-guard bypass]
+// Liveness probe — "is the process alive and accepting HTTP?". No DB query, no
+// work, just confirms the binary is up. Used by Kubernetes livenessProbe and
+// any LB / orchestrator that doesn't distinguish liveness from readiness.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn health() -> impl IntoResponse {
+    (StatusCode::OK, [(header::CONTENT_TYPE, "application/json")],
+     r#"{"status":"ok"}"#)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /ready  [public, unauthenticated, init-guard bypass]
+// Readiness probe — "is the server able to serve real user traffic?".
+// Returns 200 only when the DB pool can execute `SELECT 1` AND the schema
+// version on disk matches what the binary expects (i.e. migrations completed).
+// Returns 503 otherwise so load balancers can keep the old pod in rotation
+// while a rolling deploy runs migrations on the new one.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn ready(Extension(pool): Extension<SqlitePool>) -> impl IntoResponse {
+    // DB liveness — pool reachable and accepting a trivial query?
+    if sqlx::query_scalar::<_, i64>("SELECT 1").fetch_one(&pool).await.is_err() {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"status":"db_unavailable"}"#.to_string(),
+        );
+    }
+
+    // Migrations caught up? schema_info is created by run_migrations; its
+    // absence means a fresh install hasn't completed setup yet, in which case
+    // the server is technically up but not "ready" for normal traffic.
+    let schema_present: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name='schema_info'",
+    )
+    .fetch_one(&pool)
+    .await
+    .unwrap_or(0);
+
+    if schema_present == 0 {
+        return (
+            StatusCode::SERVICE_UNAVAILABLE,
+            [(header::CONTENT_TYPE, "application/json")],
+            r#"{"status":"setup_pending"}"#.to_string(),
+        );
+    }
+
+    let schema_version: i64 = sqlx::query_scalar("SELECT version FROM schema_info WHERE id = 1")
+        .fetch_one(&pool)
+        .await
+        .unwrap_or(-1);
+
+    (
+        StatusCode::OK,
+        [(header::CONTENT_TYPE, "application/json")],
+        format!(r#"{{"status":"ok","schema_version":{}}}"#, schema_version),
+    )
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // ClientIp — extractor for the requesting client's IP address.
 //
 // Resolution order (first hit wins):

@@ -232,8 +232,12 @@ async fn init_guard(
     let path = request.uri().path().to_owned();
     let initialized = is_initialized.load(Ordering::SeqCst);
 
-    // Let static assets through unconditionally (needed for the install page CSS/JS)
-    let is_asset = path.starts_with("/static/")
+    // Let static assets and health probes through unconditionally. /health
+    // and /ready must answer even before the DB is initialised so k8s can
+    // bring the pod up cleanly during a fresh install or upgrade.
+    let is_asset = path == "/health"
+        || path == "/ready"
+        || path.starts_with("/static/")
         || path.starts_with("/agents/")   // public client-binary downloads
         || {
         let p = path.as_str();
@@ -262,6 +266,11 @@ async fn init_guard(
 // ─────────────────────────────────────────────────────────────────────────────
 pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cookie::Key) -> Router {
     Router::new()
+        // Probes — must come first so they're not shadowed by anything else
+        // and are easy to find. The init_guard middleware whitelists them so
+        // they answer even before /install completes.
+        .route("/health", get(handlers::health))
+        .route("/ready",  get(handlers::ready))
         .route("/install", get(install::install_get).post(install::install_post))
         .route("/", get(dashboard::dashboard))
         .route("/login", get(auth::login).post(auth::login_submit))

@@ -7,6 +7,10 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **`/health` and `/ready` probes** — two tiny HTTP endpoints that make OpenSCM deployable behind any modern load balancer or orchestrator without faking a request against `/login`. Both are public, unauthenticated, and whitelisted by the init_guard middleware so they answer even before `/install` completes — which means a k8s pod can come up cleanly during a fresh install or a rolling upgrade with mid-flight migrations.
+  - `GET /health` → `200 OK` with `{"status":"ok"}`. No DB query, no work — pure liveness. Use for k8s `livenessProbe`, `HEALTHCHECK` in `scmserver/package/docker/Dockerfile`, basic LB pool membership.
+  - `GET /ready` → `200 OK` with `{"status":"ok","schema_version":N}` only when the DB pool answers `SELECT 1` AND `schema_info` exists. Otherwise `503 Service Unavailable` with `{"status":"db_unavailable"}` (DB down) or `{"status":"setup_pending"}` (fresh install, /install not completed). Use for k8s `readinessProbe` so the LB keeps the old pod in rotation while a rolling deploy runs migrations on the new one.
+
 - **Systems list — "Upgrade All" one-click action** — when at least one system in the tenant has a newer agent bundled in the server, an amber **Upgrade All** button appears next to the "Managed Systems" page title (Admin role only). Clicking it queues an UPGRADE row in the commands table for every eligible system in one POST. Eligibility uses the same semver-aware platform-match logic the per-row Upgrade button uses — systems on platforms the server doesn't ship binaries for are skipped silently. INSERT OR IGNORE means re-clicking the button on a fleet that's already mid-upgrade is idempotent (no duplicate queue rows). One `system.upgrade_queued_all` audit row records the eligible-vs-queued count and the full id list for traceability. Implementation: new `POST /systems/upgrade_all` handler, `has_upgradable: bool` computed server-side on `/systems` render so the button only appears when meaningful.
 
 ### Fixed
