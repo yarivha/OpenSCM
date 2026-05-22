@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.1] - 2026-05-22
+
 ### Added
 - **Audit log — end-to-end** — admins can finally answer "who promoted that user / excluded that finding / approved that system / queued that upgrade" without grepping journalctl. The feature shipped as one coherent slice:
 
