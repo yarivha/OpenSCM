@@ -255,6 +255,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/login", get(auth::login).post(auth::login_submit))
         .route("/logout", get(auth::logout))
         .route("/notifications/clear", get(handlers::clear_notifications))
+        .route("/admin/audit-log", get(audit::audit_log_view))
         .route("/users", get(users::users))
         .route("/users/add", get(users::users_add).post(users::users_add_save))
         .route("/users/delete/{id}", get(users::users_delete))

@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .audit-table td, .audit-table th { vertical-align: middle; font-size: 0.88rem; }
+  .audit-table td.ts { white-space: nowrap; color: #6c757d; font-variant-numeric: tabular-nums; }
+  .audit-table td.actor { white-space: nowrap; font-weight: 500; }
+  .audit-table td.action code {
+    background: rgba(0,0,0,0.05);
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 0.82rem;
+  }
+  .audit-table td.target { color: #495057; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.8rem; }
+  .audit-table td.details { color: #6c757d; font-family: ui-monospace, SFMono-Regular, Menlo, monospace; font-size: 0.78rem; max-width: 350px; word-break: break-all; }
+  .audit-table td.ip { color: #6c757d; font-variant-numeric: tabular-nums; }
+  .audit-table tr.audit-failure td.action code { background: rgba(220,53,69,0.12); color: #c82333; }
+  .audit-table tr.audit-delete  td.action code { background: rgba(220,53,69,0.08); }
+  .audit-table tr.audit-create  td.action code { background: rgba(40,167,69,0.10); color: #1c7430; }
+  .dark-mode .audit-table td.action code { background: rgba(255,255,255,0.08); }
+  .dark-mode .audit-table tr.audit-failure td.action code { background: rgba(220,53,69,0.25); color: #f8d7da; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1 class="m-0"><i class="fas fa-clipboard-list mr-2 text-primary"></i>Audit Log</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">Audit Log</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      <div class="card card-outline card-primary shadow-sm">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="fas fa-history mr-1"></i>
+            {{ total }} event{% if total != 1 %}s{% endif %} recorded
+            {% if retention_days > 0 %}
+              <small class="text-muted ml-2">— retained for {{ retention_days }} days</small>
+            {% else %}
+              <small class="text-muted ml-2">— retained forever</small>
+            {% endif %}
+          </h3>
+          <div class="card-tools">
+            <small class="text-muted">Page {{ page }} of {{ total_pages }}</small>
+          </div>
+        </div>
+        <div class="card-body p-0">
+          <div class="table-responsive">
+            <table class="table table-hover table-sm mb-0 audit-table">
+              <thead class="thead-light">
+                <tr>
+                  <th style="padding-left: 1rem;">Time (UTC)</th>
+                  <th>Actor</th>
+                  <th>Action</th>
+                  <th>Target</th>
+                  <th>Details</th>
+                  <th>IP</th>
+                </tr>
+              </thead>
+              <tbody>
+                {% for e in entries %}
+                <tr class="{% if 'failure' in e.action %}audit-failure{% elif 'delete' in e.action %}audit-delete{% elif 'create' in e.action %}audit-create{% endif %}">
+                  <td class="ts" style="padding-left: 1rem;">{{ e.created_at }}</td>
+                  <td class="actor">
+                    {{ e.actor_username }}
+                    {% if e.actor_user_id %}
+                      <small class="text-muted">#{{ e.actor_user_id }}</small>
+                    {% endif %}
+                  </td>
+                  <td class="action"><code>{{ e.action }}</code></td>
+                  <td class="target">
+                    {% if e.target_type %}{{ e.target_type }}{% if e.target_id %}:{{ e.target_id }}{% endif %}{% else %}—{% endif %}
+                  </td>
+                  <td class="details">{{ e.details | default(value="") }}</td>
+                  <td class="ip">{{ e.ip_address | default(value="—") }}</td>
+                </tr>
+                {% else %}
+                <tr><td colspan="6" class="text-center text-muted py-4">No audit events recorded yet.</td></tr>
+                {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+        {% if total_pages > 1 %}
+        <div class="card-footer clearfix">
+          <ul class="pagination pagination-sm m-0 float-right">
+            {% if page > 1 %}
+            <li class="page-item"><a class="page-link" href="?page={{ page - 1 }}&per_page={{ per_page }}">«</a></li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">«</span></li>
+            {% endif %}
+            <li class="page-item disabled"><span class="page-link">{{ page }} / {{ total_pages }}</span></li>
+            {% if page < total_pages %}
+            <li class="page-item"><a class="page-link" href="?page={{ page + 1 }}&per_page={{ per_page }}">»</a></li>
+            {% else %}
+            <li class="page-item disabled"><span class="page-link">»</span></li>
+            {% endif %}
+          </ul>
+        </div>
+        {% endif %}
+      </div>
+
+      <p class="text-muted text-sm mt-2">
+        Retention is configured at <a href="/settings">Settings → Audit Log Retention</a>.
+        Entries are immutable — there is no delete or edit handler.
+      </p>
+
+    </div>
+  </section>
+</div>
+{% endblock %}

@@ -17,6 +17,8 @@ All notable changes to OpenSCM are documented here.
 
   IP-address capture is not yet plumbed — every call passes `None` for the IP column. Adding it requires an `axum::extract::ConnectInfo<SocketAddr>` parameter on every handler that wants to record it, plus X-Forwarded-For parsing for reverse-proxy deploys. Will ride along with the REST API task (#4) which has the same requirement.
 
+- **Audit Log viewer** — new `/admin/audit-log` page (Admin role only). Paginated table of `time | actor | action | target | details | IP`, newest first, with `per_page` default 100 (clamped to 10–500). The card header shows the retention setting and a "retained forever" hint when it is 0. Action codes get colour cues — red for `*.failure`, light red for `*.delete`, green for `*.create` — so a skim across hundreds of rows surfaces interesting events without filtering. Sidebar entry lives under the existing Admin Settings tree (Settings → Users → Settings → **Audit Log**), gated on `is_admin`. No filter or CSV-export UI in v1; pagination only.
+
 ---
 
 ## [0.4.0] - 2026-05-21
