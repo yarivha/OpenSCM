@@ -21,6 +21,11 @@ All notable changes to OpenSCM are documented here.
 
 - **Audit Log viewer** — new `/admin/audit-log` page (Admin role only). Paginated table of `time | actor | action | target | details | IP`, newest first, with `per_page` default 100 (clamped to 10–500). The card header shows the retention setting and a "retained forever" hint when it is 0. Action codes get colour cues — red for `*.failure`, light red for `*.delete`, green for `*.create` — so a skim across hundreds of rows surfaces interesting events without filtering. Sidebar entry lives under the existing Admin Settings tree (Settings → Users → Settings → **Audit Log**), gated on `is_admin`. No filter or CSV-export UI in v1; pagination only.
 
+- **Audit Log retention setting surfaced in Admin Settings** — `Admin → Settings → General` gains an **Audit Log Retention (days)** numeric input next to the Schema Version chip. Accepts `0` (keep forever) or 1–10000 days; defaults to 730 (≈ 2 years, covers most regulatory minimums). The help text links straight to `/admin/audit-log` so an admin tuning retention can jump to the viewer in one click. The value is read by the prune job on its next daily tick — no restart required.
+
+### Fixed
+- **Tera template inheritance broke when a new template's name sorted alphabetically before `base.html`** — Tera 1.x validates `extends` parents eagerly at `add_raw_template` time, and `include_dir!`'s `.files()` iterator yields entries in alphabetical order. For years `base.html` happened to be the first file added (no template name started with `a`), so children that extend it could always resolve their parent. Adding `audit_log.html` (`au…` < `ba…`) put it ahead of `base.html` in the iteration and tripped `MissingParent { current: "audit_log.html", parent: "base.html" }` on startup. `init_tera_with_overrides` now explicitly looks up `base.html` via `TEMPLATES_DIR.get_file()` and registers it before the generic loop, then skips it in the loop. Idempotent and order-independent — removes a latent footgun where any future template starting with `a` would have hit the same wire.
+
 ---
 
 ## [0.4.0] - 2026-05-21
