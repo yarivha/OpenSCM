@@ -119,18 +119,30 @@ pub fn init_tera() -> Result<Tera, Box<dyn Error>> {
 pub fn init_tera_with_overrides(overrides: &[(&str, &str)]) -> Result<Tera, Box<dyn Error>> {
     let mut tera = Tera::default();
 
-    // Load CE templates FIRST. Tera 1.x validates `extends` parents at
-    // add_raw_template time, so base templates (notably base.html) must be
-    // present before any child override that extends them can be added.
-    // CE templates include base.html, which is the parent that virtually
-    // every override (e.g. admin_tenants.html) extends.
+    // Load base.html FIRST. Tera 1.x validates `extends` parents at
+    // add_raw_template time, so the base template must already be in the
+    // registry before any child that extends it can be added. include_dir's
+    // .files() iterator yields files in alphabetical order, so a child whose
+    // name sorts before "base.html" (e.g. "audit_log.html") would otherwise
+    // be added first and trip MissingParent.
+    if !overrides.iter().any(|(name, _)| *name == "base.html") {
+        if let Some(base) = TEMPLATES_DIR.get_file("base.html") {
+            let content = std::str::from_utf8(base.contents())
+                .map_err(|e| format!("base.html contains invalid UTF-8: {}", e))?;
+            tera.add_raw_template("base.html", content)?;
+        }
+    }
+
+    // Load the remaining CE templates. Skipped: (1) base.html, already loaded
+    // above; (2) any file the caller supplied as an override (added in the
+    // second loop below and wholly replaces the CE version).
     for file in TEMPLATES_DIR.files() {
         let path = file.path().to_str()
             .ok_or_else(|| format!("Template path is not valid UTF-8: {:?}", file.path()))?;
 
-        // Skip the CE version if the caller supplied an override with the
-        // same name — the override is added in the second loop below and
-        // wholly replaces the CE version.
+        if path == "base.html" {
+            continue;
+        }
         if overrides.iter().any(|(name, _)| *name == path) {
             continue;
         }
