@@ -559,6 +559,21 @@ pub struct AuthSession {
     pub role: String,
 }
 
+// One row from the audit_log table — used by the /admin/audit-log viewer.
+#[derive(Debug, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AuditEntry {
+    pub id: i64,
+    pub tenant_id: String,
+    pub actor_user_id: Option<i64>,
+    pub actor_username: String,
+    pub action: String,
+    pub target_type: Option<String>,
+    pub target_id:   Option<String>,
+    pub details:     Option<String>,
+    pub ip_address:  Option<String>,
+    pub created_at:  String,
+}
+
 
 // Role hierarchy used for authorization checks (Viewer < Runner < Editor < Admin < Superuser).
 #[derive(Debug, Clone, PartialEq, Eq, PartialOrd, Ord)]

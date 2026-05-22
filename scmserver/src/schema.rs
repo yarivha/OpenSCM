@@ -336,6 +336,35 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Audit log — immutable record of state-changing admin actions.
+    // Written by handlers via crate::audit::record(...). Visible from
+    // /admin/audit-log (Admin role only). Retention is governed by the
+    // settings.audit_log_retention_days value (see seed below); the actual
+    // cleanup tick will be added by Task #9 (retention/cleanup policy).
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS audit_log (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id       VARCHAR(191) NOT NULL DEFAULT 'default',
+            actor_user_id   INTEGER,
+            actor_username  TEXT NOT NULL,
+            action          TEXT NOT NULL,
+            target_type     TEXT,
+            target_id       TEXT,
+            details         TEXT,
+            ip_address      TEXT,
+            created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_audit_tenant_time
+            ON audit_log(tenant_id, created_at DESC)",
+    )
+    .execute(pool)
+    .await?;
+
     // Reports table
     // tests_metadata and report_results store arbitrary-size JSON — use MEDIUMTEXT
     // so MySQL does not impose a row-size limit.  They are decoded via row_get_string().
@@ -557,7 +586,8 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ('default', 'smtp_password', '', 'SMTP relay password'),
         ('default', 'smtp_from', '', 'From address for outgoing emails'),
         ('default', 'smtp_tls', 'starttls', 'TLS mode: starttls, tls, or none'),
-        ('default', 'app_url', '', 'Public URL of this installation (used in email links)')"
+        ('default', 'app_url', '', 'Public URL of this installation (used in email links)'),
+        ('default', 'audit_log_retention_days', '730', 'Days to keep audit_log rows before auto-pruning (0 = keep forever)')"
     )
     .execute(pool)
     .await?;
@@ -1456,6 +1486,57 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v18 → v19 complete.");
+    }
+
+    // v19 → v20: audit log table + retention setting.
+    //   • audit_log table — written by crate::audit::record() from every
+    //     state-changing handler; read by the Admin → Audit Log viewer.
+    //   • settings.audit_log_retention_days — number of days to keep rows
+    //     (0 = forever). The background cleanup tick that consumes this
+    //     value will land with Task #9 (retention/cleanup policy).
+    if version < 20 {
+        info!("Running schema migration v19 → v20 (audit_log + retention setting)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS audit_log (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id       VARCHAR(191) NOT NULL DEFAULT 'default',
+                actor_user_id   INTEGER,
+                actor_username  TEXT NOT NULL,
+                action          TEXT NOT NULL,
+                target_type     TEXT,
+                target_id       TEXT,
+                details         TEXT,
+                ip_address      TEXT,
+                created_at      DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            )",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_audit_tenant_time
+                ON audit_log(tenant_id, created_at DESC)",
+        )
+        .execute(pool)
+        .await?;
+
+        // Seed the retention setting for every existing tenant. INSERT OR IGNORE
+        // means re-running this migration on a partially-populated DB is safe.
+        sqlx::query(
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
+             SELECT id, 'audit_log_retention_days', '730',
+                    'Days to keep audit_log rows before auto-pruning (0 = keep forever)'
+             FROM tenants",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 20")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v19 → v20 complete.");
     }
 
     Ok(())

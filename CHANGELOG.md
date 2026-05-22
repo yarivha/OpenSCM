@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Audit log foundation** — new `audit_log` table (DB migration v19 → v20) plus `crate::audit::record()` helper used by every state-changing handler to record `(actor, action, target, ip, details)`. Retention is governed by `settings.audit_log_retention_days` (default 730 days; 0 = forever); the background cleanup tick that consumes that value will land with Task #9. The write call is fire-and-forget — DB errors are logged via `tracing::error!` and never propagated, so an audit-side failure can't abort the operation being audited. This commit lays the foundation only; call-site wiring (login, user-role-change, policy delete, exclude/unexclude, system upgrade, settings save) ships in the next commit, and the Admin viewer (`/admin/audit-log`) in the one after that.
+
 ---
 
 ## [0.4.0] - 2026-05-21
