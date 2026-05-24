@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.3] - 2026-05-24
+
 ### Fixed
 - **Upgrade button hidden for offline systems** — the per-row upgrade arrow and the "Upgrade All" toolbar button are now suppressed when a system is offline; previously both were visible even though queuing an upgrade to an unreachable agent has no effect.
 
