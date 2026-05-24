@@ -336,6 +336,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/settings/save", post(settings::settings_save))
         .route("/settings/test-email", post(settings::settings_test_email))
         .route("/settings/reset", post(settings::settings_reset))
+        .route("/settings/rotate-keys", post(settings::settings_rotate_keys))
         .route("/systems/upgrade/{id}", post(systems::systems_upgrade))
         .route("/systems/bulk/upgrade", post(systems::systems_bulk_upgrade))
         .route("/systems/upgrade_all",  post(systems::systems_upgrade_all))

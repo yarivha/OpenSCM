@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Tenant signing key rotation** — admins can now rotate the Ed25519 keypair used to authenticate agent heartbeats without touching the database manually. A new **Rotate Key** button in `Admin → Settings → Danger Zone` shows the current key fingerprint and creation date, then presents a confirmation modal before generating a fresh keypair, deactivating the old one, and inserting the new active key. All registered agents automatically re-enrol on their next heartbeat — no manual action is needed per agent. The rotation is recorded as a `tenant.key_rotated` audit event with the new key fingerprint in the details field.
+
 - **`exit_code` sub-element for `cmd`** — the `cmd` element now supports `exit_code` alongside `output`. Useful for commands that signal pass/fail via their return code rather than stdout (e.g. `equals 0` for success, `not equals 0` for failure). Works on both Unix (`sh -c`) and Windows (`cmd /C`).
 
 - **`powershell` compliance element** — policy authors can now write Windows compliance tests using PowerShell commands instead of `cmd`. Two sub-elements are supported:

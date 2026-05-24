@@ -370,6 +370,28 @@
                     <h3 class="card-title text-danger"><i class="fas fa-exclamation-triangle mr-2"></i>Danger Zone</h3>
                   </div>
                   <div class="card-body">
+
+                    <!-- Rotate Signing Key -->
+                    <div class="d-flex align-items-center justify-content-between mb-3 pb-3 border-bottom">
+                      <div>
+                        <strong>Rotate Signing Key</strong>
+                        <p class="text-muted mb-1" style="font-size:0.88rem;">
+                          Generates a new Ed25519 keypair for this tenant and deactivates the current one.
+                          <strong>All registered agents will automatically re-enrol on their next heartbeat</strong>
+                          — no manual action is needed per agent, but there will be a brief gap until each agent checks in.
+                        </p>
+                        <small class="text-muted">
+                          <i class="fas fa-key mr-1"></i>Active key: <code>{{ key_fingerprint }}</code>
+                          {% if key_created_at %}&nbsp;·&nbsp;Created {{ key_created_at }}{% endif %}
+                        </small>
+                      </div>
+                      <button type="button" class="btn btn-outline-warning btn-sm ml-4 flex-shrink-0"
+                              data-toggle="modal" data-target="#rotateKeyModal">
+                        <i class="fas fa-sync-alt mr-1"></i> Rotate Key
+                      </button>
+                    </div>
+
+                    <!-- Clean Database -->
                     <div class="d-flex align-items-center justify-content-between">
                       <div>
                         <strong>Clean Database</strong>
@@ -408,6 +430,34 @@
       </form>
 
       {% if is_admin %}
+      <!-- Rotate Key confirmation modal -->
+      <div class="modal fade" id="rotateKeyModal" tabindex="-1" role="dialog">
+        <div class="modal-dialog modal-dialog-centered" role="document">
+          <div class="modal-content border-warning">
+            <div class="modal-header bg-warning">
+              <h5 class="modal-title"><i class="fas fa-sync-alt mr-2"></i>Confirm Key Rotation</h5>
+              <button type="button" class="close" data-dismiss="modal"><span>&times;</span></button>
+            </div>
+            <form method="post" action="/settings/rotate-keys">
+              <div class="modal-body">
+                <p>A new Ed25519 signing keypair will be generated for this tenant.</p>
+                <p><strong>All registered agents will re-enrol automatically on their next heartbeat.</strong>
+                   Until each agent checks in it will be unable to submit compliance results.</p>
+                <p class="mb-0 text-muted" style="font-size:0.88rem;">
+                  Current key: <code>{{ key_fingerprint }}</code>
+                </p>
+              </div>
+              <div class="modal-footer">
+                <button type="button" class="btn btn-secondary btn-sm" data-dismiss="modal">Cancel</button>
+                <button type="submit" class="btn btn-warning btn-sm">
+                  <i class="fas fa-sync-alt mr-1"></i> Rotate Key
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+      </div>
+
       <!-- Reset confirmation modal (kept outside main form to avoid nesting) -->
       <div class="modal fade" id="resetModal" tabindex="-1" role="dialog">
         <div class="modal-dialog modal-dialog-centered" role="document">

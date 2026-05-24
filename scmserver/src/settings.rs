@@ -17,6 +17,9 @@ use std::sync::Arc;
 use tracing::{info, error};
 use urlencoding;
 use serde::Serialize;
+use base64::{engine::general_purpose, Engine as _};
+use ed25519_dalek::SigningKey;
+use rand::rngs::OsRng;
 
 use crate::models::{ErrorQuery, UserRole, AuthSession};
 use crate::auth;
@@ -108,10 +111,31 @@ pub async fn settings(
         app_url:       map.get("app_url").cloned().unwrap_or_default(),
     };
 
+    // Active signing key fingerprint and creation date for the Danger Zone card.
+    let key_row = sqlx::query(
+        "SELECT public_key, created_at FROM tenant_keys WHERE tenant_id = ? AND is_active = 1 ORDER BY id DESC LIMIT 1",
+    )
+    .bind(&auth.tenant_id)
+    .fetch_optional(&*pool)
+    .await
+    .unwrap_or(None);
+
+    let (key_fingerprint, key_created_at) = if let Some(row) = key_row {
+        let pub_key: String = row.get("public_key");
+        let created_at: String = row.try_get("created_at").unwrap_or_default();
+        // Show first 24 chars of the base64 public key as a fingerprint — enough to confirm a rotation.
+        let fingerprint = format!("{}…", &pub_key[..pub_key.len().min(24)]);
+        (fingerprint, created_at)
+    } else {
+        ("(none)".to_string(), String::new())
+    };
+
     let mut context = Context::new();
     if let Some(msg) = query.error_message { context.insert("error_message", &msg); }
     if let Some(msg) = query.success_message { context.insert("success_message", &msg); }
     context.insert("settings", &settings);
+    context.insert("key_fingerprint", &key_fingerprint);
+    context.insert("key_created_at", &key_created_at);
 
     render_template(&tera, Some(&pool), "settings.html", context, Some(auth))
         .await
@@ -452,6 +476,74 @@ pub async fn settings_reset(
         Err(e) => {
             error!("Database reset failed for '{}': {}", auth.username, e);
             let msg = urlencoding::encode(&format!("Reset failed: {}", e)).to_string();
+            Redirect::to(&format!("/settings?error_message={}", msg)).into_response()
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /settings/rotate-keys
+// Generate a new Ed25519 keypair for the caller's tenant, deactivate the old
+// one, and insert the new one as the active key.
+// All agents currently registered to this tenant will fail signature
+// verification on their next heartbeat and automatically re-enrol.
+// Role: Admin
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn settings_rotate_keys(
+    auth: AuthSession,
+    Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
+) -> impl IntoResponse {
+    if auth::authorize(&auth.role, UserRole::Admin).is_some() {
+        return Redirect::to("/settings?error_message=Access+denied").into_response();
+    }
+
+    let mut csprng = OsRng;
+    let signing_key  = SigningKey::generate(&mut csprng);
+    let verifying_key = signing_key.verifying_key();
+    let private_b64  = general_purpose::STANDARD.encode(signing_key.to_bytes());
+    let public_b64   = general_purpose::STANDARD.encode(verifying_key.to_bytes());
+
+    let result: Result<(), sqlx::Error> = async {
+        // Deactivate all current keys for this tenant
+        sqlx::query("UPDATE tenant_keys SET is_active = 0 WHERE tenant_id = ?")
+            .bind(&auth.tenant_id)
+            .execute(&pool)
+            .await?;
+
+        // Insert the new active key
+        sqlx::query(
+            "INSERT INTO tenant_keys (tenant_id, public_key, private_key, is_active) VALUES (?, ?, ?, 1)",
+        )
+        .bind(&auth.tenant_id)
+        .bind(&public_b64)
+        .bind(&private_b64)
+        .execute(&pool)
+        .await?;
+
+        Ok(())
+    }.await;
+
+    match result {
+        Ok(_) => {
+            info!(
+                "Signing key rotated by '{}' (tenant: {})", auth.username, auth.tenant_id
+            );
+            crate::audit::record(
+                &pool,
+                &auth.tenant_id,
+                Some(&auth),
+                Some(ip.as_str()),
+                "tenant.key_rotated",
+                Some("tenant"),
+                Some(auth.tenant_id.as_str()),
+                Some(&format!("{{\"new_fingerprint\":\"{}\"}}", &public_b64[..public_b64.len().min(24)])),
+            ).await;
+            Redirect::to("/settings?success_message=Signing+key+rotated+successfully.+All+agents+will+re-enrol+on+next+heartbeat.#danger").into_response()
+        }
+        Err(e) => {
+            error!("Key rotation failed for tenant '{}': {}", auth.tenant_id, e);
+            let msg = urlencoding::encode(&format!("Key rotation failed: {}", e)).to_string();
             Redirect::to(&format!("/settings?error_message={}", msg)).into_response()
         }
     }
