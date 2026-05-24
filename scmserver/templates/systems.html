@@ -188,7 +188,7 @@
                           <i class="fas {% if is_editor %}fa-pencil-alt{% else %}fa-lock{% endif %}"></i>
                         </a>
 
-                        {% if system.upgrade_available and is_admin %}
+                        {% if system.upgrade_available and not system.is_offline and is_admin %}
                         <form method="POST" action="/systems/upgrade/{{ system.id }}" style="display:inline;"
                               onsubmit="return confirm('Queue upgrade to v{{ system.upgrade_version }} for {{ system.name }}?')">
                           <button type="submit" class="btn btn-warning btn-sm ml-1"

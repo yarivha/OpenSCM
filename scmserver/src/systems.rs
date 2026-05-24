@@ -238,7 +238,7 @@ pub async fn systems(
     if let Some(success_message) = params.get("success_message") {
         context.insert("success_message", success_message);
     }
-    let has_upgradable = systems.iter().any(|s| s.upgrade_available);
+    let has_upgradable = systems.iter().any(|s| s.upgrade_available && !s.is_offline);
     context.insert("systems", &systems);
     context.insert("has_upgradable", &has_upgradable);
     render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
