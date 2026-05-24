@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.2] - 2026-05-22
+
 ### Added
 - **`/health` and `/ready` probes** — two tiny HTTP endpoints that make OpenSCM deployable behind any modern load balancer or orchestrator without faking a request against `/login`. Both are public, unauthenticated, and whitelisted by the init_guard middleware so they answer even before `/install` completes — which means a k8s pod can come up cleanly during a fresh install or a rolling upgrade with mid-flight migrations.
   - `GET /health` → `200 OK` with `{"status":"ok"}`. No DB query, no work — pure liveness. Use for k8s `livenessProbe`, `HEALTHCHECK` in `scmserver/package/docker/Dockerfile`, basic LB pool membership.
