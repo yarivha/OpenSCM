@@ -64,6 +64,10 @@
 
                 <div id="policy-bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
                   <span id="policy-bulk-count" class="mr-3 font-weight-bold text-primary"></span>
+                  <button type="button" class="btn btn-info btn-sm mr-1" id="policy-bulk-diff-btn"
+                          title="Select exactly two snapshots of the same policy" disabled>
+                    <i class="fas fa-not-equal mr-1"></i> Compare
+                  </button>
                   {% if is_editor %}
                   <button type="button" class="btn btn-danger btn-sm" id="policy-bulk-delete-btn" title="Delete Selected">
                     <i class="fas fa-trash mr-1"></i> Delete
@@ -88,7 +92,8 @@
                       {% for report in reports %}
                       <tr>
                         <td>{{ report.id }}</td>
-                        <td class="text-center"><input type="checkbox" class="policy-row-checkbox" value="{{ report.id }}" title="Select"></td>
+                        <td class="text-center"><input type="checkbox" class="policy-row-checkbox" value="{{ report.id }}"
+                          data-policy-key="{{ report.policy_name }}@{{ report.policy_version }}" title="Select"></td>
                         <td><strong>{{ report.policy_name }}</strong></td>
                         <td><span class="badge badge-light">v{{ report.policy_version }}</span></td>
                         <td>{{ report.submitter_name }}</td>
@@ -277,6 +282,29 @@
              'policy-bulk-toolbar', 'policy-bulk-delete-btn', 'policy-bulk-delete-ids', 'policy-bulk-delete-form');
     makeBulk(systemTable, 'system-row-checkbox', 'system-select-all', 'system-bulk-count',
              'system-bulk-toolbar', 'system-bulk-delete-btn', 'system-bulk-delete-ids', 'system-bulk-delete-form');
+
+    // ── Compare button — enabled when exactly two policy snapshots of the
+    //    same policy (name + version) are selected.
+    function refreshDiffBtn() {
+      const checked = $('.policy-row-checkbox:checked');
+      const btn = $('#policy-bulk-diff-btn');
+      if (checked.length !== 2) {
+        btn.prop('disabled', true).attr('title', 'Select exactly two snapshots of the same policy');
+        return;
+      }
+      const keys = checked.map(function() { return $(this).data('policy-key'); }).get();
+      if (keys[0] !== keys[1]) {
+        btn.prop('disabled', true).attr('title', 'Both snapshots must belong to the same policy + version');
+        return;
+      }
+      btn.prop('disabled', false).attr('title', 'Compare the two selected snapshots');
+    }
+    $(document).on('change', '.policy-row-checkbox, #policy-select-all', refreshDiffBtn);
+    $('#policy-bulk-diff-btn').on('click', function() {
+      if ($(this).prop('disabled')) return;
+      const ids = $('.policy-row-checkbox:checked').map(function() { return $(this).val(); }).get();
+      window.location = '/reports/diff?a=' + encodeURIComponent(ids[0]) + '&b=' + encodeURIComponent(ids[1]);
+    });
   });
 </script>
 {% endblock %}

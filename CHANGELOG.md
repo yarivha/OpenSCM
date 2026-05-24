@@ -6,6 +6,21 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Report snapshot diff** — auditors can compare two saved policy-report snapshots side-by-side without downloading two PDFs and eyeballing them. New `/reports/diff?a={id1}&b={id2}` page (Viewer role) renders the union of every (system, test) pair across both snapshots in a colour-coded table:
+  - **Green** — `improved` (was FAIL, now PASS)
+  - **Red** — `regressed` (was PASS, now FAIL)
+  - **Yellow** — `added` (test or system present only in the newer snapshot)
+  - **Grey** — `removed` (test or system gone from the newer snapshot)
+  - **Blue** — `changed` (other transitions — NA↔PASS, PASS↔NA, etc.)
+  - **Untinted** — `unchanged`
+
+  Aggregate counters at the top of the page summarise improved / regressed / added / removed / changed totals. Per-system card headers carry the same breakdown so an auditor can skim straight to the systems that moved. The handler refuses to compare snapshots of different policies (different name or version) and auto-orders by `submission_date` so "older" is always on the left regardless of which id the caller passed first.
+
+  UI: the Policy Reports list bulk toolbar gains a **Compare** button that enables when exactly two checkboxes from the same policy are ticked; clicking navigates to `/reports/diff` with the two ids. Same-policy gating happens client-side via a `data-policy-key="<name>@<version>"` attribute on each checkbox, with the server still validating defensively.
+
+  Out of scope for v1: three-way diff, system-report diff, PDF/email export of the diff itself (jump to either snapshot's PDF via the header links if you need one).
+
 ---
 
 ## [0.4.2] - 2026-05-22

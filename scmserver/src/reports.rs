@@ -399,6 +399,225 @@ pub async fn reports_view(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/diff?a={older_id}&b={newer_id}
+// Side-by-side diff of two saved policy report snapshots.
+// Both snapshots must belong to the same policy (same name + version);
+// otherwise the comparison is meaningless and we bounce with an error.
+// IDs can be passed in either order — handler swaps to put the older one
+// on the left automatically by submission_date.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(serde::Deserialize)]
+pub struct DiffQuery {
+    pub a: i32,
+    pub b: i32,
+}
+
+/// Per-test diff row used by the template.
+#[derive(serde::Serialize)]
+struct ResultDiff {
+    test_name:  String,
+    old_status: Option<String>,   // None means the test wasn't present in the older snapshot
+    new_status: Option<String>,   // None means the test isn't present in the newer one
+    old_excluded: bool,
+    new_excluded: bool,
+    /// One of: unchanged | improved | regressed | added | removed | changed
+    /// (`changed` covers NA→PASS, NA→FAIL, PASS→NA, etc. that aren't pure
+    /// improvements or regressions.)
+    change: &'static str,
+}
+
+/// Per-system diff row used by the template.
+#[derive(serde::Serialize)]
+struct SystemDiff {
+    system_name: String,
+    /// One of: new | removed | present (in both)
+    presence: &'static str,
+    results: Vec<ResultDiff>,
+    /// Aggregate counters for the system card header.
+    improved:  usize,
+    regressed: usize,
+    added:     usize,
+    removed:   usize,
+    changed:   usize,
+    unchanged: usize,
+}
+
+fn classify(old: Option<&str>, new: Option<&str>) -> &'static str {
+    match (old, new) {
+        (None,    Some(_))            => "added",
+        (Some(_), None)               => "removed",
+        (Some(a), Some(b)) if a == b  => "unchanged",
+        (Some("FAIL"), Some("PASS"))  => "improved",
+        (Some("PASS"), Some("FAIL"))  => "regressed",
+        _                             => "changed",
+    }
+}
+
+pub async fn reports_diff(
+    auth: AuthSession,
+    Query(q): Query<DiffQuery>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(tera): Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    if q.a == q.b {
+        return Redirect::to("/reports?error_message=Pick+two+different+snapshots+to+compare").into_response();
+    }
+
+    // Fetch both reports in one query so a missing/wrong-tenant id can't slip through.
+    let rows = match sqlx::query_as::<_, Report>(
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                policy_name, policy_version, policy_description,
+                submitter_name, tests_metadata, report_results
+         FROM reports
+         WHERE id IN (?, ?) AND tenant_id = ?",
+    )
+    .bind(q.a)
+    .bind(q.b)
+    .bind(&auth.tenant_id)
+    .fetch_all(&pool)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            error!(error = ?e, "diff: failed to fetch reports");
+            return Redirect::to("/reports?error_message=Database+error").into_response();
+        }
+    };
+
+    if rows.len() != 2 {
+        return Redirect::to("/reports?error_message=One+or+both+snapshots+not+found").into_response();
+    }
+
+    // Same-policy check: identical (name, version).
+    let (n0, v0) = (&rows[0].policy_name, rows[0].policy_version.as_deref().unwrap_or(""));
+    let (n1, v1) = (&rows[1].policy_name, rows[1].policy_version.as_deref().unwrap_or(""));
+    if n0 != n1 || v0 != v1 {
+        return Redirect::to(
+            "/reports?error_message=Both+snapshots+must+be+the+same+policy+name+and+version"
+        ).into_response();
+    }
+
+    // Order by submission_date so "old" is on the left even if the caller
+    // passed them in reverse. Falls back to id ordering if either date is empty.
+    let mut sorted = rows;
+    sorted.sort_by(|a, b| a.submission_date.cmp(&b.submission_date));
+    let old_report = &sorted[0];
+    let new_report = &sorted[1];
+
+    // Deserialise both report_results blobs.
+    let old_systems: Vec<SystemReport> = serde_json::from_str(
+        old_report.report_results.as_deref().unwrap_or("[]"),
+    ).unwrap_or_default();
+    let new_systems: Vec<SystemReport> = serde_json::from_str(
+        new_report.report_results.as_deref().unwrap_or("[]"),
+    ).unwrap_or_default();
+    let tests_metadata: Vec<TestMeta> = serde_json::from_str(
+        new_report.tests_metadata.as_deref().unwrap_or("[]"),
+    ).unwrap_or_default();
+
+    // Build a (system_name → results map) index so we can join the two sides.
+    use std::collections::BTreeMap;
+    let old_map: BTreeMap<&str, &Vec<crate::models::IndividualResult>> =
+        old_systems.iter().map(|s| (s.system_name.as_str(), &s.results)).collect();
+    let new_map: BTreeMap<&str, &Vec<crate::models::IndividualResult>> =
+        new_systems.iter().map(|s| (s.system_name.as_str(), &s.results)).collect();
+
+    // Union the system names (stable order: alphabetical).
+    let mut names: Vec<&str> = old_map.keys().chain(new_map.keys()).copied().collect();
+    names.sort();
+    names.dedup();
+
+    let mut diffs: Vec<SystemDiff> = Vec::with_capacity(names.len());
+    let mut tot_improved  = 0usize;
+    let mut tot_regressed = 0usize;
+    let mut tot_added     = 0usize;
+    let mut tot_removed   = 0usize;
+    let mut tot_changed   = 0usize;
+
+    for name in names {
+        let old_results = old_map.get(name);
+        let new_results = new_map.get(name);
+        let presence = match (old_results.is_some(), new_results.is_some()) {
+            (false, true) => "new",
+            (true, false) => "removed",
+            _             => "present",
+        };
+
+        // Build a (test_name → IndividualResult) map per side.
+        let old_t: BTreeMap<&str, &crate::models::IndividualResult> = old_results
+            .map(|v| v.iter().map(|r| (r.test_name.as_str(), r)).collect())
+            .unwrap_or_default();
+        let new_t: BTreeMap<&str, &crate::models::IndividualResult> = new_results
+            .map(|v| v.iter().map(|r| (r.test_name.as_str(), r)).collect())
+            .unwrap_or_default();
+
+        let mut test_names: Vec<&str> = old_t.keys().chain(new_t.keys()).copied().collect();
+        test_names.sort();
+        test_names.dedup();
+
+        let mut results: Vec<ResultDiff> = Vec::with_capacity(test_names.len());
+        let (mut improved, mut regressed, mut added, mut removed, mut changed, mut unchanged) =
+            (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+
+        for tn in test_names {
+            let o = old_t.get(tn);
+            let n = new_t.get(tn);
+            let kind = classify(o.map(|r| r.status.as_str()), n.map(|r| r.status.as_str()));
+            match kind {
+                "improved"  => improved  += 1,
+                "regressed" => regressed += 1,
+                "added"     => added     += 1,
+                "removed"   => removed   += 1,
+                "changed"   => changed   += 1,
+                _           => unchanged += 1,
+            }
+            results.push(ResultDiff {
+                test_name:    tn.to_string(),
+                old_status:   o.map(|r| r.status.clone()),
+                new_status:   n.map(|r| r.status.clone()),
+                old_excluded: o.map(|r| r.is_excluded).unwrap_or(false),
+                new_excluded: n.map(|r| r.is_excluded).unwrap_or(false),
+                change:       kind,
+            });
+        }
+
+        tot_improved  += improved;
+        tot_regressed += regressed;
+        tot_added     += added;
+        tot_removed   += removed;
+        tot_changed   += changed;
+
+        diffs.push(SystemDiff {
+            system_name: name.to_string(),
+            presence,
+            results,
+            improved, regressed, added, removed, changed, unchanged,
+        });
+    }
+
+    let mut ctx = Context::new();
+    ctx.insert("old_report",       old_report);
+    ctx.insert("new_report",       new_report);
+    ctx.insert("tests_metadata",   &tests_metadata);
+    ctx.insert("diffs",            &diffs);
+    ctx.insert("tot_improved",     &tot_improved);
+    ctx.insert("tot_regressed",    &tot_regressed);
+    ctx.insert("tot_added",        &tot_added);
+    ctx.insert("tot_removed",      &tot_removed);
+    ctx.insert("tot_changed",      &tot_changed);
+
+    render_template(&tera, Some(&pool), "reports_diff.html", ctx, Some(auth))
+        .await
+        .into_response()
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /reports/delete/{id}
 // Delete a saved policy compliance report.
 // Role: Editor

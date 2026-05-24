@@ -321,6 +321,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/reports", get(reports::reports))
         .route("/reports/save/{id}", get(reports::reports_save))
         .route("/reports/view/{id}", get(reports::reports_view))
+        .route("/reports/diff",      get(reports::reports_diff))
         .route("/reports/delete/{id}", get(reports::reports_delete))
         .route("/reports/bulk/delete", post(reports::reports_bulk_delete))
         .route("/reports/download/{id}", get(reports::reports_download))
