@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **`exit_code` sub-element for `cmd`** — the `cmd` element now supports `exit_code` alongside `output`. Useful for commands that signal pass/fail via their return code rather than stdout (e.g. `equals 0` for success, `not equals 0` for failure). Works on both Unix (`sh -c`) and Windows (`cmd /C`).
+
 - **`powershell` compliance element** — policy authors can now write Windows compliance tests using PowerShell commands instead of `cmd`. Two sub-elements are supported:
   - `output` — runs the script and applies the standard string conditions (`equals`, `contains`, `matches`, `starts_with`, etc.) against the combined stdout+stderr, identical to the `cmd` element.
   - `exit_code` — evaluates the integer exit code; `equals 0` is the standard "success" check.

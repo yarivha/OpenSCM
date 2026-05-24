@@ -977,8 +977,30 @@ pub fn evaluate(
                         }
                     }
                 }
+                "exit_code" => {
+                    #[cfg(unix)]
+                    let output = Command::new("sh").args(["-c", input]).output();
+                    #[cfg(windows)]
+                    let output = Command::new("cmd").args(["/C", input]).output();
+
+                    match output {
+                        Ok(o) => {
+                            let code = o.status.code().unwrap_or(-1).to_string();
+                            debug!("CMD '{}' exit_code: {}", input, code);
+                            if apply_string_condition(&code, condition, sinput_trim) {
+                                EvalResult::Pass
+                            } else {
+                                EvalResult::Fail
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to execute command '{}': {}", input, e);
+                            EvalResult::Fail
+                        }
+                    }
+                }
                 _ => {
-                    error!("Unsupported cmd selement: '{}'. Use 'output'.", selement);
+                    error!("Unsupported cmd selement: '{}'. Use 'output' or 'exit_code'.", selement);
                     EvalResult::Na
                 }
             }
