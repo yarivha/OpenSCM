@@ -6,6 +6,14 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **`powershell` compliance element** — policy authors can now write Windows compliance tests using PowerShell commands instead of `cmd`. Two sub-elements are supported:
+  - `output` — runs the script and applies the standard string conditions (`equals`, `contains`, `matches`, `starts_with`, etc.) against the combined stdout+stderr, identical to the `cmd` element.
+  - `exit_code` — evaluates the integer exit code; `equals 0` is the standard "success" check.
+  - On Windows the element tries `powershell.exe` (Windows PowerShell 5.x, always present) first, then falls back to `pwsh` (PowerShell Core 7+) if the former is not found.
+  - On Linux/macOS the element always returns **NA** — use the `cmd` element with `sh` on those platforms.
+  - Gated by `ps_enabled = true` in the `[client]` TOML config (Linux/macOS) or `PsEnabled = true` in the Windows registry key `HKLM\SOFTWARE\OpenSCM\Client`. Default is `false` for the same security reason as `cmd_enabled` — arbitrary script execution requires explicit opt-in.
+
 ---
 
 ## [0.4.3] - 2026-05-24

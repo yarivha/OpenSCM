@@ -152,6 +152,7 @@ async fn process_compliance_tests(
     http_client: &reqwest::Client,
     result_url: &str,
     cmd_enabled: bool,
+    ps_enabled:  bool,
 ) {
     info!("Processing {} compliance test(s).", tests.len());
 
@@ -193,6 +194,7 @@ async fn process_compliance_tests(
                         c.condition.as_deref().unwrap_or(""),
                         c.sinput.as_deref().unwrap_or(""),
                         cmd_enabled,
+                        ps_enabled,
                     ))
                     .collect();
                 
@@ -237,6 +239,7 @@ async fn process_compliance_tests(
                 c.condition.as_deref().unwrap_or(""),
                 c.sinput.as_deref().unwrap_or(""),
                 cmd_enabled,
+                ps_enabled,
             ));
         }
 
@@ -490,6 +493,7 @@ async fn dispatch_server_command(
                 match serde_json::from_value::<Vec<Test>>(tests_val.clone()) {
                     Ok(tests) => {
                         let cmd_enabled = config.client.cmd_enabled.unwrap_or(false);
+                        let ps_enabled  = config.client.ps_enabled.unwrap_or(false);
                         process_compliance_tests(
                             tests,
                             &identity.current_id,
@@ -498,6 +502,7 @@ async fn dispatch_server_command(
                             http_client,
                             result_url,
                             cmd_enabled,
+                            ps_enabled,
                         ).await;
                     }
                     Err(e) => error!("Failed to deserialize test data: {}", e),

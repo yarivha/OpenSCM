@@ -79,6 +79,7 @@ pub struct ClientConfig {
     pub heartbeat:   Option<String>,
     pub loglevel:    Option<String>,
     pub cmd_enabled: Option<bool>,
+    pub ps_enabled:  Option<bool>,
 }
 
 
@@ -97,6 +98,7 @@ impl Default for Config {
                 heartbeat:   Some("300".to_string()),
                 loglevel:    Some("info".to_string()),
                 cmd_enabled: Some(false),
+                ps_enabled:  Some(false),
             },
         }
     }
@@ -128,6 +130,7 @@ impl Config {
         if self.client.heartbeat.is_none()   { self.client.heartbeat   = d.client.heartbeat;   changed = true; }
         if self.client.loglevel.is_none()    { self.client.loglevel    = d.client.loglevel;    changed = true; }
         if self.client.cmd_enabled.is_none() { self.client.cmd_enabled = d.client.cmd_enabled; changed = true; }
+        if self.client.ps_enabled.is_none()  { self.client.ps_enabled  = d.client.ps_enabled;  changed = true; }
         (self, changed)
     }
 }
@@ -150,6 +153,7 @@ impl Config {
                 if let Some(hb)  = &self.client.heartbeat   { key.set_value("Heartbeat",  hb)?; }
                 if let Some(ll)  = &self.client.loglevel     { key.set_value("LogLevel",   ll)?; }
                 if let Some(cmd) =  self.client.cmd_enabled  { key.set_value("CmdEnabled", &cmd.to_string())?; }
+                if let Some(ps)  =  self.client.ps_enabled   { key.set_value("PsEnabled",  &ps.to_string())?;  }
 
                 Ok(())
             } else {
@@ -231,6 +235,7 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
             heartbeat:   Some(read_val("Heartbeat",  "300")),
             loglevel:    Some(read_val("LogLevel",   "info")),
             cmd_enabled: Some(read_val("CmdEnabled", "false") == "true"),
+            ps_enabled:  Some(read_val("PsEnabled",  "false") == "true"),
         },
     }
     .normalize();

@@ -522,6 +522,7 @@ pub fn evaluate(
     condition: &str,
     sinput: &str,
     cmd_enabled: bool,
+    ps_enabled:  bool,
 ) -> EvalResult {
     let element_l   = element.trim().to_lowercase();
     let selement_l  = selement.trim().to_lowercase();
@@ -979,6 +980,97 @@ pub fn evaluate(
                 _ => {
                     error!("Unsupported cmd selement: '{}'. Use 'output'.", selement);
                     EvalResult::Na
+                }
+            }
+        }
+
+        // =========================================================
+        // POWERSHELL — Windows only; returns NA on non-Windows platforms.
+        // Requires ps_enabled = true in [client] config.
+        // =========================================================
+        "powershell" => {
+            // On non-Windows platforms PowerShell is not a standard compliance
+            // tool — use the cmd element with sh instead.
+            #[cfg(not(target_os = "windows"))]
+            {
+                let _ = ps_enabled; // suppress unused-variable warning
+                return EvalResult::Na;
+            }
+
+            #[cfg(target_os = "windows")]
+            {
+                if !ps_enabled {
+                    warn!(
+                        "PowerShell element is disabled. Set 'ps_enabled = true' in the registry to enable it."
+                    );
+                    return EvalResult::Na;
+                }
+
+                match selement_l.as_str() {
+                    "output" => {
+                        // Try powershell.exe first (Windows PowerShell 5.x, always present on
+                        // modern Windows), then fall back to pwsh (PowerShell Core 7+).
+                        let output = Command::new("powershell.exe")
+                            .args(["-NonInteractive", "-NoProfile", "-Command", input])
+                            .output()
+                            .or_else(|_| {
+                                Command::new("pwsh")
+                                    .args(["-NonInteractive", "-NoProfile", "-Command", input])
+                                    .output()
+                            });
+
+                        match output {
+                            Ok(o) => {
+                                let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                                let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                                let combined = match (stdout.is_empty(), stderr.is_empty()) {
+                                    (false, false) => format!("{}\n{}", stdout, stderr),
+                                    (true,  false) => stderr,
+                                    (_,      _   ) => stdout,
+                                };
+                                debug!("PowerShell '{}' output: '{}'", input, combined);
+                                if apply_string_condition(&combined, condition, sinput_trim) {
+                                    EvalResult::Pass
+                                } else {
+                                    EvalResult::Fail
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to execute PowerShell command '{}': {}", input, e);
+                                EvalResult::Fail
+                            }
+                        }
+                    }
+                    "exit_code" => {
+                        let output = Command::new("powershell.exe")
+                            .args(["-NonInteractive", "-NoProfile", "-Command", input])
+                            .output()
+                            .or_else(|_| {
+                                Command::new("pwsh")
+                                    .args(["-NonInteractive", "-NoProfile", "-Command", input])
+                                    .output()
+                            });
+
+                        match output {
+                            Ok(o) => {
+                                let code = o.status.code().unwrap_or(-1).to_string();
+                                debug!("PowerShell '{}' exit_code: {}", input, code);
+                                if apply_string_condition(&code, condition, sinput_trim) {
+                                    EvalResult::Pass
+                                } else {
+                                    EvalResult::Fail
+                                }
+                            }
+                            Err(e) => {
+                                error!("Failed to execute PowerShell command '{}': {}", input, e);
+                                EvalResult::Fail
+                            }
+                        }
+                    }
+                    _ => {
+                        error!("Unsupported powershell selement: '{}'. Use 'output' or 'exit_code'.", selement);
+                        EvalResult::Na
+                    }
                 }
             }
         }
