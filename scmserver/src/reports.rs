@@ -1301,6 +1301,204 @@ pub async fn system_reports_view(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// GET /reports/system/diff?a={older_id}&b={newer_id}
+// Side-by-side diff of two saved system-report snapshots.
+// Both snapshots must belong to the same system_id; the handler auto-orders
+// by submission_date so "older" is always on the left regardless of input
+// order. Mirrors the policy-report diff (reports_diff) but groups by policy
+// because system reports are a per-system view across all assigned policies.
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(serde::Serialize)]
+struct PolicyDiff {
+    policy_name:    String,
+    policy_version: String,
+    /// One of: new | removed | present (in both snapshots' policy_groups)
+    presence: &'static str,
+    results: Vec<ResultDiff>,
+    improved:  usize,
+    regressed: usize,
+    added:     usize,
+    removed:   usize,
+    changed:   usize,
+    unchanged: usize,
+}
+
+pub async fn system_reports_diff(
+    auth: AuthSession,
+    Query(q): Query<DiffQuery>,
+    Extension(pool): Extension<SqlitePool>,
+    Extension(tera): Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    if q.a == q.b {
+        return Redirect::to("/reports?error_message=Pick+two+different+snapshots+to+compare").into_response();
+    }
+
+    let rows = match sqlx::query_as::<_, SavedSystemReport>(
+        "SELECT id, tenant_id, CAST(submission_date AS TEXT) AS submission_date,
+                system_id, system_name, submitter_name, report_data
+         FROM system_reports
+         WHERE id IN (?, ?) AND tenant_id = ?",
+    )
+    .bind(q.a)
+    .bind(q.b)
+    .bind(&auth.tenant_id)
+    .fetch_all(&pool)
+    .await
+    {
+        Ok(r) => r,
+        Err(e) => {
+            error!(error = ?e, "system diff: failed to fetch reports");
+            return Redirect::to("/reports?error_message=Database+error").into_response();
+        }
+    };
+
+    if rows.len() != 2 {
+        return Redirect::to("/reports?error_message=One+or+both+snapshots+not+found").into_response();
+    }
+
+    // Same-system check via system_id (FK to systems). Falls back to comparing
+    // system_name in case the original system has been deleted and re-created
+    // (different id, same hostname) — caller intent is still "compare these
+    // two reports for what the host now reads as the same name."
+    let same_system = rows[0].system_id == rows[1].system_id
+        || rows[0].system_name == rows[1].system_name;
+    if !same_system {
+        return Redirect::to(
+            "/reports?error_message=Both+snapshots+must+belong+to+the+same+system"
+        ).into_response();
+    }
+
+    // Older on the left.
+    let mut sorted = rows;
+    sorted.sort_by(|a, b| a.submission_date.cmp(&b.submission_date));
+    let old_meta = &sorted[0];
+    let new_meta = &sorted[1];
+
+    let old_data: SystemReportData = serde_json::from_str(
+        old_meta.report_data.as_deref().unwrap_or("{}"),
+    ).unwrap_or_else(|_| SystemReportData {
+        system_id: 0, system_name: String::new(), os: String::new(),
+        arch: None, ip: None, compliance_score: -1.0, last_seen: None,
+        policy_groups: vec![], total_pass: 0, total_fail: 0, total_na: 0,
+    });
+    let new_data: SystemReportData = serde_json::from_str(
+        new_meta.report_data.as_deref().unwrap_or("{}"),
+    ).unwrap_or_else(|_| SystemReportData {
+        system_id: 0, system_name: String::new(), os: String::new(),
+        arch: None, ip: None, compliance_score: -1.0, last_seen: None,
+        policy_groups: vec![], total_pass: 0, total_fail: 0, total_na: 0,
+    });
+
+    // Build per-policy index keyed by (policy_name, policy_version) so a
+    // version bump between snapshots shows up as "removed v1 / added v2"
+    // rather than silently masking a real change.
+    use std::collections::BTreeMap;
+    let old_pol: BTreeMap<(String, String), &crate::models::PolicyResultGroup> = old_data
+        .policy_groups.iter()
+        .map(|p| ((p.policy_name.clone(), p.policy_version.clone()), p))
+        .collect();
+    let new_pol: BTreeMap<(String, String), &crate::models::PolicyResultGroup> = new_data
+        .policy_groups.iter()
+        .map(|p| ((p.policy_name.clone(), p.policy_version.clone()), p))
+        .collect();
+
+    let mut keys: Vec<(String, String)> =
+        old_pol.keys().chain(new_pol.keys()).cloned().collect();
+    keys.sort();
+    keys.dedup();
+
+    let mut diffs: Vec<PolicyDiff> = Vec::with_capacity(keys.len());
+    let mut tot_improved = 0usize;
+    let mut tot_regressed = 0usize;
+    let mut tot_added = 0usize;
+    let mut tot_removed = 0usize;
+    let mut tot_changed = 0usize;
+
+    for key in &keys {
+        let o = old_pol.get(key);
+        let n = new_pol.get(key);
+        let presence = match (o.is_some(), n.is_some()) {
+            (false, true) => "new",
+            (true, false) => "removed",
+            _             => "present",
+        };
+
+        // Per-test indexes inside the policy.
+        let old_t: BTreeMap<&str, &crate::models::IndividualResult> = o
+            .map(|p| p.results.iter().map(|r| (r.test_name.as_str(), r)).collect())
+            .unwrap_or_default();
+        let new_t: BTreeMap<&str, &crate::models::IndividualResult> = n
+            .map(|p| p.results.iter().map(|r| (r.test_name.as_str(), r)).collect())
+            .unwrap_or_default();
+
+        let mut test_names: Vec<&str> = old_t.keys().chain(new_t.keys()).copied().collect();
+        test_names.sort();
+        test_names.dedup();
+
+        let mut results: Vec<ResultDiff> = Vec::with_capacity(test_names.len());
+        let (mut improved, mut regressed, mut added, mut removed, mut changed, mut unchanged) =
+            (0usize, 0usize, 0usize, 0usize, 0usize, 0usize);
+
+        for tn in test_names {
+            let oo = old_t.get(tn);
+            let nn = new_t.get(tn);
+            let kind = classify(oo.map(|r| r.status.as_str()), nn.map(|r| r.status.as_str()));
+            match kind {
+                "improved"  => improved  += 1,
+                "regressed" => regressed += 1,
+                "added"     => added     += 1,
+                "removed"   => removed   += 1,
+                "changed"   => changed   += 1,
+                _           => unchanged += 1,
+            }
+            results.push(ResultDiff {
+                test_name:    tn.to_string(),
+                old_status:   oo.map(|r| r.status.clone()),
+                new_status:   nn.map(|r| r.status.clone()),
+                old_excluded: oo.map(|r| r.is_excluded).unwrap_or(false),
+                new_excluded: nn.map(|r| r.is_excluded).unwrap_or(false),
+                change:       kind,
+            });
+        }
+
+        tot_improved  += improved;
+        tot_regressed += regressed;
+        tot_added     += added;
+        tot_removed   += removed;
+        tot_changed   += changed;
+
+        diffs.push(PolicyDiff {
+            policy_name:    key.0.clone(),
+            policy_version: key.1.clone(),
+            presence,
+            results,
+            improved, regressed, added, removed, changed, unchanged,
+        });
+    }
+
+    let mut ctx = Context::new();
+    ctx.insert("old_meta",       old_meta);
+    ctx.insert("new_meta",       new_meta);
+    ctx.insert("system_name",    &new_meta.system_name);
+    ctx.insert("diffs",          &diffs);
+    ctx.insert("tot_improved",   &tot_improved);
+    ctx.insert("tot_regressed",  &tot_regressed);
+    ctx.insert("tot_added",      &tot_added);
+    ctx.insert("tot_removed",    &tot_removed);
+    ctx.insert("tot_changed",    &tot_changed);
+
+    render_template(&tera, Some(&pool), "system_reports_diff.html", ctx, Some(auth))
+        .await
+        .into_response()
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // GET /reports/system/delete/{id}
 // Delete a saved system compliance report.
 // Role: Editor

@@ -1,0 +1,208 @@
+{% extends "base.html" %}
+
+{% block head %}
+<style>
+  .diff-summary .badge { font-size: 0.95rem; padding: 0.4rem 0.7rem; }
+  .diff-table  { table-layout: fixed; }
+  .diff-table th, .diff-table td { vertical-align: middle; }
+  .diff-table th.col-test  { width: 50%; }
+  .diff-table th.col-side  { width: 22%; text-align: center; }
+  .diff-table th.col-arrow { width:  6%; text-align: center; color: #6c757d; }
+  .diff-table td.col-side  { text-align: center; }
+
+  tr.diff-improved  td { background: rgba( 40, 167,  69, 0.10); }
+  tr.diff-regressed td { background: rgba(220,  53,  69, 0.10); }
+  tr.diff-added     td { background: rgba(255, 193,   7, 0.12); }
+  tr.diff-removed   td { background: rgba(108, 117, 125, 0.10); }
+  tr.diff-changed   td { background: rgba(  0, 123, 255, 0.08); }
+
+  .dark-mode tr.diff-improved  td { background: rgba( 40, 167,  69, 0.18); }
+  .dark-mode tr.diff-regressed td { background: rgba(220,  53,  69, 0.18); }
+  .dark-mode tr.diff-added     td { background: rgba(255, 193,   7, 0.18); }
+  .dark-mode tr.diff-removed   td { background: rgba(108, 117, 125, 0.18); }
+  .dark-mode tr.diff-changed   td { background: rgba(  0, 123, 255, 0.16); }
+
+  .status-pill {
+    display: inline-block;
+    min-width: 70px;
+    padding: 2px 8px;
+    border-radius: 3px;
+    font-size: 0.82rem;
+    font-weight: 600;
+  }
+  .pill-pass     { background: rgba( 40, 167,  69, 0.18); color: #1e7e34; }
+  .pill-fail     { background: rgba(220,  53,  69, 0.18); color: #c82333; }
+  .pill-na       { background: rgba(108, 117, 125, 0.18); color: #5a6268; }
+  .pill-excluded { background: rgba(108, 117, 125, 0.25); color: #5a6268; }
+  .pill-absent   { color: #adb5bd; }
+  .dark-mode .pill-pass { color: #6ee7b7; }
+  .dark-mode .pill-fail { color: #fda4af; }
+  .dark-mode .pill-na, .dark-mode .pill-excluded { color: #ced4da; }
+
+  .policy-card-header .badge { margin-right: 4px; }
+  .meta-line { color: #6c757d; font-size: 0.88rem; }
+</style>
+{% endblock %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1><i class="fas fa-not-equal mr-2 text-primary"></i>System Report Diff</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/reports">Reports</a></li>
+            <li class="breadcrumb-item active">Diff</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      <div class="card card-outline card-primary shadow-sm">
+        <div class="card-body">
+          <div class="row">
+            <div class="col-md-6 border-right">
+              <h4><i class="fas fa-server mr-1"></i>{{ system_name }}</h4>
+              <p class="meta-line mb-1">
+                <i class="fas fa-clock mr-1"></i><strong>Older:</strong>
+                <a href="/reports/system/view/{{ old_meta.id }}">{{ old_meta.submission_date }}</a>
+                {% if old_meta.submitter_name %}<span class="ml-2"><i class="fas fa-user mr-1"></i>{{ old_meta.submitter_name }}</span>{% endif %}
+              </p>
+              <p class="meta-line mb-0">
+                <i class="fas fa-clock mr-1"></i><strong>Newer:</strong>
+                <a href="/reports/system/view/{{ new_meta.id }}">{{ new_meta.submission_date }}</a>
+                {% if new_meta.submitter_name %}<span class="ml-2"><i class="fas fa-user mr-1"></i>{{ new_meta.submitter_name }}</span>{% endif %}
+              </p>
+            </div>
+            <div class="col-md-6 text-center diff-summary">
+              <div class="row">
+                <div class="col-4 col-md text-success">
+                  <h3 class="mb-0">{{ tot_improved }}</h3>
+                  <small class="text-uppercase">Improved</small>
+                </div>
+                <div class="col-4 col-md text-danger">
+                  <h3 class="mb-0">{{ tot_regressed }}</h3>
+                  <small class="text-uppercase">Regressed</small>
+                </div>
+                <div class="col-4 col-md text-warning">
+                  <h3 class="mb-0">{{ tot_added }}</h3>
+                  <small class="text-uppercase">Added</small>
+                </div>
+                <div class="col-4 col-md text-muted">
+                  <h3 class="mb-0">{{ tot_removed }}</h3>
+                  <small class="text-uppercase">Removed</small>
+                </div>
+                <div class="col-4 col-md text-info">
+                  <h3 class="mb-0">{{ tot_changed }}</h3>
+                  <small class="text-uppercase">Changed</small>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {% for p in diffs %}
+      <div class="card card-outline
+                  {% if p.regressed > 0 %}card-danger
+                  {% elif p.improved > 0 %}card-success
+                  {% elif p.presence == 'new' %}card-warning
+                  {% elif p.presence == 'removed' %}card-secondary
+                  {% else %}card-primary{% endif %}
+                  shadow-sm">
+        <div class="card-header policy-card-header">
+          <h3 class="card-title font-weight-bold">
+            <i class="fas fa-shield-alt mr-2"></i>{{ p.policy_name }}
+            <small class="text-muted ml-1">v{{ p.policy_version }}</small>
+            {% if p.presence == 'new' %}
+              <span class="badge badge-warning ml-2">New in this snapshot</span>
+            {% elif p.presence == 'removed' %}
+              <span class="badge badge-secondary ml-2">Gone from new snapshot</span>
+            {% endif %}
+          </h3>
+          <div class="card-tools">
+            {% if p.improved > 0 %}<span class="badge badge-success">↑ {{ p.improved }} improved</span>{% endif %}
+            {% if p.regressed > 0 %}<span class="badge badge-danger">↓ {{ p.regressed }} regressed</span>{% endif %}
+            {% if p.added > 0 %}<span class="badge badge-warning">+ {{ p.added }} added</span>{% endif %}
+            {% if p.removed > 0 %}<span class="badge badge-secondary">− {{ p.removed }} removed</span>{% endif %}
+            {% if p.changed > 0 %}<span class="badge badge-info">~ {{ p.changed }} changed</span>{% endif %}
+            {% if p.unchanged > 0 %}<span class="badge badge-light text-muted">= {{ p.unchanged }} unchanged</span>{% endif %}
+            <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
+          </div>
+        </div>
+
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0 diff-table">
+            <thead class="thead-light">
+              <tr>
+                <th class="col-test" style="padding-left: 1rem;">Test</th>
+                <th class="col-side">Older</th>
+                <th class="col-arrow"></th>
+                <th class="col-side">Newer</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for r in p.results %}
+              <tr class="diff-{{ r.change }}">
+                <td style="padding-left: 1rem;">{{ r.test_name }}</td>
+                <td class="col-side">
+                  {% if r.old_excluded %}
+                    <span class="status-pill pill-excluded"><i class="fas fa-ban mr-1"></i>EXCL</span>
+                  {% elif r.old_status %}
+                    <span class="status-pill
+                      {% if r.old_status == 'PASS' %}pill-pass
+                      {% elif r.old_status == 'FAIL' %}pill-fail
+                      {% else %}pill-na{% endif %}">{{ r.old_status }}</span>
+                  {% else %}
+                    <span class="pill-absent">—</span>
+                  {% endif %}
+                </td>
+                <td class="col-arrow">
+                  {% if r.change == 'improved' %}<i class="fas fa-arrow-right text-success"></i>
+                  {% elif r.change == 'regressed' %}<i class="fas fa-arrow-right text-danger"></i>
+                  {% elif r.change == 'added' %}<i class="fas fa-plus text-warning"></i>
+                  {% elif r.change == 'removed' %}<i class="fas fa-minus text-muted"></i>
+                  {% elif r.change == 'changed' %}<i class="fas fa-arrow-right text-info"></i>
+                  {% else %}<i class="fas fa-equals text-muted"></i>{% endif %}
+                </td>
+                <td class="col-side">
+                  {% if r.new_excluded %}
+                    <span class="status-pill pill-excluded"><i class="fas fa-ban mr-1"></i>EXCL</span>
+                  {% elif r.new_status %}
+                    <span class="status-pill
+                      {% if r.new_status == 'PASS' %}pill-pass
+                      {% elif r.new_status == 'FAIL' %}pill-fail
+                      {% else %}pill-na{% endif %}">{{ r.new_status }}</span>
+                  {% else %}
+                    <span class="pill-absent">—</span>
+                  {% endif %}
+                </td>
+              </tr>
+              {% else %}
+              <tr><td colspan="4" class="text-center text-muted py-3">No tests in either snapshot for this policy.</td></tr>
+              {% endfor %}
+            </tbody>
+          </table>
+        </div>
+      </div>
+      {% endfor %}
+
+      {% if diffs | length == 0 %}
+      <div class="alert alert-info">
+        <i class="fas fa-info-circle mr-1"></i>
+        Neither snapshot has any policy groups to compare.
+      </div>
+      {% endif %}
+
+    </div>
+  </section>
+</div>
+{% endblock %}

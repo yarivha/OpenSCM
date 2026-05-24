@@ -127,6 +127,10 @@
 
                 <div id="system-bulk-toolbar" class="card-header bg-light border-top" style="display:none;">
                   <span id="system-bulk-count" class="mr-3 font-weight-bold text-primary"></span>
+                  <button type="button" class="btn btn-info btn-sm mr-1" id="system-bulk-diff-btn"
+                          title="Select exactly two snapshots of the same system" disabled>
+                    <i class="fas fa-not-equal mr-1"></i> Compare
+                  </button>
                   {% if is_editor %}
                   <button type="button" class="btn btn-danger btn-sm" id="system-bulk-delete-btn" title="Delete Selected">
                     <i class="fas fa-trash mr-1"></i> Delete
@@ -150,7 +154,8 @@
                       {% for report in system_reports %}
                       <tr>
                         <td>{{ report.id }}</td>
-                        <td class="text-center"><input type="checkbox" class="system-row-checkbox" value="{{ report.id }}" title="Select"></td>
+                        <td class="text-center"><input type="checkbox" class="system-row-checkbox" value="{{ report.id }}"
+                          data-system-key="{{ report.system_id }}@{{ report.system_name }}" title="Select"></td>
                         <td><strong><i class="fas fa-server mr-1 text-muted"></i>{{ report.system_name }}</strong></td>
                         <td>{{ report.submitter_name }}</td>
                         <td class="datetime" data-utc="{{ report.submission_date }}">{{ report.submission_date }}</td>
@@ -304,6 +309,29 @@
       if ($(this).prop('disabled')) return;
       const ids = $('.policy-row-checkbox:checked').map(function() { return $(this).val(); }).get();
       window.location = '/reports/diff?a=' + encodeURIComponent(ids[0]) + '&b=' + encodeURIComponent(ids[1]);
+    });
+
+    // ── Same Compare-button logic for the System Reports tab — pairs are
+    //    same-system instead of same-policy.
+    function refreshSystemDiffBtn() {
+      const checked = $('.system-row-checkbox:checked');
+      const btn = $('#system-bulk-diff-btn');
+      if (checked.length !== 2) {
+        btn.prop('disabled', true).attr('title', 'Select exactly two snapshots of the same system');
+        return;
+      }
+      const keys = checked.map(function() { return $(this).data('system-key'); }).get();
+      if (keys[0] !== keys[1]) {
+        btn.prop('disabled', true).attr('title', 'Both snapshots must belong to the same system');
+        return;
+      }
+      btn.prop('disabled', false).attr('title', 'Compare the two selected snapshots');
+    }
+    $(document).on('change', '.system-row-checkbox, #system-select-all', refreshSystemDiffBtn);
+    $('#system-bulk-diff-btn').on('click', function() {
+      if ($(this).prop('disabled')) return;
+      const ids = $('.system-row-checkbox:checked').map(function() { return $(this).val(); }).get();
+      window.location = '/reports/system/diff?a=' + encodeURIComponent(ids[0]) + '&b=' + encodeURIComponent(ids[1]);
     });
   });
 </script>
