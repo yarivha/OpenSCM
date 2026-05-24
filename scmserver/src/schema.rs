@@ -608,7 +608,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     // Selements
     for name in &[
         "EXISTS", "NOT EXISTS", "CONTENT", "VERSION", "PERMISSION",
-        "OWNER", "GROUP", "SHA1", "SHA2", "OUTPUT", "EXIT_CODE",
+        "OWNER", "GROUP", "SHA1", "SHA2", "OUTPUT", "EXIT CODE",
     ] {
         sqlx::query(
             "INSERT OR IGNORE INTO selements (name) VALUES (?)"
@@ -1539,15 +1539,15 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v19 → v20 complete.");
     }
 
-    // v20 → v21: add POWERSHELL element and EXIT_CODE selement to lookup tables.
+    // v20 → v21: add POWERSHELL element and EXIT CODE selement to lookup tables.
     if version < 21 {
-        info!("Running schema migration v20 → v21 (POWERSHELL element + EXIT_CODE selement)...");
+        info!("Running schema migration v20 → v21 (POWERSHELL element + EXIT CODE selement)...");
 
         sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES ('POWERSHELL')")
             .execute(pool)
             .await?;
 
-        sqlx::query("INSERT OR IGNORE INTO selements (name) VALUES ('EXIT_CODE')")
+        sqlx::query("INSERT OR IGNORE INTO selements (name) VALUES ('EXIT CODE')")
             .execute(pool)
             .await?;
 

@@ -977,7 +977,7 @@ pub fn evaluate(
                         }
                     }
                 }
-                "exit_code" => {
+                "exit code" => {
                     #[cfg(unix)]
                     let output = Command::new("sh").args(["-c", input]).output();
                     #[cfg(windows)]
@@ -1000,7 +1000,7 @@ pub fn evaluate(
                     }
                 }
                 _ => {
-                    error!("Unsupported cmd selement: '{}'. Use 'output' or 'exit_code'.", selement);
+                    error!("Unsupported cmd selement: '{}'. Use 'output' or 'exit code'.", selement);
                     EvalResult::Na
                 }
             }
@@ -1063,7 +1063,7 @@ pub fn evaluate(
                             }
                         }
                     }
-                    "exit_code" => {
+                    "exit code" => {
                         let output = Command::new("powershell.exe")
                             .args(["-NonInteractive", "-NoProfile", "-Command", input])
                             .output()
@@ -1090,7 +1090,7 @@ pub fn evaluate(
                         }
                     }
                     _ => {
-                        error!("Unsupported powershell selement: '{}'. Use 'output' or 'exit_code'.", selement);
+                        error!("Unsupported powershell selement: '{}'. Use 'output' or 'exit code'.", selement);
                         EvalResult::Na
                     }
                 }
