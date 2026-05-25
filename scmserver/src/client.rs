@@ -416,7 +416,8 @@ pub async fn send(
                 // rather than persisted — keeps the schema simple and means a binary
                 // rebuild can't get out of sync with stale stored data.
                 if let Err(e) = sqlx::query(
-                    "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, status='active', last_seen=CURRENT_TIMESTAMP
+                    "UPDATE systems SET name=?, ver=?, os=?, ip=?, arch=?, status='active', last_seen=CURRENT_TIMESTAMP,
+                     cpu_usage=?, mem_used_mb=?, mem_total_mb=?, disk_used_gb=?, disk_total_gb=?, uptime_secs=?
                      WHERE id=? AND tenant_id=?",
                 )
                 .bind(&payload.hostname)
@@ -424,6 +425,12 @@ pub async fn send(
                 .bind(&payload.os)
                 .bind(&payload.ip)
                 .bind(&payload.arch)
+                .bind(payload.cpu_usage)
+                .bind(payload.mem_used_mb)
+                .bind(payload.mem_total_mb)
+                .bind(payload.disk_used_gb)
+                .bind(payload.disk_total_gb)
+                .bind(payload.uptime_secs)
                 .bind(id)
                 .bind(tenant_id)
                 .execute(&mut *tx)

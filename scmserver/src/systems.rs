@@ -89,7 +89,9 @@ pub async fn systems(
                         WHEN s.last_seen IS NULL   THEN 0
                         WHEN {unix_diff} > ?        THEN 1
                         ELSE 0
-                    END AS is_offline
+                    END AS is_offline,
+                    s.cpu_usage, s.mem_used_mb, s.mem_total_mb,
+                    s.disk_used_gb, s.disk_total_gb, s.uptime_secs
                 FROM systems AS s
                 LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
                 LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
@@ -214,6 +216,12 @@ pub async fn systems(
                 is_offline:       row.try_get::<bool, _>("is_offline").unwrap_or(false),
                 upgrade_available,
                 upgrade_version,
+                cpu_usage:        row.try_get("cpu_usage").ok(),
+                mem_used_mb:      row.try_get("mem_used_mb").ok(),
+                mem_total_mb:     row.try_get("mem_total_mb").ok(),
+                disk_used_gb:     row.try_get("disk_used_gb").ok(),
+                disk_total_gb:    row.try_get("disk_total_gb").ok(),
+                uptime_secs:      row.try_get("uptime_secs").ok(),
             }
         })
         .collect();
@@ -386,6 +394,12 @@ pub async fn systems_edit(
         platform: None,
         upgrade_available: false,
         upgrade_version: None,
+        cpu_usage: None,
+        mem_used_mb: None,
+        mem_total_mb: None,
+        disk_used_gb: None,
+        disk_total_gb: None,
+        uptime_secs: None,
     };
 
     let groups_result = sqlx::query(
@@ -625,6 +639,12 @@ pub async fn systems_pending(
             platform: None,
             upgrade_available: false,
             upgrade_version: None,
+            cpu_usage: None,
+            mem_used_mb: None,
+            mem_total_mb: None,
+            disk_used_gb: None,
+            disk_total_gb: None,
+            uptime_secs: None,
         })
         .collect();
 

@@ -15,6 +15,19 @@ pub struct UnsignedPayload {
     pub arch: String,
     pub timestamp: String,
     pub public_key: Option<String>,
+    // Telemetry — optional so old servers ignore unknown fields gracefully.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub cpu_usage:    Option<f32>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem_used_mb:  Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub mem_total_mb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_used_gb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub disk_total_gb: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub uptime_secs:  Option<u64>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

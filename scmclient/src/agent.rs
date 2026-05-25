@@ -296,11 +296,18 @@ struct AgentIdentity {
 
 // Snapshot of host attributes reported to the server.
 struct SystemInfo {
-    hostname: String,
-    ip:       String,
-    os:       String,
-    arch:     String,
-    ver:      String,
+    hostname:     String,
+    ip:           String,
+    os:           String,
+    arch:         String,
+    ver:          String,
+    // Telemetry
+    cpu_usage:    Option<f32>,
+    mem_used_mb:  Option<u64>,
+    mem_total_mb: Option<u64>,
+    disk_used_gb: Option<u64>,
+    disk_total_gb: Option<u64>,
+    uptime_secs:  Option<u64>,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -358,6 +365,8 @@ fn load_or_create_identity(config: &Config) -> Result<AgentIdentity, Box<dyn std
 // Collect host metadata for the heartbeat payload.
 // ─────────────────────────────────────────────────────────────────────────────
 fn collect_system_info() -> SystemInfo {
+    use sysinfo::{System, Disks};
+
     let osinfo = os_info::get();
     let ip = local_ip_address::local_ip()
         .map(|ip| ip.to_string())
@@ -366,12 +375,60 @@ fn collect_system_info() -> SystemInfo {
             "0.0.0.0".to_string()
         });
 
+    // Collect telemetry via sysinfo.
+    // CPU usage requires a brief refresh interval to get a meaningful value.
+    let mut sys = System::new_all();
+    sys.refresh_all();
+    // Second refresh after a short pause so CPU deltas are computed.
+    std::thread::sleep(std::time::Duration::from_millis(500));
+    sys.refresh_cpu_usage();
+
+    // System-wide CPU usage: average across all logical CPUs.
+    let cpu_usage = {
+        let cpus = sys.cpus();
+        if cpus.is_empty() {
+            None
+        } else {
+            let avg = cpus.iter().map(|c| c.cpu_usage()).sum::<f32>() / cpus.len() as f32;
+            Some((avg * 10.0).round() / 10.0) // round to 1 decimal
+        }
+    };
+
+    let mem_total_mb = if sys.total_memory() > 0 { Some(sys.total_memory() / 1024 / 1024) } else { None };
+    let mem_used_mb  = mem_total_mb.map(|_| sys.used_memory() / 1024 / 1024);
+
+    // Root disk (largest mount or C:\ on Windows).
+    let disks = Disks::new_with_refreshed_list();
+    let (disk_used_gb, disk_total_gb) = {
+        // Pick the disk mounted at "/" (Unix) or with the most total space (Windows/fallback).
+        let root = disks.iter()
+            .find(|d| d.mount_point().to_str() == Some("/"))
+            .or_else(|| disks.iter().max_by_key(|d| d.total_space()));
+
+        if let Some(d) = root {
+            let total = d.total_space();
+            let avail = d.available_space();
+            let used  = total.saturating_sub(avail);
+            (Some(used / 1024 / 1024 / 1024), Some(total / 1024 / 1024 / 1024))
+        } else {
+            (None, None)
+        }
+    };
+
+    let uptime_secs = Some(System::uptime());
+
     SystemInfo {
-        hostname: gethostname::gethostname().to_string_lossy().into_owned(),
+        hostname:     gethostname::gethostname().to_string_lossy().into_owned(),
         ip,
-        os:       format!("{} {}", osinfo.os_type(), osinfo.version()),
-        arch:     std::env::consts::ARCH.to_string(),
-        ver:      env!("CARGO_PKG_VERSION").to_string(),
+        os:           format!("{} {}", osinfo.os_type(), osinfo.version()),
+        arch:         std::env::consts::ARCH.to_string(),
+        ver:          env!("CARGO_PKG_VERSION").to_string(),
+        cpu_usage,
+        mem_used_mb,
+        mem_total_mb,
+        disk_used_gb,
+        disk_total_gb,
+        uptime_secs,
     }
 }
 
@@ -391,15 +448,21 @@ async fn post_heartbeat(
     let needs_handshake = identity.current_id == "0" || !identity.server_pub_path.exists();
 
     let unsigned = UnsignedPayload {
-        id:         identity.current_id.clone(),
+        id:           identity.current_id.clone(),
         organization: config.server.organization.clone(),
-        hostname:   sys.hostname.clone(),
-        ver:        sys.ver.clone(),
-        ip:         sys.ip.clone(),
-        os:         sys.os.clone(),
-        arch:       sys.arch.clone(),
-        timestamp:  chrono::Utc::now().timestamp().to_string(),
-        public_key: if needs_handshake { Some(identity.public_base64.clone()) } else { None },
+        hostname:     sys.hostname.clone(),
+        ver:          sys.ver.clone(),
+        ip:           sys.ip.clone(),
+        os:           sys.os.clone(),
+        arch:         sys.arch.clone(),
+        timestamp:    chrono::Utc::now().timestamp().to_string(),
+        public_key:   if needs_handshake { Some(identity.public_base64.clone()) } else { None },
+        cpu_usage:    sys.cpu_usage,
+        mem_used_mb:  sys.mem_used_mb,
+        mem_total_mb: sys.mem_total_mb,
+        disk_used_gb: sys.disk_used_gb,
+        disk_total_gb: sys.disk_total_gb,
+        uptime_secs:  sys.uptime_secs,
     };
 
     let signature = sign_payload(&unsigned, &identity.signing_key)?;

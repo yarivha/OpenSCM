@@ -1557,6 +1557,31 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v20 → v21 complete.");
     }
 
+    // v21 → v22: add live telemetry columns to systems table.
+    if version < 22 {
+        info!("Running schema migration v21 → v22 (live telemetry columns)...");
+
+        for col in &[
+            "cpu_usage    REAL",
+            "mem_used_mb  INTEGER",
+            "mem_total_mb INTEGER",
+            "disk_used_gb  INTEGER",
+            "disk_total_gb INTEGER",
+            "uptime_secs  INTEGER",
+        ] {
+            if !column_exists(pool, "systems", col.split_whitespace().next().unwrap_or("")).await {
+                sqlx::query(&format!("ALTER TABLE systems ADD COLUMN {}", col))
+                    .execute(pool)
+                    .await?;
+            }
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 22")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v21 → v22 complete.");
+    }
+
     Ok(())
 }
 

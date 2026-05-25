@@ -59,6 +59,13 @@ pub struct System {
     pub upgrade_available: bool,
     /// The newer version available for this system, if any.
     pub upgrade_version: Option<String>,
+    // Live telemetry — updated on every heartbeat; None if agent hasn't reported yet.
+    pub cpu_usage:    Option<f32>,
+    pub mem_used_mb:  Option<i64>,
+    pub mem_total_mb: Option<i64>,
+    pub disk_used_gb: Option<i64>,
+    pub disk_total_gb: Option<i64>,
+    pub uptime_secs:  Option<i64>,
 }
 
 
@@ -297,6 +304,19 @@ pub struct UnsignedPayload {
     pub arch: String,
     pub timestamp: String,
     pub public_key: Option<String>,
+    // Telemetry — all optional; absent from old clients defaults to None.
+    #[serde(default)]
+    pub cpu_usage:    Option<f32>,
+    #[serde(default)]
+    pub mem_used_mb:  Option<i64>,
+    #[serde(default)]
+    pub mem_total_mb: Option<i64>,
+    #[serde(default)]
+    pub disk_used_gb: Option<i64>,
+    #[serde(default)]
+    pub disk_total_gb: Option<i64>,
+    #[serde(default)]
+    pub uptime_secs:  Option<i64>,
 }
 
 

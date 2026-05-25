@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Live telemetry on heartbeat** — agents now send CPU usage, RAM, disk, and uptime with every heartbeat. The systems list shows a compact telemetry line under each system name: CPU %, RAM used/total (GB), disk used/total (GB), and uptime (days + hours). Old agents that don't send telemetry fields show nothing — the fields are all optional and `#[serde(default)]` on both sides. Schema migration v21→v22 adds six nullable columns to the `systems` table (`cpu_usage`, `mem_used_mb`, `mem_total_mb`, `disk_used_gb`, `disk_total_gb`, `uptime_secs`). Client uses the `sysinfo` crate (already a dependency) with a 500ms CPU sampling window for an accurate reading.
+
 ---
 
 ## [0.4.4] - 2026-05-25

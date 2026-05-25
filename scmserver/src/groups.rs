@@ -132,6 +132,12 @@ pub async fn system_groups_add(
                 platform: None,
                 upgrade_available: false,
                 upgrade_version: None,
+                cpu_usage: None,
+                mem_used_mb: None,
+                mem_total_mb: None,
+                disk_used_gb: None,
+                disk_total_gb: None,
+                uptime_secs: None,
             })
             .collect(),
         Err(e) => {
@@ -409,6 +415,12 @@ pub async fn system_groups_edit(
                 platform: None,
                 upgrade_available: false,
                 upgrade_version: None,
+                cpu_usage: None,
+                mem_used_mb: None,
+                mem_total_mb: None,
+                disk_used_gb: None,
+                disk_total_gb: None,
+                uptime_secs: None,
             })
             .collect(),
         Err(e) => {
