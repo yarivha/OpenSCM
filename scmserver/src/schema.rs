@@ -587,7 +587,9 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ('default', 'smtp_from', '', 'From address for outgoing emails'),
         ('default', 'smtp_tls', 'starttls', 'TLS mode: starttls, tls, or none'),
         ('default', 'app_url', '', 'Public URL of this installation (used in email links)'),
-        ('default', 'audit_log_retention_days', '730', 'Days to keep audit_log rows before auto-pruning (0 = keep forever)')"
+        ('default', 'audit_log_retention_days', '730', 'Days to keep audit_log rows before auto-pruning (0 = keep forever)'),
+        ('default', 'report_retention_days', '0', 'Days to keep saved policy/system report snapshots before auto-pruning (0 = keep forever)'),
+        ('default', 'notification_retention_days', '30', 'Days to keep bell-icon notifications before auto-pruning (0 = keep forever)')"
     )
     .execute(pool)
     .await?;
@@ -1580,6 +1582,26 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v21 → v22 complete.");
+    }
+
+    // v22 → v23: add retention settings for reports and notifications.
+    if version < 23 {
+        info!("Running schema migration v22 → v23 (report + notification retention)...");
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
+            ('default', 'report_retention_days', '0',
+                'Days to keep saved policy/system report snapshots before auto-pruning (0 = keep forever)'),
+            ('default', 'notification_retention_days', '30',
+                'Days to keep bell-icon notifications before auto-pruning (0 = keep forever)')",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 23")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v22 → v23 complete.");
     }
 
     Ok(())

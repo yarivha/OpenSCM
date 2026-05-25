@@ -414,10 +414,11 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 
     tokio::spawn(async move {
         let mut last_snapshot_hour: i32 = Utc::now().hour() as i32;
-        // Track the last calendar day on which audit-log pruning ran so
+        // Track the last calendar day on which daily-prune tasks ran so
         // the daily tick fires exactly once per UTC day regardless of
-        // when the server started.
-        let mut last_audit_prune_day: i32 = -1;
+        // when the server started. Drives audit-log, report, and
+        // notification retention pruning together.
+        let mut last_daily_prune_day: i32 = -1;
 
         loop {
             interval.tick().await;
@@ -529,14 +530,17 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 check_for_updates(&loop_pool).await;
             }
 
-            // --- TASK E: DAILY AUDIT-LOG PRUNE ---
+            // --- TASK E: DAILY RETENTION PRUNE ---
             // Runs once per UTC day at the first tick that lands on a new
-            // day. Per-tenant retention is read from settings inside
-            // crate::audit::prune; tenants with retention = 0 (forever)
-            // are skipped there.
-            if current_day != last_audit_prune_day {
+            // day. Per-tenant retention is read from settings inside each
+            // prune helper; tenants with retention = 0 (forever) are
+            // skipped there. Covers audit log, saved reports, and
+            // notifications in one daily pass.
+            if current_day != last_daily_prune_day {
                 crate::audit::prune(&loop_pool).await;
-                last_audit_prune_day = current_day;
+                prune_reports(&loop_pool).await;
+                prune_notifications(&loop_pool).await;
+                last_daily_prune_day = current_day;
             }
         }
     });
@@ -579,6 +583,111 @@ async fn prune_inactive_systems(pool: &SqlitePool) {
             }
             Ok(_) => {}
             Err(e) => error!("Auto-prune: delete failed for tenant '{}': {}", tenant_id, e),
+        }
+    }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: prune_reports
+// For each tenant with report_retention_days > 0, deletes rows from both
+// `reports` (policy snapshots) and `system_reports` whose submission_date is
+// older than the configured threshold. One `retention.reports_pruned` audit
+// entry per tenant whose data was actually trimmed.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn prune_reports(pool: &SqlitePool) {
+    let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
+        "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
+         WHERE skey = 'report_retention_days' AND CAST(value AS INTEGER) > 0",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => { error!("report prune: failed to fetch retention settings: {}", e); return; }
+    };
+
+    for (tenant_id, days) in tenants {
+        let cutoff_clause = "submission_date < datetime('now', '-' || ? || ' days')";
+
+        let policy_del = sqlx::query(&format!(
+            "DELETE FROM reports WHERE tenant_id = ? AND {}", cutoff_clause
+        ))
+        .bind(&tenant_id).bind(days)
+        .execute(pool).await;
+
+        let system_del = sqlx::query(&format!(
+            "DELETE FROM system_reports WHERE tenant_id = ? AND {}", cutoff_clause
+        ))
+        .bind(&tenant_id).bind(days)
+        .execute(pool).await;
+
+        let removed = match (&policy_del, &system_del) {
+            (Ok(p), Ok(s)) => p.rows_affected() + s.rows_affected(),
+            _ => 0,
+        };
+
+        if let Err(e) = &policy_del { error!("report prune: policy delete failed for tenant '{}': {}", tenant_id, e); }
+        if let Err(e) = &system_del { error!("report prune: system delete failed for tenant '{}': {}", tenant_id, e); }
+
+        if removed > 0 {
+            info!("report prune: removed {} report snapshot(s) older than {} day(s) for tenant '{}'.", removed, days, tenant_id);
+            crate::audit::record_raw(
+                pool, &tenant_id,
+                None, "system",
+                None,
+                "retention.reports_pruned",
+                Some("reports"), None,
+                Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+            ).await;
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: prune_notifications
+// For each tenant with notification_retention_days > 0, deletes rows from the
+// `notify` table whose `nts` timestamp is older than the configured threshold.
+// `nts` is stored as an ISO-8601 string; lexical comparison is correct for that
+// format. One `retention.notifications_pruned` audit entry per tenant whose
+// data was actually trimmed.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn prune_notifications(pool: &SqlitePool) {
+    let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
+        "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
+         WHERE skey = 'notification_retention_days' AND CAST(value AS INTEGER) > 0",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => { error!("notification prune: failed to fetch retention settings: {}", e); return; }
+    };
+
+    for (tenant_id, days) in tenants {
+        let res = sqlx::query(
+            "DELETE FROM notify
+             WHERE tenant_id = ?
+               AND nts < strftime('%Y-%m-%dT%H:%M:%SZ', 'now', '-' || ? || ' days')",
+        )
+        .bind(&tenant_id).bind(days)
+        .execute(pool).await;
+
+        match res {
+            Ok(r) if r.rows_affected() > 0 => {
+                let removed = r.rows_affected();
+                info!("notification prune: removed {} row(s) older than {} day(s) for tenant '{}'.", removed, days, tenant_id);
+                crate::audit::record_raw(
+                    pool, &tenant_id,
+                    None, "system",
+                    None,
+                    "retention.notifications_pruned",
+                    Some("notify"), None,
+                    Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+                ).await;
+            }
+            Ok(_) => {}
+            Err(e) => error!("notification prune: delete failed for tenant '{}': {}", tenant_id, e),
         }
     }
 }

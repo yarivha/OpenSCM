@@ -7,6 +7,12 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Retention policies for reports and notifications** — closes the long-running #9 by extending the existing daily prune that already handled the audit log. Two new per-tenant settings appear in `Admin → Settings → General`:
+  - **Report Retention (days)** — applies to both `reports` (policy snapshots) and `system_reports`. Default `0` (keep forever) — audit work usually wants long history; admins who must trim for storage reasons can opt in.
+  - **Notification Retention (days)** — applies to the bell-icon `notify` table. Default `30` — operational chatter piles up fast and is rarely useful after a month.
+
+  Both accept `0` (forever) or 1-10000 days, validated server-side. The scheduler's daily-prune tick (previously only audit log) now also calls `prune_reports` and `prune_notifications` in the same pass, tracked by `last_daily_prune_day` to fire exactly once per UTC day. Successful trims are themselves audited as `retention.reports_pruned` and `retention.notifications_pruned` with `{"removed":N,"retention_days":D}` in the details field — so an auditor noticing data disappeared can answer "why" without grep. Schema migration v22→v23 seeds the two new settings rows on existing installs.
+
 - **Live telemetry on heartbeat** — agents now send CPU usage, RAM, disk, and uptime with every heartbeat. The systems list shows a compact telemetry line under each system name: CPU %, RAM used/total (GB), disk used/total (GB), and uptime (days + hours). Old agents that don't send telemetry fields show nothing — the fields are all optional and `#[serde(default)]` on both sides. Schema migration v21→v22 adds six nullable columns to the `systems` table (`cpu_usage`, `mem_used_mb`, `mem_total_mb`, `disk_used_gb`, `disk_total_gb`, `uptime_secs`). Client uses the `sysinfo` crate (already a dependency) with a 500ms CPU sampling window for an accurate reading.
 
 ---

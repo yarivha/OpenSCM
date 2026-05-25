@@ -130,6 +130,39 @@
                 </div>
               </div>
             </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="report_retention_days">
+                    <i class="fas fa-file-alt mr-1 text-muted"></i>
+                    Report Retention (days)
+                  </label>
+                  <input type="number" class="form-control" id="report_retention_days"
+                    name="report_retention_days" value="{{ settings.report_retention_days }}"
+                    min="0" max="10000">
+                  <small class="form-text text-muted">
+                    How long to keep saved policy and system report snapshots.
+                    Set to <strong>0</strong> to keep forever (recommended for audit trails). Applies to both policy and system reports.
+                  </small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="notification_retention_days">
+                    <i class="fas fa-bell mr-1 text-muted"></i>
+                    Notification Retention (days)
+                  </label>
+                  <input type="number" class="form-control" id="notification_retention_days"
+                    name="notification_retention_days" value="{{ settings.notification_retention_days }}"
+                    min="0" max="10000">
+                  <small class="form-text text-muted">
+                    How long to keep bell-icon notifications.
+                    Set to <strong>0</strong> to keep forever. Default is <strong>30</strong> — operational chatter accumulates fast.
+                  </small>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Compliance Tab -->
