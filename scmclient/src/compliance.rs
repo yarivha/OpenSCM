@@ -87,6 +87,87 @@ fn check_path_permission(_p: &str, _c: &str, _s: &str) -> EvalResult { EvalResul
 // HELPERS
 // ============================================================
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: service_is_active / service_is_enabled
+// Cross-platform query of a managed service's runtime / boot state.
+// Returns Some(true|false) when the state is determined, None when we can't
+// figure it out (no init system available, command missing, parse failure).
+// ─────────────────────────────────────────────────────────────────────────────
+fn service_is_active(name: &str) -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        // systemctl is-active <name> exits 0 with "active" on stdout when running,
+        // non-zero with "inactive" / "failed" / "unknown" otherwise.
+        let out = Command::new("systemctl").args(["is-active", name]).output().ok()?;
+        let txt = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+        return Some(txt == "active");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // launchctl print system/<name> — running services include a "state = running" line.
+        let out = Command::new("launchctl")
+            .args(["print", &format!("system/{}", name)])
+            .output().ok()?;
+        if !out.status.success() { return Some(false); }
+        let txt = String::from_utf8_lossy(&out.stdout).to_lowercase();
+        return Some(txt.contains("state = running"));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // sc query <name> — "STATE : 4 RUNNING" when active.
+        let out = Command::new("sc").args(["query", name]).output().ok()?;
+        let txt = String::from_utf8_lossy(&out.stdout).to_uppercase();
+        return Some(txt.contains("RUNNING"));
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        // service <name> status — exit 0 if running.
+        let out = Command::new("service").args([name, "status"]).output().ok()?;
+        return Some(out.status.success());
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+fn service_is_enabled(name: &str) -> Option<bool> {
+    #[cfg(target_os = "linux")]
+    {
+        // systemctl is-enabled <name> prints "enabled" / "disabled" / "static" / "masked".
+        // "enabled" and "alias" count as enabled; everything else does not.
+        let out = Command::new("systemctl").args(["is-enabled", name]).output().ok()?;
+        let txt = String::from_utf8_lossy(&out.stdout).trim().to_lowercase();
+        return Some(txt == "enabled" || txt == "alias" || txt == "enabled-runtime");
+    }
+    #[cfg(target_os = "macos")]
+    {
+        // launchctl print system/<name> — when present and not in disabled list,
+        // launchd will load it at boot. Disabled jobs are tracked separately.
+        let out = Command::new("launchctl")
+            .args(["print-disabled", "system"])
+            .output().ok()?;
+        let txt = String::from_utf8_lossy(&out.stdout);
+        let needle = format!("\"{}\" => disabled", name);
+        return Some(!txt.contains(&needle));
+    }
+    #[cfg(target_os = "windows")]
+    {
+        // sc qc <name> — "START_TYPE : 2 AUTO_START" means enabled at boot.
+        let out = Command::new("sc").args(["qc", name]).output().ok()?;
+        let txt = String::from_utf8_lossy(&out.stdout).to_uppercase();
+        return Some(txt.contains("AUTO_START"));
+    }
+    #[cfg(target_os = "freebsd")]
+    {
+        // sysrc -n <name>_enable — returns "YES" / "NO".
+        let out = Command::new("sysrc").args(["-n", &format!("{}_enable", name)]).output().ok()?;
+        let txt = String::from_utf8_lossy(&out.stdout).trim().to_uppercase();
+        return Some(txt == "YES");
+    }
+    #[allow(unreachable_code)]
+    None
+}
+
+
 fn parse_to_semver(v: &str) -> Option<Version> {
     let parts: Vec<_> = v.split('.').collect();
     let normalized = match parts.len() {
@@ -827,16 +908,95 @@ pub fn evaluate(
             let mut sys = System::new();
             sys.refresh_processes();
 
-            let is_running = sys
+            let needle = input.to_lowercase();
+            let matching: Vec<_> = sys
                 .processes()
                 .values()
-                .any(|p| p.name().to_lowercase().contains(&input.to_lowercase()));
+                .filter(|p| p.name().to_lowercase().contains(&needle))
+                .collect();
+            let is_running = !matching.is_empty();
 
             match selement_l.as_str() {
-                "exists"     => if is_running { EvalResult::Pass } else { EvalResult::Fail },
+                "exists"     => if is_running  { EvalResult::Pass } else { EvalResult::Fail },
                 "not exists" => if !is_running { EvalResult::Pass } else { EvalResult::Fail },
+
+                "count" => {
+                    let count = matching.len().to_string();
+                    debug!("PROCESS '{}' count: {}", input, count);
+                    if apply_string_condition(&count, condition, sinput_trim) {
+                        EvalResult::Pass
+                    } else {
+                        EvalResult::Fail
+                    }
+                }
+
+                "owner" => {
+                    if !is_running {
+                        debug!("PROCESS '{}' owner check: process not running", input);
+                        return EvalResult::Fail;
+                    }
+                    // Look up the username for the first matching process.
+                    let users = sysinfo::Users::new_with_refreshed_list();
+                    let owner = matching.first()
+                        .and_then(|p| p.user_id())
+                        .and_then(|uid| users.iter().find(|u| u.id() == uid))
+                        .map(|u| u.name().to_string())
+                        .unwrap_or_default();
+                    debug!("PROCESS '{}' owner: '{}'", input, owner);
+                    if apply_string_condition(&owner, condition, sinput_trim) {
+                        EvalResult::Pass
+                    } else {
+                        EvalResult::Fail
+                    }
+                }
+
                 _ => {
-                    error!("Unsupported process selement: '{}'", selement);
+                    error!("Unsupported process selement: '{}'. Use 'exists', 'not exists', 'count', or 'owner'.", selement);
+                    EvalResult::Na
+                }
+            }
+        }
+
+        // =========================================================
+        // SERVICE — cross-platform service state via shell-out.
+        // Sub-elements: ACTIVE | INACTIVE | ENABLED | DISABLED
+        // Input = service name (e.g. "sshd", "auditd", "firewalld").
+        // No sinput / condition needed — sub-elements are boolean.
+        // =========================================================
+        "service" => {
+            // service_is_active and service_is_enabled return Option<bool>:
+            //   Some(true)  — confirmed active/enabled
+            //   Some(false) — confirmed inactive/disabled
+            //   None        — could not determine (no init system, command missing, etc.)
+            let svc = input.trim();
+            if svc.is_empty() {
+                error!("SERVICE element requires a service name in 'input'.");
+                return EvalResult::Na;
+            }
+
+            match selement_l.as_str() {
+                "active" => match service_is_active(svc) {
+                    Some(true)  => EvalResult::Pass,
+                    Some(false) => EvalResult::Fail,
+                    None        => EvalResult::Na,
+                },
+                "inactive" => match service_is_active(svc) {
+                    Some(true)  => EvalResult::Fail,
+                    Some(false) => EvalResult::Pass,
+                    None        => EvalResult::Na,
+                },
+                "enabled" => match service_is_enabled(svc) {
+                    Some(true)  => EvalResult::Pass,
+                    Some(false) => EvalResult::Fail,
+                    None        => EvalResult::Na,
+                },
+                "disabled" => match service_is_enabled(svc) {
+                    Some(true)  => EvalResult::Fail,
+                    Some(false) => EvalResult::Pass,
+                    None        => EvalResult::Na,
+                },
+                _ => {
+                    error!("Unsupported service selement: '{}'. Use 'active', 'inactive', 'enabled', or 'disabled'.", selement);
                     EvalResult::Na
                 }
             }

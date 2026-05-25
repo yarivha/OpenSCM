@@ -6,6 +6,27 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **`SERVICE` compliance element** — first-class cross-platform service-state checks for the kind of controls auditors actually care about ("ensure auditd is enabled and active"). Four sub-elements, all boolean — no condition/sinput needed; input = service name:
+  - `ACTIVE` — service is currently running
+  - `INACTIVE` — service is currently stopped
+  - `ENABLED` — service is configured to start at boot
+  - `DISABLED` — service is not configured to start at boot
+
+  Platform matrix:
+  - **Linux** — `systemctl is-active` / `systemctl is-enabled`
+  - **macOS** — `launchctl print system/<name>` / `launchctl print-disabled system`
+  - **Windows** — `sc query <name>` / `sc qc <name>` (checks for `RUNNING` / `AUTO_START`)
+  - **FreeBSD** — `service <name> status` / `sysrc -n <name>_enable`
+
+  Returns `NA` when the platform's service manager isn't reachable (rare — only on stripped-down systems without an init system in `$PATH`). Not gated by `cmd_enabled` because the inputs are well-bounded service names, not arbitrary shell strings.
+
+- **`PROCESS` element extensions** — two new sub-elements added to the existing PROCESS element (which previously only had `EXISTS` / `NOT EXISTS`):
+  - `OWNER` — emits the username of the first matching process; applies the standard string conditions (`equals`, `contains`, etc.). Useful for "nginx must run as `www-data`, not root" checks. Returns `FAIL` if the process isn't running at all (can't check owner of a process that doesn't exist).
+  - `COUNT` — emits the integer count of matching processes; works with numeric conditions (`more than 0`, `equals 1` for singleton daemons, etc.).
+
+  Schema migration v23→v24 adds the `SERVICE` element row and the `COUNT` / `ACTIVE` / `INACTIVE` / `ENABLED` / `DISABLED` selement rows. `OWNER` was already present.
+
 ---
 
 ## [0.4.5] - 2026-05-25

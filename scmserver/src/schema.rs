@@ -598,6 +598,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for name in &[
         "AGENT", "OS", "HOSTNAME", "IP", "DOMAIN", "ARCHITECTURE", "USER", "GROUP",
         "FILE", "DIRECTORY", "PROCESS", "PACKAGE", "REGISTRY", "PORT", "CMD", "POWERSHELL",
+        "SERVICE",
     ] {
         sqlx::query(
             "INSERT OR IGNORE INTO elements (name) VALUES (?)"
@@ -611,6 +612,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for name in &[
         "EXISTS", "NOT EXISTS", "CONTENT", "VERSION", "PERMISSION",
         "OWNER", "GROUP", "SHA1", "SHA2", "OUTPUT", "EXIT CODE",
+        "COUNT", "ACTIVE", "INACTIVE", "ENABLED", "DISABLED",
     ] {
         sqlx::query(
             "INSERT OR IGNORE INTO selements (name) VALUES (?)"
@@ -1602,6 +1604,27 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v22 → v23 complete.");
+    }
+
+    // v23 → v24: add SERVICE element and COUNT/ACTIVE/INACTIVE/ENABLED/DISABLED selements.
+    if version < 24 {
+        info!("Running schema migration v23 → v24 (SERVICE element + new selements)...");
+
+        sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES ('SERVICE')")
+            .execute(pool)
+            .await?;
+
+        for name in &["COUNT", "ACTIVE", "INACTIVE", "ENABLED", "DISABLED"] {
+            sqlx::query("INSERT OR IGNORE INTO selements (name) VALUES (?)")
+                .bind(name)
+                .execute(pool)
+                .await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 24")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v23 → v24 complete.");
     }
 
     Ok(())
