@@ -2,6 +2,7 @@ mod models;
 mod agent;
 mod config;
 mod compliance;
+mod runner;
 
 use tokio::time::{sleep, Duration};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
@@ -88,6 +89,63 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
             _ => {}
         }
+    }
+
+    // 2a. `run` subcommand — local policy evaluation, no server interaction.
+    //     Handled before config load / heartbeat loop because the runner is
+    //     a one-shot tool and shouldn't block on missing config or network.
+    if args.len() > 1 && args[1] == "run" {
+        let mut policy_path: Option<String> = None;
+        let mut format = runner::OutputFormat::Text;
+        let mut strict = false;
+        let mut failed_only = false;
+        let mut cmd_enabled_override: Option<bool> = None;
+        let mut ps_enabled_override:  Option<bool> = None;
+
+        let mut i = 2;
+        while i < args.len() {
+            match args[i].as_str() {
+                "--policy" if i + 1 < args.len() => { policy_path = Some(args[i + 1].clone()); i += 2; }
+                "--format" if i + 1 < args.len() => {
+                    format = match args[i + 1].to_lowercase().as_str() {
+                        "json" => runner::OutputFormat::Json,
+                        "text" => runner::OutputFormat::Text,
+                        other  => {
+                            eprintln!("Error: unknown --format '{}'. Use 'text' or 'json'.", other);
+                            std::process::exit(2);
+                        }
+                    };
+                    i += 2;
+                }
+                "--strict"       => { strict = true; i += 1; }
+                "--failed-only"  => { failed_only = true; i += 1; }
+                "--cmd-enabled"  => { cmd_enabled_override = Some(true); i += 1; }
+                "--ps-enabled"   => { ps_enabled_override  = Some(true); i += 1; }
+                other => {
+                    eprintln!("Error: unknown argument '{}' for 'run' subcommand.", other);
+                    std::process::exit(2);
+                }
+            }
+        }
+
+        let policy_path = match policy_path {
+            Some(p) => p,
+            None => {
+                eprintln!("Error: 'run' requires --policy <path>.");
+                std::process::exit(2);
+            }
+        };
+
+        // Default the gating flags to false in local mode unless explicitly
+        // overridden — the user is running an arbitrary policy file so
+        // arbitrary command execution should remain opt-in.
+        let cmd_enabled = cmd_enabled_override.unwrap_or(false);
+        let ps_enabled  = ps_enabled_override.unwrap_or(false);
+
+        let exit_code = runner::run(runner::RunOptions {
+            policy_path, format, strict, failed_only, cmd_enabled, ps_enabled,
+        });
+        std::process::exit(exit_code as i32);
     }
 
 	
@@ -199,14 +257,31 @@ fn print_usage() {
 OpenSCM Client - Security Compliance Manager Agent
 
 USAGE:
-    scmclient [OPTIONS]
+    scmclient [OPTIONS]                            # Run as a managed agent (default)
+    scmclient run --policy <FILE> [RUN OPTIONS]    # Local policy evaluation (no server)
 
 OPTIONS:
     -h, --help          Print this help message
     -ver, --version     Print version information
     --url <URL>         Set or override the Server URL (e.g., http://localhost:8000)
 
-EXAMPLE:
+RUN OPTIONS (for `scmclient run`):
+    --policy <FILE>     Path to an OpenSCM policy JSON file (required)
+    --format text|json  Output format (default: text)
+    --strict            Exit with code 1 if any test fails
+    --failed-only       Text mode: print only failing tests
+    --cmd-enabled       Allow CMD elements to execute (off by default in local mode)
+    --ps-enabled        Allow PowerShell elements to execute (off by default in local mode)
+
+EXAMPLES:
     scmclient --url https://demo.openscm.io:8000
+    scmclient run --policy cis-debian-13.json
+    scmclient run --policy cis-debian-13.json --format json --strict
+    scmclient run --policy custom.json --failed-only --cmd-enabled
+
+EXIT CODES (for `scmclient run`):
+    0   Success (or non-strict mode with failures)
+    1   Strict mode and one or more tests failed
+    2   Invalid arguments or policy file
     "#);
 }

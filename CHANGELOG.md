@@ -7,6 +7,15 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Local policy run (CLI subcommand)** — `scmclient run --policy <file.json>` evaluates a standard OpenSCM policy file against the local host with **no server interaction at all**. Same compliance engine, same JSON format used by the policy store — bypasses only the network/heartbeat layer. Opens up several use cases the managed-agent model can't reach:
+  - **Air-gapped systems** — get CIS/STIG scoring without deploying the server side
+  - **CI/CD pipelines** — `scmclient run --policy cis-debian-13.json --format json --strict` returns a non-zero exit code on any FAIL; pair with `jq` to extract findings
+  - **Policy authoring** — test a custom policy locally before publishing
+  - **One-off audits** — consultants doing a spot-check without long-term enrollment
+  - **Customer-shipped hardening kits** — vendors bundle agent + policy as a portable scanner
+
+  Output formats: `text` (human-readable; default) and `json` (machine-readable). Flags: `--strict` (exit 1 if any test fails), `--failed-only` (text mode skips PASS/NA), `--cmd-enabled` / `--ps-enabled` (override default-off gates since the user is running an arbitrary policy file). Exit codes: 0 success, 1 strict mode + failures, 2 invalid args or unreadable/malformed policy file. No persistent state is touched — the runner never reads or writes the agent's identity, config beyond defaults, or any spool directory.
+
 - **`SERVICE` compliance element** — first-class cross-platform service-state checks for the kind of controls auditors actually care about ("ensure auditd is enabled and active"). Four sub-elements, all boolean — no condition/sinput needed; input = service name:
   - `ACTIVE` — service is currently running
   - `INACTIVE` — service is currently stopped
