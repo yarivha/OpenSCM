@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.6] - 2026-05-25
+
 ### Added
 - **Local policy run (CLI subcommand)** — `scmclient run --policy <file.json>` evaluates a standard OpenSCM policy file against the local host with **no server interaction at all**. Same compliance engine, same JSON format used by the policy store — bypasses only the network/heartbeat layer. Opens up several use cases the managed-agent model can't reach:
   - **Air-gapped systems** — get CIS/STIG scoring without deploying the server side
