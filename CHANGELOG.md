@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Systems list sort order** — pending systems now show at the top of the list (so newly-enrolled agents awaiting approval are immediately visible), with the rest sorted alphabetically by name. Previously both the server-side SQL and the DataTables client-side sort ordered by ID ascending, which buried new systems at the bottom of the list once a tenant accumulated a few dozen agents. Both layers are now aligned: SQL uses `ORDER BY (pending first), s.name ASC`, and DataTables uses `[[0, "desc"], [3, "asc"]]` (hidden status column descending — `pending` sorts after `active` alphabetically — then Name ascending).
+
 ### Added
 - **Retention policies for reports and notifications** — closes the long-running #9 by extending the existing daily prune that already handled the audit log. Two new per-tenant settings appear in `Admin → Settings → General`:
   - **Report Retention (days)** — applies to both `reports` (policy snapshots) and `system_reports`. Default `0` (keep forever) — audit work usually wants long history; admins who must trim for storage reasons can opt in.
