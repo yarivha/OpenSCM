@@ -189,6 +189,13 @@
                                 data-groups="{{ system.groups }}"
                                 data-seen="{{ system.last_seen }}"
                                 data-created="{{ system.created_date }}"
+                                data-has-telemetry="{{ system.has_telemetry }}"
+                                data-cpu="{{ system.cpu_usage | default(value='') }}"
+                                data-mem-used="{{ system.mem_used_mb | default(value='') }}"
+                                data-mem-total="{{ system.mem_total_mb | default(value='') }}"
+                                data-disk-used="{{ system.disk_used_gb | default(value='') }}"
+                                data-disk-total="{{ system.disk_total_gb | default(value='') }}"
+                                data-uptime="{{ system.uptime_secs | default(value='') }}"
                                 title="Quick View">
                           <i class="fas fa-eye mr-1"></i> View
                         </button>
@@ -258,6 +265,28 @@
             <p><strong>Assigned Groups:</strong> <span id="m-groups"></span></p>
             <p><strong>Last Communication:</strong> <span id="m-seen"></span></p>
             <p><strong>Enrollment Date:</strong> <span id="m-created"></span></p>
+          </div>
+        </div>
+
+        <div id="m-telemetry-row" class="row mt-3 pt-3 border-top" style="display:none;">
+          <div class="col-12">
+            <h6 class="text-muted mb-3"><i class="fas fa-chart-line mr-1"></i> Live Telemetry</h6>
+          </div>
+          <div class="col-md-3">
+            <p class="mb-1 text-muted small">CPU Usage</p>
+            <p class="mb-0"><i class="fas fa-microchip mr-1 text-primary"></i><strong id="m-cpu"></strong></p>
+          </div>
+          <div class="col-md-3">
+            <p class="mb-1 text-muted small">Memory</p>
+            <p class="mb-0"><i class="fas fa-memory mr-1 text-primary"></i><strong id="m-mem"></strong></p>
+          </div>
+          <div class="col-md-3">
+            <p class="mb-1 text-muted small">Disk</p>
+            <p class="mb-0"><i class="fas fa-hdd mr-1 text-primary"></i><strong id="m-disk"></strong></p>
+          </div>
+          <div class="col-md-3">
+            <p class="mb-1 text-muted small">Uptime</p>
+            <p class="mb-0"><i class="fas fa-clock mr-1 text-primary"></i><strong id="m-uptime"></strong></p>
           </div>
         </div>
       </div>
@@ -347,6 +376,37 @@
 
         $('#m-seen').text(formatLocalTime(btn.data('seen')));
         $('#m-created').text(formatLocalTime(btn.data('created')));
+
+        // Telemetry — only show when the agent has reported it.
+        // jQuery's .data() coerces "True"/"False" strings to JS bools.
+        if (btn.data('has-telemetry') === true || btn.data('has-telemetry') === 'true' || btn.data('has-telemetry') === 'True') {
+            const cpu       = btn.data('cpu');
+            const memUsed   = btn.data('mem-used');
+            const memTotal  = btn.data('mem-total');
+            const diskUsed  = btn.data('disk-used');
+            const diskTotal = btn.data('disk-total');
+            const uptime    = parseInt(btn.data('uptime'), 10);
+
+            $('#m-cpu').text(cpu !== '' ? (Math.round(cpu * 10) / 10) + '%' : '—');
+
+            if (memUsed !== '' && memTotal !== '') {
+                $('#m-mem').text(Math.round(memUsed / 1024) + ' / ' + Math.round(memTotal / 1024) + ' GB');
+            } else { $('#m-mem').text('—'); }
+
+            if (diskUsed !== '' && diskTotal !== '') {
+                $('#m-disk').text(diskUsed + ' / ' + diskTotal + ' GB');
+            } else { $('#m-disk').text('—'); }
+
+            if (!isNaN(uptime)) {
+                const days = Math.floor(uptime / 86400);
+                const hours = Math.floor((uptime % 86400) / 3600);
+                $('#m-uptime').text((days > 0 ? days + 'd ' : '') + hours + 'h');
+            } else { $('#m-uptime').text('—'); }
+
+            $('#m-telemetry-row').show();
+        } else {
+            $('#m-telemetry-row').hide();
+        }
 
         $('#systemDetailsModal').modal('show');
     });
