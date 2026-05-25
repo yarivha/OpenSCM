@@ -97,7 +97,7 @@ pub async fn systems(
                 LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
                 WHERE s.status = ? AND s.tenant_id = ?
                 GROUP BY s.id
-                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC"#
+                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.name ASC"#
             );
             sqlx::query(&sql)
                 .bind(offline_threshold)
@@ -132,7 +132,7 @@ pub async fn systems(
                 LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
                 WHERE s.tenant_id = ?
                 GROUP BY s.id
-                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.id ASC"#
+                ORDER BY CASE WHEN s.status = 'pending' THEN 0 ELSE 1 END, s.name ASC"#
             );
             sqlx::query(&sql)
                 .bind(offline_threshold)
