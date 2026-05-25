@@ -123,21 +123,20 @@
                       {% if system.status == "pending" %}
                         <span class="badge badge-warning ml-1">New</span>
                       {% endif %}
-                      {% if system.cpu_usage is defined and system.cpu_usage %}
+                      {% if system.cpu_usage %}
                       <div class="text-muted mt-1" style="font-size:0.75rem; white-space:nowrap;">
-                        <span title="CPU Usage"><i class="fas fa-microchip mr-1"></i>{{ system.cpu_usage }}%</span>
-                        {% if system.mem_used_mb and system.mem_total_mb %}
-                        <span class="ml-2" title="Memory"><i class="fas fa-memory mr-1"></i>{{ (system.mem_used_mb / 1024) | round(method="ceil") }}/{{ (system.mem_total_mb / 1024) | round(method="ceil") }} GB</span>
+                        <span title="CPU Usage"><i class="fas fa-microchip mr-1"></i>{{ system.cpu_usage | round(precision=1) }}%</span>
+                        {% if system.mem_used_mb %}
+                        <span class="ml-2" title="Memory"><i class="fas fa-memory mr-1"></i>{{ system.mem_used_mb / 1024 | round }}GB / {{ system.mem_total_mb / 1024 | round }}GB</span>
                         {% endif %}
-                        {% if system.disk_used_gb and system.disk_total_gb %}
-                        <span class="ml-2" title="Disk"><i class="fas fa-hdd mr-1"></i>{{ system.disk_used_gb }}/{{ system.disk_total_gb }} GB</span>
+                        {% if system.disk_total_gb %}
+                        <span class="ml-2" title="Disk"><i class="fas fa-hdd mr-1"></i>{{ system.disk_used_gb }}GB / {{ system.disk_total_gb }}GB</span>
                         {% endif %}
                         {% if system.uptime_secs %}
-                        <span class="ml-2" title="Uptime"><i class="fas fa-clock mr-1"></i>
-                          {% set days = system.uptime_secs / 86400 | int %}
-                          {% set hours = (system.uptime_secs % 86400) / 3600 | int %}
-                          {% if days > 0 %}{{ days }}d {% endif %}{{ hours }}h
-                        </span>
+                        {% set total_hours = system.uptime_secs / 3600 | round(method="floor") %}
+                        {% set days = total_hours / 24 | round(method="floor") %}
+                        {% set hours = total_hours - days * 24 %}
+                        <span class="ml-2" title="Uptime"><i class="fas fa-clock mr-1"></i>{% if days > 0 %}{{ days }}d {% endif %}{{ hours }}h</span>
                         {% endif %}
                       </div>
                       {% endif %}
