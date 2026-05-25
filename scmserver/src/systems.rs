@@ -124,7 +124,9 @@ pub async fn systems(
                         WHEN s.last_seen IS NULL   THEN 0
                         WHEN {unix_diff} > ?        THEN 1
                         ELSE 0
-                    END AS is_offline
+                    END AS is_offline,
+                    s.cpu_usage, s.mem_used_mb, s.mem_total_mb,
+                    s.disk_used_gb, s.disk_total_gb, s.uptime_secs
                 FROM systems AS s
                 LEFT JOIN systems_in_groups AS sig ON s.id = sig.system_id
                 LEFT JOIN system_groups     AS sg  ON sig.group_id = sg.id
