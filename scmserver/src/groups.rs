@@ -138,6 +138,7 @@ pub async fn system_groups_add(
                 disk_used_gb: None,
                 disk_total_gb: None,
                 uptime_secs: None,
+                has_telemetry: false,
             })
             .collect(),
         Err(e) => {
@@ -421,6 +422,7 @@ pub async fn system_groups_edit(
                 disk_used_gb: None,
                 disk_total_gb: None,
                 uptime_secs: None,
+                has_telemetry: false,
             })
             .collect(),
         Err(e) => {

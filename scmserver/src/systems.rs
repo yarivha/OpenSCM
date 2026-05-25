@@ -222,6 +222,7 @@ pub async fn systems(
                 disk_used_gb:     row.try_get("disk_used_gb").ok(),
                 disk_total_gb:    row.try_get("disk_total_gb").ok(),
                 uptime_secs:      row.try_get("uptime_secs").ok(),
+                has_telemetry:    row.try_get::<Option<f32>, _>("cpu_usage").ok().flatten().is_some(),
             }
         })
         .collect();
@@ -400,6 +401,7 @@ pub async fn systems_edit(
         disk_used_gb: None,
         disk_total_gb: None,
         uptime_secs: None,
+        has_telemetry: false,
     };
 
     let groups_result = sqlx::query(
@@ -645,6 +647,7 @@ pub async fn systems_pending(
             disk_used_gb: None,
             disk_total_gb: None,
             uptime_secs: None,
+            has_telemetry: false,
         })
         .collect();
 

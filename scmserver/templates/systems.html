@@ -123,7 +123,7 @@
                       {% if system.status == "pending" %}
                         <span class="badge badge-warning ml-1">New</span>
                       {% endif %}
-                      {% if system.cpu_usage %}
+                      {% if system.has_telemetry %}
                       <div class="text-muted mt-1" style="font-size:0.75rem; white-space:nowrap;">
                         <span title="CPU Usage"><i class="fas fa-microchip mr-1"></i>{{ system.cpu_usage | round(precision=1) }}%</span>
                         {% if system.mem_used_mb %}

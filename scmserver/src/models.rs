@@ -66,6 +66,9 @@ pub struct System {
     pub disk_used_gb: Option<i64>,
     pub disk_total_gb: Option<i64>,
     pub uptime_secs:  Option<i64>,
+    /// True when at least cpu_usage is present — used as a reliable Tera gate.
+    #[serde(default)]
+    pub has_telemetry: bool,
 }
 
 
