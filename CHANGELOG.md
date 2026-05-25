@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.4] - 2026-05-25
+
 ### Added
 - **Tenant signing key rotation** — admins can now rotate the Ed25519 keypair used to authenticate agent heartbeats without touching the database manually. A new **Rotate Key** button in `Admin → Settings → Danger Zone` shows the current key fingerprint and creation date, then presents a confirmation modal before generating a fresh keypair, deactivating the old one, and inserting the new active key. All registered agents automatically re-enrol on their next heartbeat — no manual action is needed per agent. The rotation is recorded as a `tenant.key_rotated` audit event with the new key fingerprint in the details field.
 
