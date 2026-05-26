@@ -18,6 +18,8 @@ All notable changes to OpenSCM are documented here.
 
   Out of scope for v1: auto-provisioning (admins still create user rows manually with role + display name), group → role sync, OIDC/SAML federation (those are tracked separately as #3 SSO), Kerberos/GSSAPI bind, field-level encryption of the bind password (stored plaintext in DB — protect the DB file accordingly; documented warning in the edit form).
 
+  **CE/EE only — disabled in SaaS mode.** LDAP requires the OpenSCM server to make outbound connections to the customer's internal LDAP server, which doesn't fit the SaaS network topology (customers shouldn't expose their LDAP to the public internet, and per-customer VPN tunnels are operationally untenable). In SaaS mode, the **Directories** sidebar entry is hidden, every `/admin/directories/*` route returns a redirect to the dashboard with an "LDAP not available in SaaS mode" message, and the "Authentication Source" dropdown is absent from the user-add form. The right SaaS identity story is browser-mediated federation (OIDC/SAML) — tracked separately as #3 SSO.
+
   Built on the `ldap3` crate (sync API via `tokio::task::spawn_blocking`, rustls TLS backend).
 
 ---

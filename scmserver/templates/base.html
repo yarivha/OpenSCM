@@ -211,12 +211,14 @@
                   <p>Audit Log</p>
                 </a>
               </li>
+              {% if not is_saas %}
               <li class="nav-item">
                 <a href="/admin/directories" class="nav-link" style="padding-left: 30px;">
                   <i class="fas fa-network-wired nav-icon"></i>
                   <p>Directories</p>
                 </a>
               </li>
+              {% endif %}
             </ul>
           </li>
           {% endif %}

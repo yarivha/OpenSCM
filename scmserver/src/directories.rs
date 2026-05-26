@@ -20,8 +20,17 @@ use tracing::{error, info, warn};
 use urlencoding;
 
 use crate::auth;
-use crate::handlers::render_template;
+use crate::handlers::{is_saas_mode, render_template};
 use crate::models::{AuthSession, ErrorQuery, UserRole};
+
+/// LDAP is intentionally disabled in SaaS mode — the server cannot reach
+/// into a customer's internal network to talk to their LDAP server. Use
+/// OIDC/SAML SSO (task #3) for SaaS-side identity federation instead.
+/// Returns a redirect for HTML handlers; JSON handlers should check this
+/// inline and return their own error shape.
+fn saas_block_redirect() -> Redirect {
+    Redirect::to("/?error_message=LDAP+directories+are+not+available+in+SaaS+mode")
+}
 
 // ============================================================
 // Domain model
@@ -205,6 +214,7 @@ pub async fn list_view(
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
+    if is_saas_mode() { return saas_block_redirect().into_response(); }
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir.into_response();
     }
@@ -236,6 +246,7 @@ pub async fn add_form(
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
+    if is_saas_mode() { return saas_block_redirect().into_response(); }
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir.into_response();
     }
@@ -256,6 +267,7 @@ pub async fn add_submit(
     ip: crate::handlers::ClientIp,
     Form(form): Form<DirectoryForm>,
 ) -> impl IntoResponse {
+    if is_saas_mode() { return saas_block_redirect().into_response(); }
     if auth::authorize(&auth.role, UserRole::Admin).is_some() {
         return Redirect::to("/admin/directories?error_message=Access+denied").into_response();
     }
@@ -318,6 +330,7 @@ pub async fn edit_form(
     Extension(pool): Extension<SqlitePool>,
     Extension(tera): Extension<Arc<Tera>>,
 ) -> impl IntoResponse {
+    if is_saas_mode() { return saas_block_redirect().into_response(); }
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
         return redir.into_response();
     }
@@ -354,6 +367,7 @@ pub async fn edit_submit(
     ip: crate::handlers::ClientIp,
     Form(form): Form<DirectoryForm>,
 ) -> impl IntoResponse {
+    if is_saas_mode() { return saas_block_redirect().into_response(); }
     if auth::authorize(&auth.role, UserRole::Admin).is_some() {
         return Redirect::to("/admin/directories?error_message=Access+denied").into_response();
     }
@@ -413,6 +427,7 @@ pub async fn delete(
     Extension(pool): Extension<SqlitePool>,
     ip: crate::handlers::ClientIp,
 ) -> impl IntoResponse {
+    if is_saas_mode() { return saas_block_redirect().into_response(); }
     if auth::authorize(&auth.role, UserRole::Admin).is_some() {
         return Redirect::to("/admin/directories?error_message=Access+denied").into_response();
     }
@@ -464,6 +479,9 @@ pub async fn test(
     Extension(pool): Extension<SqlitePool>,
     ip: crate::handlers::ClientIp,
 ) -> Json<TestResponse> {
+    if is_saas_mode() {
+        return Json(TestResponse { ok: false, error: Some("LDAP directories are not available in SaaS mode".into()) });
+    }
     if auth::authorize(&auth.role, UserRole::Admin).is_some() {
         return Json(TestResponse { ok: false, error: Some("Access denied".into()) });
     }

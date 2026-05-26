@@ -106,13 +106,19 @@ pub async fn users_add(
     }
 
     // Load configured directories for the Authentication Source dropdown.
-    let dirs = sqlx::query_as::<_, crate::directories::Directory>(
-        "SELECT * FROM directories WHERE tenant_id = ? ORDER BY name ASC"
-    )
-    .bind(&auth.tenant_id)
-    .fetch_all(&*pool)
-    .await
-    .unwrap_or_default();
+    // Skipped in SaaS mode — LDAP is a CE/EE-only feature there (the SaaS
+    // server can't reach into customer-internal networks; use OIDC/SAML SSO).
+    let dirs = if crate::handlers::is_saas_mode() {
+        Vec::new()
+    } else {
+        sqlx::query_as::<_, crate::directories::Directory>(
+            "SELECT * FROM directories WHERE tenant_id = ? ORDER BY name ASC"
+        )
+        .bind(&auth.tenant_id)
+        .fetch_all(&*pool)
+        .await
+        .unwrap_or_default()
+    };
     context.insert("directories", &dirs);
 
     render_template(&tera, Some(&pool), "users_add.html", context, Some(auth))
