@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.8] - 2026-05-26
+
 ### Changed
 - **SQLite tuning + pool-wide pragma application.** Two things land together:
   1. **Bug fix:** PRAGMAs were applied via `pool.execute()` at startup, but SQLite pragmas are per-connection — only the first connection in the pool actually had them set. Every subsequent connection ran with sqlite's defaults (FULL synchronous, no busy_timeout, no foreign-key enforcement, etc.). Pragmas are now applied via a `SqlitePoolOptions::after_connect()` hook so every connection the pool hands out has the same tuning. Same fix applied to the SaaS binary.
