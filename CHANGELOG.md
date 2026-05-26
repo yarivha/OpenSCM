@@ -6,6 +6,14 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Compliance engine — eliminate the worst shell-out hot paths.** Three of the most-fired element backends are replaced with native code that avoids forking a child process per test. A policy with dozens of PACKAGE / SERVICE / Windows-registry tests now scans noticeably faster, and the OS process table stays calm during a scan.
+  - **Windows packages** (PACKAGE `EXISTS` / `VERSION`) — replaced `powershell -Command "Get-Package ..."` with a native walk of the two Uninstall registry hives (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall` plus the `WOW6432Node` variant) via the existing `winreg` crate. Per-call cost drops from roughly 1-2 s (PowerShell cold start dominates) to under 10 ms. ~150× speedup.
+  - **Debian/Ubuntu packages** — replaced the `dpkg-query` fork-per-call with a native parser of `/var/lib/dpkg/status`. The parsed map is cached in a `Mutex<Option<(mtime, HashMap)>>` and only re-parsed when the file's mtime changes. First call ~10× faster than `dpkg-query`; every subsequent PACKAGE test in the same scan run is effectively free (HashMap lookup).
+  - **systemd services** (SERVICE `ACTIVE` / `INACTIVE` / `ENABLED` / `DISABLED`) — collapsed the two `systemctl is-active` + `systemctl is-enabled` shell-outs into a single `systemctl show -p ActiveState -p UnitFileState`, cached for 300 ms so a test that checks both states on the same unit costs one fork rather than two.
+
+  No behavioural change — the boolean outcomes are unchanged. Deferred to a future patch: native RPM database parsing (DB format varies by distro version), full D-Bus replacement of systemctl (needs the `zbus` dep), and native macOS receipts/plist read for `pkgutil`.
+
 ### Fixed
 - **`scmclient run` defaulted CMD/PowerShell off, generating noise warnings** — the local-policy runner inherited the managed-agent gating logic where `cmd_enabled` / `ps_enabled` must be opted into per-agent to prevent a server from pushing arbitrary commands. In local-run mode that threat model doesn't apply (the user supplied the policy file by hand at the CLI), so the gates are now **on by default**. The `--cmd-enabled` / `--ps-enabled` flags are kept for symmetry but redundant; new `--no-cmd` / `--no-ps` flags let you explicitly opt out (e.g. for a sandbox / CI scan that must not exec shell). Eliminates the wall of `CMD element is disabled` warnings when running a CIS Linux policy locally.
 
