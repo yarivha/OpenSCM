@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **`scmclient run` defaulted CMD/PowerShell off, generating noise warnings** — the local-policy runner inherited the managed-agent gating logic where `cmd_enabled` / `ps_enabled` must be opted into per-agent to prevent a server from pushing arbitrary commands. In local-run mode that threat model doesn't apply (the user supplied the policy file by hand at the CLI), so the gates are now **on by default**. The `--cmd-enabled` / `--ps-enabled` flags are kept for symmetry but redundant; new `--no-cmd` / `--no-ps` flags let you explicitly opt out (e.g. for a sandbox / CI scan that must not exec shell). Eliminates the wall of `CMD element is disabled` warnings when running a CIS Linux policy locally.
+
 ---
 
 ## [0.4.7] - 2026-05-26

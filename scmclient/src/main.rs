@@ -121,6 +121,8 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
                 "--failed-only"  => { failed_only = true; i += 1; }
                 "--cmd-enabled"  => { cmd_enabled_override = Some(true); i += 1; }
                 "--ps-enabled"   => { ps_enabled_override  = Some(true); i += 1; }
+                "--no-cmd"       => { cmd_enabled_override = Some(false); i += 1; }
+                "--no-ps"        => { ps_enabled_override  = Some(false); i += 1; }
                 other => {
                     eprintln!("Error: unknown argument '{}' for 'run' subcommand.", other);
                     std::process::exit(2);
@@ -136,11 +138,13 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         };
 
-        // Default the gating flags to false in local mode unless explicitly
-        // overridden — the user is running an arbitrary policy file so
-        // arbitrary command execution should remain opt-in.
-        let cmd_enabled = cmd_enabled_override.unwrap_or(false);
-        let ps_enabled  = ps_enabled_override.unwrap_or(false);
+        // Default the gating flags to true in local mode — the user supplied
+        // the policy file by hand at the CLI, so the "untrusted server pushing
+        // arbitrary commands" threat model that gates the managed-agent mode
+        // does not apply here. They can still pass --no-cmd / --no-ps to
+        // explicitly opt out (e.g. in a sandbox / CI scan that must not exec).
+        let cmd_enabled = cmd_enabled_override.unwrap_or(true);
+        let ps_enabled  = ps_enabled_override.unwrap_or(true);
 
         let exit_code = runner::run(runner::RunOptions {
             policy_path, format, strict, failed_only, cmd_enabled, ps_enabled,
@@ -270,8 +274,10 @@ RUN OPTIONS (for `scmclient run`):
     --format text|json  Output format (default: text)
     --strict            Exit with code 1 if any test fails
     --failed-only       Text mode: print only failing tests
-    --cmd-enabled       Allow CMD elements to execute (off by default in local mode)
-    --ps-enabled        Allow PowerShell elements to execute (off by default in local mode)
+    --no-cmd            Disable CMD elements (on by default in local mode)
+    --no-ps             Disable PowerShell elements (on by default in local mode)
+    --cmd-enabled       (kept for symmetry; CMD is already on by default in local mode)
+    --ps-enabled        (kept for symmetry; PowerShell is already on by default)
 
 EXAMPLES:
     scmclient --url https://demo.openscm.io:8000
