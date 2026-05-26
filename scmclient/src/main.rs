@@ -276,8 +276,6 @@ RUN OPTIONS (for `scmclient run`):
     --failed-only       Text mode: print only failing tests
     --no-cmd            Disable CMD elements (on by default in local mode)
     --no-ps             Disable PowerShell elements (on by default in local mode)
-    --cmd-enabled       (kept for symmetry; CMD is already on by default in local mode)
-    --ps-enabled        (kept for symmetry; PowerShell is already on by default)
 
 EXAMPLES:
     scmclient --url https://demo.openscm.io:8000
