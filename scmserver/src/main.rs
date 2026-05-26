@@ -115,13 +115,33 @@ async fn main() -> Result<(), Box<dyn Error>> {
             .map_err(|e| format!("Cannot create database file '{}': {}", db_file, e))?;
     }
 
-    let database_url = format!("sqlite://{}?mode=rwc", db_file);
-    let pool: sqlx::SqlitePool = sqlx::SqlitePool::connect(&database_url).await?;
-
-    // Apply SQLite pragmas for performance / safety.
-    sqlx::query("PRAGMA journal_mode = WAL").execute(&pool).await.ok();
-    sqlx::query("PRAGMA synchronous = NORMAL").execute(&pool).await.ok();
-    sqlx::query("PRAGMA busy_timeout = 5000").execute(&pool).await.ok();
+    // SQLite pragmas are per-connection — apply them via an after_connect hook
+    // so every connection the pool hands out has the same tuning. Doing this
+    // once at startup (as before) only configured a single connection and
+    // every subsequent one in the pool ran with sqlite's defaults.
+    //
+    // Tuning summary (see CHANGELOG for rationale):
+    //   journal_mode=WAL      — durable + concurrent readers (persistent at file level)
+    //   synchronous=NORMAL    — safe under WAL, ~4x faster than FULL
+    //   busy_timeout=10000    — wait up to 10s before SQLITE_BUSY
+    //   temp_store=MEMORY     — keep temp B-trees in RAM during big aggregations
+    //   mmap_size=256 MiB     — kernel-page-cache backed reads
+    //   cache_size=-65536     — 64 MiB per-connection page cache (negative = KiB)
+    //   foreign_keys=ON       — FK enforcement (off by default in SQLite)
+    let pool: sqlx::SqlitePool = sqlx::sqlite::SqlitePoolOptions::new()
+        .after_connect(|conn, _meta| Box::pin(async move {
+            use sqlx::Executor;
+            conn.execute("PRAGMA journal_mode = WAL").await?;
+            conn.execute("PRAGMA synchronous = NORMAL").await?;
+            conn.execute("PRAGMA busy_timeout = 10000").await?;
+            conn.execute("PRAGMA temp_store = MEMORY").await?;
+            conn.execute("PRAGMA mmap_size = 268435456").await?;
+            conn.execute("PRAGMA cache_size = -65536").await?;
+            conn.execute("PRAGMA foreign_keys = ON").await?;
+            Ok(())
+        }))
+        .connect(&format!("sqlite://{}?mode=rwc", db_file))
+        .await?;
 
     // Detect real initialisation: schema_info table exists and has a row.
     let db_initialized: bool = sqlx::query_scalar::<_, i64>(
@@ -132,7 +152,6 @@ async fn main() -> Result<(), Box<dyn Error>> {
     .unwrap_or(0) > 0;
 
     if db_initialized {
-        sqlx::query("PRAGMA foreign_keys = ON").execute(&pool).await?;
         run_migrations(&pool).await?;
         scmserver::agents::startup_scan(&pool).await;
     } else {

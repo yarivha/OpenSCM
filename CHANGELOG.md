@@ -7,6 +7,10 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Changed
+- **SQLite tuning + pool-wide pragma application.** Two things land together:
+  1. **Bug fix:** PRAGMAs were applied via `pool.execute()` at startup, but SQLite pragmas are per-connection — only the first connection in the pool actually had them set. Every subsequent connection ran with sqlite's defaults (FULL synchronous, no busy_timeout, no foreign-key enforcement, etc.). Pragmas are now applied via a `SqlitePoolOptions::after_connect()` hook so every connection the pool hands out has the same tuning. Same fix applied to the SaaS binary.
+  2. **Tuning:** added `temp_store=MEMORY` (keep transient B-trees in RAM during big dashboard aggregations), `mmap_size=268435456` (256 MiB kernel-page-cache-backed reads — much lower latency for hot pages), `cache_size=-65536` (64 MiB per-connection page cache, up from the 2 MiB default), and bumped `busy_timeout` from 5 s → 10 s. Existing settings (`journal_mode=WAL`, `synchronous=NORMAL`, `foreign_keys=ON`) preserved.
+
 - **Compliance engine — eliminate the worst shell-out hot paths.** Three of the most-fired element backends are replaced with native code that avoids forking a child process per test. A policy with dozens of PACKAGE / SERVICE / Windows-registry tests now scans noticeably faster, and the OS process table stays calm during a scan.
   - **Windows packages** (PACKAGE `EXISTS` / `VERSION`) — replaced `powershell -Command "Get-Package ..."` with a native walk of the two Uninstall registry hives (`HKLM\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall` plus the `WOW6432Node` variant) via the existing `winreg` crate. Per-call cost drops from roughly 1-2 s (PowerShell cold start dominates) to under 10 ms. ~150× speedup.
   - **Debian/Ubuntu packages** — replaced the `dpkg-query` fork-per-call with a native parser of `/var/lib/dpkg/status`. The parsed map is cached in a `Mutex<Option<(mtime, HashMap)>>` and only re-parsed when the file's mtime changes. First call ~10× faster than `dpkg-query`; every subsequent PACKAGE test in the same scan run is effectively free (HashMap lookup).
