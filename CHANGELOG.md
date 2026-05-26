@@ -6,6 +6,20 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **LDAP directory support** — admins can now delegate user authentication to an external LDAP server (OpenLDAP, Active Directory, FreeIPA, 389-DS, etc.) instead of storing every password in the OpenSCM database. New **Directories** section under `Admin → Settings` (sidebar link gated on Admin role) provides full CRUD over LDAP integrations:
+  - **Per-tenant directories** stored in a new `directories` table (schema migration v24→v25); each entry holds host, port, TLS settings, base DN, service-account bind credentials, and the user-lookup attribute (`uid`, `sAMAccountName`, etc.).
+  - **Test Connection** button on both the list page (one click per directory) and inside the edit form — `POST /admin/directories/test/{id}` runs a service-account bind and returns `{ok: bool, error: "…"}` JSON; LDAP errors are surfaced verbatim so a misconfigured base DN or wrong password produces an actionable message.
+  - **Skip TLS verification** toggle for self-signed certs in dev/test environments, with a prominent in-form security warning. Production deployments should leave it off.
+  - **User Add form** gains an "Authentication Source" dropdown when at least one directory exists — choosing a directory hides the password field and replaces it with an "External Username" input (defaults to the local Login Username if blank). New columns `users.directory_id` and `users.external_username` track the mapping.
+  - **Login flow** in `auth.rs` checks `directory_id`: NULL → existing bcrypt path; set → look up the directory, bind as service account, search by user attribute, then re-bind as the resolved DN with the submitted password. Bcrypt is still run against a dummy hash for LDAP users to keep timing parity.
+  - **Audit log** events: `directory.create`, `directory.update`, `directory.delete`, `directory.test_success`, `directory.test_failure`.
+  - **Refuses to delete** a directory while any user still references it (with a count in the error message), so an admin can't accidentally lock out a fleet of LDAP users.
+
+  Out of scope for v1: auto-provisioning (admins still create user rows manually with role + display name), group → role sync, OIDC/SAML federation (those are tracked separately as #3 SSO), Kerberos/GSSAPI bind, field-level encryption of the bind password (stored plaintext in DB — protect the DB file accordingly; documented warning in the edit form).
+
+  Built on the `ldap3` crate (sync API via `tokio::task::spawn_blocking`, rustls TLS backend).
+
 ---
 
 ## [0.4.6] - 2026-05-25

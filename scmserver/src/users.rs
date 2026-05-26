@@ -105,6 +105,16 @@ pub async fn users_add(
         context.insert("success_message", &msg);
     }
 
+    // Load configured directories for the Authentication Source dropdown.
+    let dirs = sqlx::query_as::<_, crate::directories::Directory>(
+        "SELECT * FROM directories WHERE tenant_id = ? ORDER BY name ASC"
+    )
+    .bind(&auth.tenant_id)
+    .fetch_all(&*pool)
+    .await
+    .unwrap_or_default();
+    context.insert("directories", &dirs);
+
     render_template(&tera, Some(&pool), "users_add.html", context, Some(auth))
         .await
         .into_response()
@@ -143,9 +153,28 @@ pub async fn users_add_save(
         None => return Redirect::to("/users/add?error_message=Username+is+required").into_response(),
     };
 
-    let password = match form_data.get("password").and_then(|v| v.first()).filter(|s| s.len() >= 8) {
-        Some(v) => v.to_string(),
-        None => return Redirect::to("/users/add?error_message=Password+must+be+at+least+8+characters").into_response(),
+    // Directory-backed user? If directory_id is set, the password lives in LDAP —
+    // we don't validate or hash a password, and a placeholder is stored instead.
+    let directory_id: Option<i64> = form_data
+        .get("directory_id")
+        .and_then(|v| v.first())
+        .filter(|s| !s.trim().is_empty())
+        .and_then(|s| s.trim().parse().ok());
+
+    let external_username: Option<String> = form_data
+        .get("external_username")
+        .and_then(|v| v.first())
+        .map(|s| s.trim().to_string())
+        .filter(|s| !s.is_empty());
+
+    let password = if directory_id.is_some() {
+        // Placeholder — never used; bcrypt will not match it because it's not a valid hash.
+        String::new()
+    } else {
+        match form_data.get("password").and_then(|v| v.first()).filter(|s| s.len() >= 8) {
+            Some(v) => v.to_string(),
+            None => return Redirect::to("/users/add?error_message=Password+must+be+at+least+8+characters").into_response(),
+        }
     };
 
     let role_raw = match form_data.get("role").and_then(|v| v.first()).filter(|s| !s.trim().is_empty()) {
@@ -201,19 +230,25 @@ pub async fn users_add_save(
         return Redirect::to(&format!("/users/add?error_message={}", encoded)).into_response();
     }
 
-    // Hash password
-    let password_hash = match hash(&password, DEFAULT_COST) {
-        Ok(h) => h,
-        Err(e) => {
-            let encoded = urlencoding::encode(&format!("Failed to hash password: {}", e)).to_string();
-            tx.rollback().await.ok();
-            return Redirect::to(&format!("/users?error_message={}", encoded)).into_response();
+    // Hash password (placeholder used for directory-backed users).
+    let password_hash = if directory_id.is_some() {
+        // Sentinel string — never validates as bcrypt; LDAP bind is the auth path.
+        "ldap:no-local-password".to_string()
+    } else {
+        match hash(&password, DEFAULT_COST) {
+            Ok(h) => h,
+            Err(e) => {
+                let encoded = urlencoding::encode(&format!("Failed to hash password: {}", e)).to_string();
+                tx.rollback().await.ok();
+                return Redirect::to(&format!("/users?error_message={}", encoded)).into_response();
+            }
         }
     };
 
     // Insert with tenant_id
     if let Err(e) = sqlx::query(
-        "INSERT INTO users (tenant_id, name, email, username, password, role) VALUES (?, ?, ?, ?, ?, ?)",
+        "INSERT INTO users (tenant_id, name, email, username, password, role, directory_id, external_username)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&auth.tenant_id)
     .bind(&name)
@@ -221,6 +256,8 @@ pub async fn users_add_save(
     .bind(&username)
     .bind(&password_hash)
     .bind(&role)
+    .bind(directory_id)
+    .bind(&external_username)
     .execute(&mut *tx)
     .await
     {

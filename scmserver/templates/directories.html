@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1 class="m-0"><i class="fas fa-network-wired mr-2 text-primary"></i>Directories</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item active">Directories</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger"><i class="fas fa-exclamation-circle mr-1"></i>{{ error_message }}</div>
+      {% endif %}
+      {% if success_message %}
+      <div class="alert alert-success"><i class="fas fa-check-circle mr-1"></i>{{ success_message }}</div>
+      {% endif %}
+
+      <div class="card card-outline card-primary shadow-sm">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="fas fa-server mr-1"></i>
+            Configured LDAP Directories
+          </h3>
+          <div class="card-tools">
+            <a href="/admin/directories/add" class="btn btn-primary btn-sm">
+              <i class="fas fa-plus mr-1"></i> Add Directory
+            </a>
+          </div>
+        </div>
+
+        <div class="card-body p-0">
+          {% if directories | length == 0 %}
+          <div class="alert alert-info m-3 mb-0">
+            <i class="fas fa-info-circle mr-1"></i>
+            No directories configured. Click <strong>Add Directory</strong> to integrate with an LDAP server.
+            Once added, you can create users whose passwords are managed by the directory instead of locally.
+          </div>
+          {% else %}
+          <table class="table table-hover mb-0">
+            <thead class="thead-light">
+              <tr>
+                <th>Name</th>
+                <th>Host</th>
+                <th>Type</th>
+                <th>TLS</th>
+                <th>Base DN</th>
+                <th class="text-right">Actions</th>
+              </tr>
+            </thead>
+            <tbody>
+              {% for d in directories %}
+              <tr>
+                <td><strong>{{ d.name }}</strong></td>
+                <td><code>{{ d.host }}:{{ d.port }}</code></td>
+                <td><span class="badge badge-secondary">{{ d.dir_type | upper }}</span></td>
+                <td>
+                  {% if d.use_tls != 0 %}
+                    <span class="badge badge-success"><i class="fas fa-lock mr-1"></i>LDAPS</span>
+                    {% if d.skip_tls_verify != 0 %}
+                      <span class="badge badge-warning ml-1" title="TLS cert verification disabled">Insecure</span>
+                    {% endif %}
+                  {% else %}
+                    <span class="badge badge-secondary"><i class="fas fa-lock-open mr-1"></i>Plain</span>
+                  {% endif %}
+                </td>
+                <td><code>{{ d.base_dn }}</code></td>
+                <td class="text-right" style="white-space:nowrap;">
+                  <button type="button" class="btn btn-info btn-sm test-dir-btn" data-id="{{ d.id }}" title="Test connection">
+                    <i class="fas fa-plug"></i>
+                  </button>
+                  <a href="/admin/directories/edit/{{ d.id }}" class="btn btn-primary btn-sm ml-1" title="Edit">
+                    <i class="fas fa-pencil-alt"></i>
+                  </a>
+                  <form method="POST" action="/admin/directories/delete/{{ d.id }}" style="display:inline;"
+                        onsubmit="return confirm('Delete directory {{ d.name }}? Users linked to it will fail to log in.')">
+                    <button type="submit" class="btn btn-danger btn-sm ml-1" title="Delete">
+                      <i class="fas fa-trash"></i>
+                    </button>
+                  </form>
+                </td>
+              </tr>
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+        </div>
+      </div>
+
+    </div>
+  </section>
+</div>
+
+<script>
+$(document).on('click', '.test-dir-btn', function() {
+  const btn  = $(this);
+  const id   = btn.data('id');
+  const orig = btn.html();
+  btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin"></i>');
+  fetch('/admin/directories/test/' + id, { method: 'POST' })
+    .then(r => r.json())
+    .then(j => {
+      if (j.ok) {
+        alert('✓ Bind successful — directory is reachable and credentials are valid.');
+      } else {
+        alert('✗ Bind failed:\n\n' + (j.error || 'unknown error'));
+      }
+    })
+    .catch(e => alert('Request error: ' + e))
+    .finally(() => btn.prop('disabled', false).html(orig));
+});
+</script>
+{% endblock %}

@@ -106,6 +106,8 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             email TEXT,
             role TEXT,
             email_verified INTEGER NOT NULL DEFAULT 1,
+            directory_id INTEGER,
+            external_username TEXT,
             UNIQUE(username, tenant_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
@@ -364,6 +366,33 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     )
     .execute(pool)
     .await?;
+
+    // Directories table — configured external identity providers (LDAP in v1).
+    // Users reference a directory via users.directory_id (NULL = local).
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS directories (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+            name TEXT NOT NULL,
+            dir_type TEXT NOT NULL DEFAULT 'ldap',
+            host TEXT NOT NULL,
+            port INTEGER NOT NULL,
+            use_tls INTEGER NOT NULL DEFAULT 0,
+            skip_tls_verify INTEGER NOT NULL DEFAULT 0,
+            base_dn TEXT NOT NULL,
+            bind_dn TEXT NOT NULL DEFAULT '',
+            bind_password TEXT NOT NULL DEFAULT '',
+            user_attribute TEXT NOT NULL DEFAULT 'uid',
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_directories_tenant ON directories (tenant_id)")
+        .execute(pool)
+        .await?;
 
     // Reports table
     // tests_metadata and report_results store arbitrary-size JSON — use MEDIUMTEXT
@@ -1625,6 +1654,55 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v23 → v24 complete.");
+    }
+
+    // v24 → v25: LDAP directory support.
+    //   - new `directories` table for configured LDAP servers per tenant
+    //   - `users.directory_id` (NULL = local user) + `users.external_username`
+    if version < 25 {
+        info!("Running schema migration v24 → v25 (LDAP directories)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS directories (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+                name TEXT NOT NULL,
+                dir_type TEXT NOT NULL DEFAULT 'ldap',
+                host TEXT NOT NULL,
+                port INTEGER NOT NULL,
+                use_tls INTEGER NOT NULL DEFAULT 0,
+                skip_tls_verify INTEGER NOT NULL DEFAULT 0,
+                base_dn TEXT NOT NULL,
+                bind_dn TEXT NOT NULL DEFAULT '',
+                bind_password TEXT NOT NULL DEFAULT '',
+                user_attribute TEXT NOT NULL DEFAULT 'uid',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            )"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_directories_tenant ON directories (tenant_id)")
+            .execute(pool)
+            .await?;
+
+        if !column_exists(pool, "users", "directory_id").await {
+            sqlx::query("ALTER TABLE users ADD COLUMN directory_id INTEGER")
+                .execute(pool)
+                .await?;
+        }
+        if !column_exists(pool, "users", "external_username").await {
+            sqlx::query("ALTER TABLE users ADD COLUMN external_username TEXT")
+                .execute(pool)
+                .await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 25")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v24 → v25 complete.");
     }
 
     Ok(())

@@ -1,0 +1,190 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1 class="m-0">
+            <i class="fas fa-network-wired mr-2 text-primary"></i>
+            {% if mode == "edit" %}Edit Directory{% else %}Add Directory{% endif %}
+          </h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/admin/directories">Directories</a></li>
+            <li class="breadcrumb-item active">{% if mode == "edit" %}Edit{% else %}Add{% endif %}</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger"><i class="fas fa-exclamation-circle mr-1"></i>{{ error_message }}</div>
+      {% endif %}
+
+      <div class="card card-outline card-primary shadow-sm">
+        <div class="card-header">
+          <h3 class="card-title">
+            <i class="fas fa-server mr-1"></i>
+            LDAP Connection
+          </h3>
+        </div>
+        <form method="POST" action="{% if mode == 'edit' %}/admin/directories/edit/{{ directory.id }}{% else %}/admin/directories/add{% endif %}">
+          <div class="card-body">
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="name">Display Name <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" id="name" name="name"
+                         value="{% if directory %}{{ directory.name }}{% endif %}"
+                         placeholder="Corp AD" required>
+                  <small class="form-text text-muted">Shown in the user-add dropdown.</small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="user_attribute">User Attribute</label>
+                  <input type="text" class="form-control" id="user_attribute" name="user_attribute"
+                         value="{% if directory %}{{ directory.user_attribute }}{% else %}uid{% endif %}"
+                         placeholder="uid">
+                  <small class="form-text text-muted">
+                    Attribute used to look up users by login name. Common values: <code>uid</code> (OpenLDAP), <code>sAMAccountName</code> (Active Directory), <code>userPrincipalName</code>.
+                  </small>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-8">
+                <div class="form-group">
+                  <label for="host">Host <span class="text-danger">*</span></label>
+                  <input type="text" class="form-control" id="host" name="host"
+                         value="{% if directory %}{{ directory.host }}{% endif %}"
+                         placeholder="ldap.example.com" required>
+                </div>
+              </div>
+              <div class="col-md-4">
+                <div class="form-group">
+                  <label for="port">Port <span class="text-danger">*</span></label>
+                  <input type="number" class="form-control" id="port" name="port" min="1" max="65535"
+                         value="{% if directory %}{{ directory.port }}{% else %}389{% endif %}" required>
+                  <small class="form-text text-muted">389 for plain LDAP, 636 for LDAPS.</small>
+                </div>
+              </div>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <div class="custom-control custom-switch">
+                    <input type="checkbox" class="custom-control-input" id="use_tls" name="use_tls"
+                           {% if directory and directory.use_tls != 0 %}checked{% endif %}>
+                    <label class="custom-control-label" for="use_tls">
+                      Use TLS (LDAPS)
+                    </label>
+                  </div>
+                  <small class="form-text text-muted">Connect over <code>ldaps://</code>. Default port should be 636.</small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-group">
+                  <div class="custom-control custom-switch">
+                    <input type="checkbox" class="custom-control-input" id="skip_tls_verify" name="skip_tls_verify"
+                           {% if directory and directory.skip_tls_verify != 0 %}checked{% endif %}>
+                    <label class="custom-control-label" for="skip_tls_verify">
+                      Skip TLS certificate verification
+                    </label>
+                  </div>
+                  <small class="form-text text-danger">
+                    <i class="fas fa-exclamation-triangle mr-1"></i>
+                    Insecure — only enable for self-signed certificates in dev/test environments.
+                  </small>
+                </div>
+              </div>
+            </div>
+
+            <hr>
+
+            <div class="form-group">
+              <label for="base_dn">Base DN <span class="text-danger">*</span></label>
+              <input type="text" class="form-control" id="base_dn" name="base_dn"
+                     value="{% if directory %}{{ directory.base_dn }}{% endif %}"
+                     placeholder="ou=people,dc=example,dc=com" required>
+              <small class="form-text text-muted">Subtree to search for users.</small>
+            </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="bind_dn">Service Account Bind DN</label>
+                  <input type="text" class="form-control" id="bind_dn" name="bind_dn"
+                         value="{% if directory %}{{ directory.bind_dn }}{% endif %}"
+                         placeholder="cn=openscm,ou=svc,dc=example,dc=com">
+                  <small class="form-text text-muted">Leave empty for anonymous bind.</small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="bind_password">Service Account Password</label>
+                  <input type="password" class="form-control" id="bind_password" name="bind_password"
+                         value="{{ bind_password | default(value='') }}"
+                         autocomplete="new-password">
+                  <small class="form-text text-muted">
+                    <i class="fas fa-info-circle mr-1"></i>
+                    Stored in the OpenSCM database. Protect the DB file accordingly.
+                  </small>
+                </div>
+              </div>
+            </div>
+
+          </div>
+
+          <div class="card-footer text-right">
+            <a href="/admin/directories" class="btn btn-secondary btn-sm mr-2">
+              <i class="fas fa-times mr-1"></i> Cancel
+            </a>
+            {% if mode == "edit" %}
+            <button type="button" class="btn btn-info btn-sm mr-2" id="test-current-btn">
+              <i class="fas fa-plug mr-1"></i> Test Connection
+            </button>
+            {% endif %}
+            <button type="submit" class="btn btn-primary btn-sm">
+              <i class="fas fa-save mr-1"></i> Save Directory
+            </button>
+          </div>
+        </form>
+      </div>
+
+    </div>
+  </section>
+</div>
+
+{% if mode == "edit" %}
+<script>
+$('#test-current-btn').on('click', function() {
+  const btn  = $(this);
+  const orig = btn.html();
+  btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i> Testing...');
+  fetch('/admin/directories/test/{{ directory.id }}', { method: 'POST' })
+    .then(r => r.json())
+    .then(j => {
+      if (j.ok) {
+        alert('✓ Bind successful — directory is reachable and credentials are valid.');
+      } else {
+        alert('✗ Bind failed:\n\n' + (j.error || 'unknown error'));
+      }
+    })
+    .catch(e => alert('Request error: ' + e))
+    .finally(() => btn.prop('disabled', false).html(orig));
+});
+</script>
+{% endif %}
+{% endblock %}

@@ -175,21 +175,25 @@ pub async fn login_submit(
 
     let row = match &tenant_id_filter {
         Some(tid) => sqlx::query(
-            "SELECT password, username, id, tenant_id, role FROM users WHERE username = ? AND tenant_id = ?",
+            "SELECT password, username, id, tenant_id, role, directory_id, external_username
+             FROM users WHERE username = ? AND tenant_id = ?",
         )
         .bind(&form.username)
         .bind(tid)
         .fetch_optional(&pool)
         .await,
         None => sqlx::query(
-            "SELECT password, username, id, tenant_id, role FROM users WHERE username = ?",
+            "SELECT password, username, id, tenant_id, role, directory_id, external_username
+             FROM users WHERE username = ?",
         )
         .bind(&form.username)
         .fetch_optional(&pool)
         .await,
     };
 
-    // Timing attack protection — always run bcrypt regardless of whether user exists
+    // Timing attack protection — always run bcrypt regardless of whether user exists.
+    // For LDAP-backed users we still run bcrypt against the dummy hash to keep the
+    // timing profile similar (the actual auth result comes from the LDAP bind below).
     const DUMMY_HASH: &str = "$2b$12$invalidhashfortimingprotectionXXXXXXXXXXXXXXXXXXXXXX";
 
     let (hash_to_check, maybe_row) = match row {
@@ -207,7 +211,36 @@ pub async fn login_submit(
         },
     };
 
-    let password_valid = verify(&form.password, &hash_to_check).unwrap_or(false);
+    // For LDAP-backed users we bypass the bcrypt result; for local users (or non-
+    // existent users), bcrypt is the authority.
+    let directory_id: Option<i64> = maybe_row.as_ref()
+        .and_then(|r| r.try_get::<Option<i64>, _>("directory_id").ok().flatten());
+
+    let bcrypt_valid = verify(&form.password, &hash_to_check).unwrap_or(false);
+
+    let password_valid = if let Some(dir_id) = directory_id {
+        // LDAP path — look up the directory, bind as user. Bcrypt result is ignored
+        // (it was run only for timing parity).
+        let _ = bcrypt_valid;
+        let external_login = maybe_row.as_ref()
+            .and_then(|r| r.try_get::<Option<String>, _>("external_username").ok().flatten())
+            .filter(|s| !s.is_empty())
+            .unwrap_or_else(|| form.username.clone());
+        match crate::directories::get_by_id(&pool, dir_id).await {
+            Some(dir) => {
+                let pw = form.password.clone();
+                tokio::task::spawn_blocking(move || crate::directories::verify_user(&dir, &external_login, &pw))
+                    .await
+                    .unwrap_or(false)
+            }
+            None => {
+                warn!("LDAP login for '{}' references missing directory id {}", form.username, dir_id);
+                false
+            }
+        }
+    } else {
+        bcrypt_valid
+    };
 
     if password_valid {
         if let Some(row) = maybe_row {
