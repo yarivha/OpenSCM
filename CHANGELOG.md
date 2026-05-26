@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.4.7] - 2026-05-26
+
 ### Added
 - **LDAP directory support** — admins can now delegate user authentication to an external LDAP server (OpenLDAP, Active Directory, FreeIPA, 389-DS, etc.) instead of storing every password in the OpenSCM database. New **Directories** section under `Admin → Settings` (sidebar link gated on Admin role) provides full CRUD over LDAP integrations:
   - **Per-tenant directories** stored in a new `directories` table (schema migration v24→v25); each entry holds host, port, TLS settings, base DN, service-account bind credentials, and the user-lookup attribute (`uid`, `sAMAccountName`, etc.).
