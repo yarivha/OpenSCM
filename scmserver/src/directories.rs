@@ -8,11 +8,11 @@
 // =============================================================================
 
 use axum::extract::{Extension, Form, Path, Query};
-use axum::response::{Html, IntoResponse, Redirect};
+use axum::response::{IntoResponse, Redirect};
 use axum::Json;
 use ldap3::{LdapConn, LdapConnSettings, Scope, SearchEntry};
 use serde::{Deserialize, Serialize};
-use sqlx::{Row, SqlitePool};
+use sqlx::SqlitePool;
 use std::sync::Arc;
 use std::time::Duration;
 use tera::{Context, Tera};
