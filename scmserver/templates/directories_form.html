@@ -176,24 +176,31 @@
   </section>
 </div>
 
-{% if mode == "edit" %}
-<script>
-$('#test-current-btn').on('click', function() {
-  const btn  = $(this);
-  const orig = btn.html();
-  btn.prop('disabled', true).html('<i class="fas fa-spinner fa-spin mr-1"></i> Testing...');
-  fetch('/admin/directories/test/{{ directory.id }}', { method: 'POST' })
-    .then(r => r.json())
-    .then(j => {
-      if (j.ok) {
-        alert('✓ Bind successful — directory is reachable and credentials are valid.');
-      } else {
-        alert('✗ Bind failed:\n\n' + (j.error || 'unknown error'));
-      }
-    })
-    .catch(e => alert('Request error: ' + e))
-    .finally(() => btn.prop('disabled', false).html(orig));
-});
-</script>
-{% endif %}
 {% endblock %}
+
+{% if mode == "edit" %}
+{% block scripts %}
+<script>
+(function() {
+  var btn = document.getElementById('test-current-btn');
+  if (!btn) return;
+  btn.addEventListener('click', function() {
+    var orig = btn.innerHTML;
+    btn.disabled = true;
+    btn.innerHTML = '<i class="fas fa-spinner fa-spin mr-1"></i> Testing...';
+    fetch('/admin/directories/test/{{ directory.id }}', { method: 'POST' })
+      .then(function(r) { return r.json(); })
+      .then(function(j) {
+        if (j.ok) {
+          alert('✓ Bind successful — directory is reachable and credentials are valid.');
+        } else {
+          alert('✗ Bind failed:\n\n' + (j.error || 'unknown error'));
+        }
+      })
+      .catch(function(e) { alert('Request error: ' + e); })
+      .finally(function() { btn.disabled = false; btn.innerHTML = orig; });
+  });
+})();
+</script>
+{% endblock %}
+{% endif %}
