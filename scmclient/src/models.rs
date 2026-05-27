@@ -1,5 +1,7 @@
 use serde::{Serialize, Deserialize};
 
+use crate::containers::DiscoveredContainer;
+
 // =========================
 // 1. IDENTITY & HEARTBEAT
 // =========================
@@ -28,6 +30,10 @@ pub struct UnsignedPayload {
     pub disk_total_gb: Option<u64>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub uptime_secs:  Option<u64>,
+    /// App-container inventory (Docker / Podman). Omitted entirely on non-Linux
+    /// or when no runtime is installed so old servers see no new field at all.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub containers:   Option<Vec<DiscoveredContainer>>,
 }
 
 #[derive(Debug, Serialize, Deserialize)]

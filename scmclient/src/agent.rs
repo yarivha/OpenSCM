@@ -447,6 +447,12 @@ async fn post_heartbeat(
 ) -> Result<Option<SignedResponse>, Box<dyn std::error::Error>> {
     let needs_handshake = identity.current_id == "0" || !identity.server_pub_path.exists();
 
+    // Container discovery — Linux only, soft-fails on missing runtime / no
+    // permission. We send None (omitted in the serialized payload) when the
+    // list is empty so old servers don't see any new field at all.
+    let discovered = crate::containers::enumerate();
+    let containers = if discovered.is_empty() { None } else { Some(discovered) };
+
     let unsigned = UnsignedPayload {
         id:           identity.current_id.clone(),
         organization: config.server.organization.clone(),
@@ -463,6 +469,7 @@ async fn post_heartbeat(
         disk_used_gb: sys.disk_used_gb,
         disk_total_gb: sys.disk_total_gb,
         uptime_secs:  sys.uptime_secs,
+        containers,
     };
 
     let signature = sign_payload(&unsigned, &identity.signing_key)?;

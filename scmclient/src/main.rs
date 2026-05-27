@@ -3,6 +3,7 @@ mod agent;
 mod config;
 mod compliance;
 mod runner;
+mod containers;
 
 use tokio::time::{sleep, Duration};
 use tracing_subscriber::{fmt, EnvFilter, layer::SubscriberExt, util::SubscriberInitExt, reload};
