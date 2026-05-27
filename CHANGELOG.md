@@ -6,6 +6,17 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Container support — schema groundwork (step 1/8).** Lays the database foundation for the upcoming container inventory and container-only tests; nothing reads or writes these yet, but a fresh install and any existing tenant on schema v25 will land at v26 with the new shape in place. Specifically:
+  - New `containers` table — per-host inventory keyed by `(host_system_id, runtime, name)`. Stores runtime identifier (docker / podman / kubernetes), image + digest, status, IP, plus cached metadata fields (privileged, run_user, network_mode, exposed_ports as JSON, mounts as JSON, capabilities, read-only-fs, restart_policy, health_check) for future container-only element evaluation. `first_seen` / `last_seen` drive retention.
+  - New `results.container_id` nullable column — NULL keeps existing host-level result semantics; future per-container results will set it.
+  - Seed the first two container-only **elements** in the lookup table: `IMAGE` and `NETWORK`. Other container elements from the design doc (`PRIVILEGED`, `RUN_USER`, `MOUNT`, `EXPOSED_PORT`, `READ_ONLY_FS`, `HEALTH_CHECK`) are deferred to a later 0.5.x increment.
+  - Seed five new **sub-elements**: `NAME`, `TAG`, `DIGEST`, `REGISTRY` (for IMAGE), and `MODE` (for NETWORK).
+  - New per-tenant setting `container_retention_days` (default `7`, `0` = forever) — will drive a future daily-prune of stale container rows alongside the existing audit/report/notification prunes.
+  - Schema migration v25 → v26 with `column_exists` guard for the `results.container_id` ALTER; fresh-install path mirrors the same table creation and seed data.
+
+  Reference: `docs/design/0.5.0-containers.md` section 3 (data model) and section 7 (container-only elements).
+
 ---
 
 ## [0.4.8] - 2026-05-26

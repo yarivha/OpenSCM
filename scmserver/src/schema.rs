@@ -329,6 +329,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             excluded     INTEGER NOT NULL DEFAULT 0,
             excluded_by  TEXT,
             excluded_at  DATETIME,
+            container_id INTEGER,
             PRIMARY KEY (tenant_id, system_id, test_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
@@ -393,6 +394,43 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_directories_tenant ON directories (tenant_id)")
         .execute(pool)
         .await?;
+
+    // Containers table — per-host inventory of app containers (Docker, Podman,
+    // later Kubernetes pods). Replaced on every heartbeat by the host's agent;
+    // stale rows pruned by container_retention_days. See docs/design/0.5.0-containers.md.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS containers (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id       VARCHAR(191) NOT NULL DEFAULT 'default',
+            host_system_id  INTEGER NOT NULL,
+            runtime         TEXT NOT NULL,
+            runtime_id      TEXT NOT NULL,
+            name            TEXT NOT NULL,
+            image           TEXT,
+            image_digest    TEXT,
+            status          TEXT,
+            ip              TEXT,
+            is_privileged   INTEGER,
+            run_user        TEXT,
+            network_mode    TEXT,
+            exposed_ports   TEXT,
+            mounts          TEXT,
+            capabilities_add TEXT,
+            read_only_fs    INTEGER,
+            restart_policy  TEXT,
+            health_check    INTEGER,
+            first_seen      DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_seen       DATETIME DEFAULT CURRENT_TIMESTAMP,
+            UNIQUE(host_system_id, runtime, name),
+            FOREIGN KEY (host_system_id) REFERENCES systems(id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_containers_host  ON containers(host_system_id)")
+        .execute(pool).await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_containers_image ON containers(image)")
+        .execute(pool).await?;
 
     // Reports table
     // tests_metadata and report_results store arbitrary-size JSON — use MEDIUMTEXT
@@ -618,7 +656,8 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ('default', 'app_url', '', 'Public URL of this installation (used in email links)'),
         ('default', 'audit_log_retention_days', '730', 'Days to keep audit_log rows before auto-pruning (0 = keep forever)'),
         ('default', 'report_retention_days', '0', 'Days to keep saved policy/system report snapshots before auto-pruning (0 = keep forever)'),
-        ('default', 'notification_retention_days', '30', 'Days to keep bell-icon notifications before auto-pruning (0 = keep forever)')"
+        ('default', 'notification_retention_days', '30', 'Days to keep bell-icon notifications before auto-pruning (0 = keep forever)'),
+        ('default', 'container_retention_days', '7', 'Days to keep container inventory rows after last_seen before auto-pruning (0 = keep forever)')"
     )
     .execute(pool)
     .await?;
@@ -627,7 +666,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for name in &[
         "AGENT", "OS", "HOSTNAME", "IP", "DOMAIN", "ARCHITECTURE", "USER", "GROUP",
         "FILE", "DIRECTORY", "PROCESS", "PACKAGE", "REGISTRY", "PORT", "CMD", "POWERSHELL",
-        "SERVICE",
+        "SERVICE", "IMAGE", "NETWORK",
     ] {
         sqlx::query(
             "INSERT OR IGNORE INTO elements (name) VALUES (?)"
@@ -642,6 +681,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         "EXISTS", "NOT EXISTS", "CONTENT", "VERSION", "PERMISSION",
         "OWNER", "GROUP", "SHA1", "SHA2", "OUTPUT", "EXIT CODE",
         "COUNT", "ACTIVE", "INACTIVE", "ENABLED", "DISABLED",
+        "NAME", "TAG", "DIGEST", "REGISTRY", "MODE",
     ] {
         sqlx::query(
             "INSERT OR IGNORE INTO selements (name) VALUES (?)"
@@ -1703,6 +1743,91 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v24 → v25 complete.");
+    }
+
+    // v25 → v26: container support groundwork.
+    //   - new `containers` table (per-host inventory of running app containers)
+    //   - `results.container_id` column (NULL = host-level; set = per-container)
+    //   - seed IMAGE + NETWORK elements and their sub-elements
+    //   - new per-tenant `container_retention_days` setting (default 7)
+    //
+    // No code reads or writes these yet — this is structural groundwork the
+    // agent/server/UI work in later steps will build on.
+    if version < 26 {
+        info!("Running schema migration v25 → v26 (container groundwork)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS containers (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id       VARCHAR(191) NOT NULL DEFAULT 'default',
+                host_system_id  INTEGER NOT NULL,
+                runtime         TEXT NOT NULL,
+                runtime_id      TEXT NOT NULL,
+                name            TEXT NOT NULL,
+                image           TEXT,
+                image_digest    TEXT,
+                status          TEXT,
+                ip              TEXT,
+                is_privileged   INTEGER,
+                run_user        TEXT,
+                network_mode    TEXT,
+                exposed_ports   TEXT,
+                mounts          TEXT,
+                capabilities_add TEXT,
+                read_only_fs    INTEGER,
+                restart_policy  TEXT,
+                health_check    INTEGER,
+                first_seen      DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_seen       DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(host_system_id, runtime, name),
+                FOREIGN KEY (host_system_id) REFERENCES systems(id) ON DELETE CASCADE
+            )"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_containers_host  ON containers(host_system_id)")
+            .execute(pool).await?;
+        sqlx::query("CREATE INDEX IF NOT EXISTS idx_containers_image ON containers(image)")
+            .execute(pool).await?;
+
+        if !column_exists(pool, "results", "container_id").await {
+            sqlx::query("ALTER TABLE results ADD COLUMN container_id INTEGER")
+                .execute(pool)
+                .await?;
+        }
+
+        // Container-only elements (deferred elements in 0.5.x: PRIVILEGED,
+        // RUN_USER, MOUNT, EXPOSED_PORT, READ_ONLY_FS, HEALTH_CHECK).
+        for name in &["IMAGE", "NETWORK"] {
+            sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
+                .bind(name)
+                .execute(pool)
+                .await?;
+        }
+
+        // Sub-elements: NAME/TAG/DIGEST/REGISTRY for IMAGE; MODE for NETWORK.
+        // EQUALS / NOT EQUALS / CONTAINS already exist as conditions.
+        for name in &["NAME", "TAG", "DIGEST", "REGISTRY", "MODE"] {
+            sqlx::query("INSERT OR IGNORE INTO selements (name) VALUES (?)")
+                .bind(name)
+                .execute(pool)
+                .await?;
+        }
+
+        // Per-tenant retention setting (default 7 days). 0 = keep forever.
+        sqlx::query(
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description)
+             VALUES ('default', 'container_retention_days', '7',
+                     'Days to keep container inventory rows after last_seen before auto-pruning (0 = keep forever)')"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 26")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v25 → v26 complete.");
     }
 
     Ok(())
