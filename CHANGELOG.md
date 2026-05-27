@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Container support — daily retention prune (step 4/8).** The scheduler's existing once-per-UTC-day prune tick gains a fourth helper (`prune_containers`) alongside the audit / report / notification prunes. Per-tenant `container_retention_days` setting (seeded at 7 days in step 1; configurable via `Admin → Settings → General`, validated as `0` (forever) or 1-10000 days) drives a `DELETE FROM containers WHERE last_seen < now - N days` per tenant. A successful trim writes a `retention.containers_pruned` audit row with the count + retention window so the cleanup is itself auditable. This is the second half of the staleness story — the heartbeat ingest already removes containers the agent stopped reporting (stragglers); this prune handles containers whose *host* stopped checking in entirely.
+
 - **Container support — server ingest (step 3/8).** Heartbeat handler now persists the `containers` array shipped by Linux agents into the `containers` table that landed in step 1. Three explicit cases per design doc §3 "Lifecycle":
   - `containers` field **absent** (old agent or non-Linux) → leave existing rows alone; they age out via retention (step 4).
   - `containers: []` → agent explicitly reports no containers; delete every container row for this host so the UI matches reality immediately.

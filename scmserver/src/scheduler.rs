@@ -534,12 +534,13 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             // Runs once per UTC day at the first tick that lands on a new
             // day. Per-tenant retention is read from settings inside each
             // prune helper; tenants with retention = 0 (forever) are
-            // skipped there. Covers audit log, saved reports, and
-            // notifications in one daily pass.
+            // skipped there. Covers audit log, saved reports, notifications,
+            // and container inventory in one daily pass.
             if current_day != last_daily_prune_day {
                 crate::audit::prune(&loop_pool).await;
                 prune_reports(&loop_pool).await;
                 prune_notifications(&loop_pool).await;
+                prune_containers(&loop_pool).await;
                 last_daily_prune_day = current_day;
             }
         }
@@ -688,6 +689,57 @@ async fn prune_notifications(pool: &SqlitePool) {
             }
             Ok(_) => {}
             Err(e) => error!("notification prune: delete failed for tenant '{}': {}", tenant_id, e),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: prune_containers
+// For each tenant with container_retention_days > 0, deletes rows from the
+// `containers` table whose `last_seen` is older than the configured threshold.
+// Two-phase staleness: the heartbeat ingest already deletes containers that
+// the agent stopped reporting (stragglers from previous ticks). This prune
+// handles the case where the *host itself* stopped checking in — its
+// containers' last_seen freezes, and after the retention window we drop them.
+// One `retention.containers_pruned` audit entry per tenant whose data was
+// actually trimmed.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn prune_containers(pool: &SqlitePool) {
+    let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
+        "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
+         WHERE skey = 'container_retention_days' AND CAST(value AS INTEGER) > 0",
+    )
+    .fetch_all(pool)
+    .await
+    {
+        Ok(rows) => rows,
+        Err(e) => { error!("container prune: failed to fetch retention settings: {}", e); return; }
+    };
+
+    for (tenant_id, days) in tenants {
+        let res = sqlx::query(
+            "DELETE FROM containers
+             WHERE tenant_id = ?
+               AND last_seen < datetime('now', '-' || ? || ' days')",
+        )
+        .bind(&tenant_id).bind(days)
+        .execute(pool).await;
+
+        match res {
+            Ok(r) if r.rows_affected() > 0 => {
+                let removed = r.rows_affected();
+                info!("container prune: removed {} row(s) older than {} day(s) for tenant '{}'.", removed, days, tenant_id);
+                crate::audit::record_raw(
+                    pool, &tenant_id,
+                    None, "system",
+                    None,
+                    "retention.containers_pruned",
+                    Some("containers"), None,
+                    Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+                ).await;
+            }
+            Ok(_) => {}
+            Err(e) => error!("container prune: delete failed for tenant '{}': {}", tenant_id, e),
         }
     }
 }

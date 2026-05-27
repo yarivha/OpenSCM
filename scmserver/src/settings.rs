@@ -35,6 +35,7 @@ pub struct Settings {
     pub audit_log_retention_days: String,
     pub report_retention_days: String,
     pub notification_retention_days: String,
+    pub container_retention_days: String,
     pub smtp_host:     String,
     pub smtp_port:     String,
     pub smtp_username: String,
@@ -106,6 +107,7 @@ pub async fn settings(
         audit_log_retention_days: map.get("audit_log_retention_days").cloned().unwrap_or_else(|| "730".to_string()),
         report_retention_days: map.get("report_retention_days").cloned().unwrap_or_else(|| "0".to_string()),
         notification_retention_days: map.get("notification_retention_days").cloned().unwrap_or_else(|| "30".to_string()),
+        container_retention_days: map.get("container_retention_days").cloned().unwrap_or_else(|| "7".to_string()),
         smtp_host:     map.get("smtp_host").cloned().unwrap_or_default(),
         smtp_port:     map.get("smtp_port").cloned().unwrap_or_else(|| "587".to_string()),
         smtp_username: map.get("smtp_username").cloned().unwrap_or_default(),
@@ -171,6 +173,7 @@ pub async fn settings_save(
     let raw_audit_keep   = form_data.get("audit_log_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
     let raw_report_keep  = form_data.get("report_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
     let raw_notify_keep  = form_data.get("notification_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_container_keep = form_data.get("container_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
 
     let threshold: i64 = match raw_threshold.parse() {
         Ok(v) if v >= 1 => v,
@@ -218,6 +221,12 @@ pub async fn settings_save(
         _ => return Redirect::to("/settings?error_message=Notification+retention+must+be+0+(forever)+or+1-10000+days").into_response(),
     };
 
+    let container_keep: i64 = match raw_container_keep.parse::<i64>() {
+        Ok(0) => 0,
+        Ok(v) if (1..=10000).contains(&v) => v,
+        _ => return Redirect::to("/settings?error_message=Container+retention+must+be+0+(forever)+or+1-10000+days").into_response(),
+    };
+
     let mut updates: Vec<(&str, String)> = vec![
         ("offline_threshold",            threshold.to_string()),
         ("auto_prune_inactive",          auto_prune.to_string()),
@@ -226,6 +235,7 @@ pub async fn settings_save(
         ("audit_log_retention_days",     audit_keep.to_string()),
         ("report_retention_days",        report_keep.to_string()),
         ("notification_retention_days",  notify_keep.to_string()),
+        ("container_retention_days",     container_keep.to_string()),
     ];
 
     // Email settings — superuser only

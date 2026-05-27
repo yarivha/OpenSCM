@@ -163,6 +163,24 @@
                 </div>
               </div>
             </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="container_retention_days">
+                    <i class="fab fa-docker mr-1 text-muted"></i>
+                    Container Retention (days)
+                  </label>
+                  <input type="number" class="form-control" id="container_retention_days"
+                    name="container_retention_days" value="{{ settings.container_retention_days }}"
+                    min="0" max="10000">
+                  <small class="form-text text-muted">
+                    How long to keep container inventory rows after their host stops reporting them.
+                    Set to <strong>0</strong> to keep forever. Default is <strong>7</strong> — container churn is high; long-lived containers stay because the heartbeat keeps refreshing <code>last_seen</code>.
+                  </small>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Compliance Tab -->
