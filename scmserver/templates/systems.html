@@ -95,6 +95,7 @@
                 <thead>
                   <tr>
                     <th style="display:none;">Status_Internal</th>
+                    <th style="width: 22px; text-align:center;" class="dt-no-sort"></th>
                     <th style="width: 20px; text-align:center;">
                       <input type="checkbox" id="select-all" title="Select All">
                     </th>
@@ -112,8 +113,9 @@
                   {% for system in systems %}
                   {% set os_lower = system.os | default(value="") | lower %}
 
-                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}" data-offline="{{ system.is_offline }}">
+                  <tr class="{% if system.status == 'pending' %}table-warning{% endif %}" data-offline="{{ system.is_offline }}" data-system-id="{{ system.id }}">
                     <td style="display:none;">{{ system.status }}</td>
+                    <td class="text-center expand-toggle" style="cursor:pointer; user-select:none;" title="Show containers"></td>
                     <td class="text-center">
                       <input type="checkbox" class="row-checkbox" value="{{ system.id }}" title="Select">
                     </td>
@@ -345,6 +347,58 @@
   <div id="bulk-upgrade-ids"></div>
 </form>
 
+{# Container inventory — one JSON blob shared by every expand-row toggle.
+   Keyed by host_system_id; empty {} when no system has any containers. #}
+<script id="containers-by-system" type="application/json">{{ containers_by_system_json | safe }}</script>
+
+{# Per-container detail modal — populated on click of a container row. #}
+<div class="modal fade" id="containerDetailsModal" tabindex="-1" role="dialog" aria-hidden="true">
+  <div class="modal-dialog modal-lg" role="document">
+    <div class="modal-content">
+      <div class="modal-header bg-primary">
+        <h5 class="modal-title" id="cm-title"><i class="fab fa-docker mr-2"></i><span id="cm-name"></span></h5>
+        <button type="button" class="close" data-dismiss="modal" aria-label="Close">
+          <span aria-hidden="true" style="color: white;">&times;</span>
+        </button>
+      </div>
+      <div class="modal-body">
+        <div class="row">
+          <div class="col-md-6 border-right">
+            <p><strong>Runtime:</strong> <span class="badge badge-secondary" id="cm-runtime"></span></p>
+            <p><strong>Image:</strong> <code id="cm-image"></code></p>
+            <p><strong>Digest:</strong> <code id="cm-digest" style="font-size:0.78rem; word-break:break-all;"></code></p>
+            <p><strong>Status:</strong> <span id="cm-status"></span></p>
+            <p><strong>IP:</strong> <code id="cm-ip"></code></p>
+          </div>
+          <div class="col-md-6">
+            <p><strong>Run user:</strong> <code id="cm-user"></code></p>
+            <p><strong>Network mode:</strong> <code id="cm-netmode"></code></p>
+            <p><strong>Privileged:</strong> <span id="cm-priv"></span></p>
+            <p><strong>Read-only FS:</strong> <span id="cm-rofs"></span></p>
+            <p><strong>Health check:</strong> <span id="cm-health"></span></p>
+            <p><strong>Restart policy:</strong> <code id="cm-restart"></code></p>
+            <p><strong>First seen:</strong> <span id="cm-first"></span></p>
+            <p><strong>Last seen:</strong> <span id="cm-last"></span></p>
+          </div>
+        </div>
+        <div class="row mt-2">
+          <div class="col-12">
+            <p class="mb-1"><strong>Exposed ports:</strong></p>
+            <p class="text-muted" id="cm-ports" style="font-family: ui-monospace, monospace; font-size: 0.85rem;"></p>
+            <p class="mb-1"><strong>Mounts:</strong></p>
+            <pre id="cm-mounts" style="background:#f6f8fa; padding:8px; border-radius:4px; font-size:0.78rem; max-height:200px; overflow:auto;"></pre>
+            <p class="mb-1"><strong>Added capabilities:</strong></p>
+            <p class="text-muted" id="cm-caps" style="font-family: ui-monospace, monospace; font-size: 0.85rem;"></p>
+          </div>
+        </div>
+      </div>
+      <div class="modal-footer">
+        <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
+      </div>
+    </div>
+  </div>
+</div>
+
 {% endblock %}
 
 {% block scripts %}
@@ -417,14 +471,19 @@
     });
 
     // 3. DataTables
+    //   Column 0: hidden status (used for the pending-first sort)
+    //   Column 1: expand chevron (not sortable, not searchable)
+    //   Column 2: checkbox (not sortable, not searchable)
+    //   Column 3: ID  |  Column 4: Name  | ...
     const table = $("#systems_table").DataTable({
       "responsive": true,
       "lengthChange": true,
       "autoWidth": false,
-      "order": [[0, "desc"], [3, "asc"]],
+      "order": [[0, "desc"], [4, "asc"]],
       "columnDefs": [
         { "targets": 0, "visible": false },
-        { "targets": 1, "orderable": false, "searchable": false, "className": "text-center" }
+        { "targets": 1, "orderable": false, "searchable": false, "className": "text-center" },
+        { "targets": 2, "orderable": false, "searchable": false, "className": "text-center" }
       ],
       "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
     });
@@ -512,5 +571,117 @@
     });
   });
 
+    // ─────────────────────────────────────────────────────────────────────
+    // Container inventory — chevron in column 1 expands a DataTables child
+    // row with the host's containers. JSON blob is preloaded; click on a
+    // container row opens the detail modal.
+    // ─────────────────────────────────────────────────────────────────────
+    let containersBySystem = {};
+    try {
+      const blob = document.getElementById('containers-by-system');
+      containersBySystem = JSON.parse(blob ? blob.textContent : '{}');
+    } catch (e) { containersBySystem = {}; }
+
+    function runtimeIcon(rt) {
+      if (rt === 'docker') return '<i class="fab fa-docker text-primary mr-1" title="Docker"></i>';
+      if (rt === 'podman') return '<i class="fas fa-cube text-warning mr-1" title="Podman"></i>';
+      return '<i class="fas fa-cube text-secondary mr-1"></i>';
+    }
+    function statusBadge(s) {
+      if (!s) return '';
+      const cls = s.toLowerCase().includes('up') || s.toLowerCase().includes('running') ? 'badge-success' : 'badge-secondary';
+      return '<span class="badge ' + cls + '">' + $('<div/>').text(s).html() + '</span>';
+    }
+
+    function renderContainerTable(list) {
+      if (!list || list.length === 0) {
+        return '<div class="p-3 text-muted small">No containers on this host.</div>';
+      }
+      let h = '<div style="padding: 6px 10px 6px 30px;"><table class="table table-sm table-hover mb-0" style="background: rgba(0,0,0,0.02);"><thead><tr>'
+            + '<th style="width:30%">Container</th><th style="width:35%">Image</th><th style="width:15%">IP</th><th>Status</th>'
+            + '</tr></thead><tbody>';
+      list.forEach(function(c, idx) {
+        h += '<tr class="container-row" style="cursor:pointer;" data-host-id="' + $('<div/>').text(c._host_id || '').html() + '" data-idx="' + idx + '">'
+           + '<td>' + runtimeIcon(c.runtime) + '<strong>' + $('<div/>').text(c.name || '').html() + '</strong></td>'
+           + '<td><code style="font-size:0.82rem;">' + $('<div/>').text(c.image || '—').html() + '</code></td>'
+           + '<td><code>' + $('<div/>').text(c.ip || '—').html() + '</code></td>'
+           + '<td>' + statusBadge(c.status) + '</td>'
+           + '</tr>';
+      });
+      return h + '</tbody></table></div>';
+    }
+
+    // Paint a small ▶ on rows where the host has any containers.
+    $('#systems_table tbody tr').each(function() {
+      const sid = $(this).data('system-id');
+      const list = containersBySystem[sid];
+      const cell = $(this).find('td.expand-toggle');
+      if (list && list.length > 0) {
+        cell.html('<span class="text-muted">▶</span>');
+        cell.attr('title', list.length + ' container' + (list.length === 1 ? '' : 's'));
+      }
+    });
+
+    // Cache the rendered HTML on the row so we can re-show after a redraw.
+    $('#systems_table tbody').on('click', 'td.expand-toggle', function() {
+      const tr = $(this).closest('tr');
+      const row = table.row(tr);
+      const sid = tr.data('system-id');
+      const list = containersBySystem[sid];
+      if (!list || list.length === 0) return;
+      // Tag each container with its host id so the click handler can find it back.
+      list.forEach(function(c) { c._host_id = sid; });
+
+      if (row.child.isShown()) {
+        row.child.hide();
+        $(this).find('span').text('▶');
+      } else {
+        row.child(renderContainerTable(list), 'container-child-row').show();
+        $(this).find('span').text('▼');
+      }
+    });
+
+    // Container row click → detail modal.
+    $('#systems_table').on('click', 'tr.container-row', function() {
+      const sid  = $(this).data('host-id');
+      const idx  = $(this).data('idx');
+      const list = containersBySystem[sid] || [];
+      const c    = list[idx];
+      if (!c) return;
+
+      $('#cm-name').text(c.name || '');
+      $('#cm-runtime').text((c.runtime || '').toUpperCase());
+      $('#cm-image').text(c.image || '—');
+      $('#cm-digest').text(c.image_digest || '—');
+      $('#cm-status').html(statusBadge(c.status) || '<span class="text-muted">—</span>');
+      $('#cm-ip').text(c.ip || '—');
+      $('#cm-user').text(c.run_user || '—');
+      $('#cm-netmode').text(c.network_mode || '—');
+      $('#cm-priv').html(c.is_privileged === true
+        ? '<span class="badge badge-danger">Yes</span>'
+        : c.is_privileged === false ? '<span class="badge badge-success">No</span>' : '<span class="text-muted">—</span>');
+      $('#cm-rofs').html(c.read_only_fs === true
+        ? '<span class="badge badge-success">Yes</span>'
+        : c.read_only_fs === false ? '<span class="badge badge-secondary">No</span>' : '<span class="text-muted">—</span>');
+      $('#cm-health').html(c.health_check === true
+        ? '<span class="badge badge-success">Defined</span>'
+        : c.health_check === false ? '<span class="badge badge-secondary">None</span>' : '<span class="text-muted">—</span>');
+      $('#cm-restart').text(c.restart_policy || '—');
+      $('#cm-first').text(c.first_seen || '—');
+      $('#cm-last').text(c.last_seen || '—');
+
+      // Lists are stored as JSON strings.
+      let ports = '—'; try { ports = (JSON.parse(c.exposed_ports || '[]') || []).join(', ') || '—'; } catch (_) {}
+      $('#cm-ports').text(ports);
+
+      let mounts = '—'; try { mounts = JSON.stringify(JSON.parse(c.mounts || '[]'), null, 2); } catch (_) {}
+      $('#cm-mounts').text(mounts === '[]' ? '—' : mounts);
+
+      let caps = '—'; try { caps = (JSON.parse(c.capabilities_add || '[]') || []).join(', ') || '(defaults)'; } catch (_) {}
+      $('#cm-caps').text(caps);
+
+      $('#containerDetailsModal').modal('show');
+    });
+    // ─────────────────────────────────────────────────────────────────────
 </script>
 {% endblock %}

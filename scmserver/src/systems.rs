@@ -250,8 +250,58 @@ pub async fn systems(
         context.insert("success_message", success_message);
     }
     let has_upgradable = systems.iter().any(|s| s.upgrade_available && !s.is_offline);
+
+    // Container inventory — one bulk query for every system on the page,
+    // grouped by host_system_id, JSON-encoded once and embedded as a script
+    // block. The systems-list JS reads it on chevron-click to populate the
+    // DataTables child row without a per-system round-trip.
+    let host_ids: Vec<i32> = systems.iter().filter_map(|s| s.id).collect();
+    let containers_by_system_json: String = if host_ids.is_empty() {
+        "{}".to_string()
+    } else {
+        let placeholders = std::iter::repeat("?").take(host_ids.len()).collect::<Vec<_>>().join(",");
+        let sql = format!(
+            "SELECT host_system_id, runtime, runtime_id, name, image, image_digest, status, ip,
+                    is_privileged, run_user, network_mode, exposed_ports, mounts, capabilities_add,
+                    read_only_fs, restart_policy, health_check, first_seen, last_seen
+             FROM containers
+             WHERE tenant_id = ? AND host_system_id IN ({})
+             ORDER BY host_system_id, name",
+            placeholders
+        );
+        let mut q = sqlx::query(&sql).bind(&auth.tenant_id);
+        for id in &host_ids { q = q.bind(id); }
+        let rows = q.fetch_all(&pool).await.unwrap_or_default();
+        let mut map: std::collections::BTreeMap<i32, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
+        for row in rows {
+            let host_id: i32 = row.try_get("host_system_id").unwrap_or(0);
+            map.entry(host_id).or_default().push(serde_json::json!({
+                "runtime":          row.try_get::<String, _>("runtime").ok(),
+                "runtime_id":       row.try_get::<String, _>("runtime_id").ok(),
+                "name":             row.try_get::<String, _>("name").ok(),
+                "image":            row.try_get::<Option<String>, _>("image").ok().flatten(),
+                "image_digest":     row.try_get::<Option<String>, _>("image_digest").ok().flatten(),
+                "status":           row.try_get::<Option<String>, _>("status").ok().flatten(),
+                "ip":               row.try_get::<Option<String>, _>("ip").ok().flatten(),
+                "is_privileged":    row.try_get::<Option<i64>, _>("is_privileged").ok().flatten().map(|v| v != 0),
+                "run_user":         row.try_get::<Option<String>, _>("run_user").ok().flatten(),
+                "network_mode":     row.try_get::<Option<String>, _>("network_mode").ok().flatten(),
+                "exposed_ports":    row.try_get::<Option<String>, _>("exposed_ports").ok().flatten(),
+                "mounts":           row.try_get::<Option<String>, _>("mounts").ok().flatten(),
+                "capabilities_add": row.try_get::<Option<String>, _>("capabilities_add").ok().flatten(),
+                "read_only_fs":     row.try_get::<Option<i64>, _>("read_only_fs").ok().flatten().map(|v| v != 0),
+                "restart_policy":   row.try_get::<Option<String>, _>("restart_policy").ok().flatten(),
+                "health_check":     row.try_get::<Option<i64>, _>("health_check").ok().flatten().map(|v| v != 0),
+                "first_seen":       row.try_get::<Option<String>, _>("first_seen").ok().flatten(),
+                "last_seen":        row.try_get::<Option<String>, _>("last_seen").ok().flatten(),
+            }));
+        }
+        serde_json::to_string(&map).unwrap_or_else(|_| "{}".to_string())
+    };
+
     context.insert("systems", &systems);
     context.insert("has_upgradable", &has_upgradable);
+    context.insert("containers_by_system_json", &containers_by_system_json);
     render_template(&tera, Some(&pool), "systems.html", context, Some(auth))
         .await
         .into_response()

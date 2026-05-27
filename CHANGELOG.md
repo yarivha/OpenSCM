@@ -7,6 +7,14 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Container support — Systems-list inventory + detail modal (step 5/8).** The first user-visible payoff of the container work:
+  - **Expand chevron** — every system row gains a left-side `▶` cell when the host has any containers; click to reveal a DataTables child row containing a nested table of that host's containers (runtime icon, name, image, IP, status).
+  - **Detail modal** — clicking any container row opens a modal showing the full inventory metadata: runtime, image + digest, IP, run-user, network mode, privileged / read-only / health-check flags, restart policy, exposed ports, mount list, added capabilities, first/last seen timestamps. Mounts and ports render from the JSON cached at ingest — no extra round-trip.
+  - **Server-side**, the `systems` handler fetches every visible host's containers in one bulk query (`WHERE host_system_id IN (...)`), groups by host id, and embeds the result as a single JSON `<script id="containers-by-system" type="application/json">` blob the client-side JS reads on chevron click. Zero per-row round-trips when expanding.
+  - DataTables `columnDefs` updated for the new column shift; new sort uses column 4 (Name) instead of column 3 (which became Name + 1 after the chevron column landed).
+
+  Hosts with no containers show no chevron; reverted/non-Linux hosts are unaffected. This closes the inventory loop end-to-end: agent discovers → server stores → UI shows it.
+
 - **Container support — daily retention prune (step 4/8).** The scheduler's existing once-per-UTC-day prune tick gains a fourth helper (`prune_containers`) alongside the audit / report / notification prunes. Per-tenant `container_retention_days` setting (seeded at 7 days in step 1; configurable via `Admin → Settings → General`, validated as `0` (forever) or 1-10000 days) drives a `DELETE FROM containers WHERE last_seen < now - N days` per tenant. A successful trim writes a `retention.containers_pruned` audit row with the count + retention window so the cleanup is itself auditable. This is the second half of the staleness story — the heartbeat ingest already removes containers the agent stopped reporting (stragglers); this prune handles containers whose *host* stopped checking in entirely.
 
 - **Container support — server ingest (step 3/8).** Heartbeat handler now persists the `containers` array shipped by Linux agents into the `containers` table that landed in step 1. Three explicit cases per design doc §3 "Lifecycle":
