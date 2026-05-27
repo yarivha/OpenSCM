@@ -320,6 +320,36 @@ pub struct UnsignedPayload {
     pub disk_total_gb: Option<i64>,
     #[serde(default)]
     pub uptime_secs:  Option<i64>,
+    /// App-container inventory shipped by the Linux agent. None = field absent
+    /// (old agent or non-Linux); we leave existing container rows alone.
+    /// Some([]) = explicit "no containers right now", so we delete the host's rows.
+    /// Some([...]) = full current list; we upsert each and delete anything not in it.
+    #[serde(default)]
+    pub containers:   Option<Vec<IncomingContainer>>,
+}
+
+
+// One container as reported by a Linux agent. Mirrors the columns of the
+// `containers` table 1-to-1; metadata fields are optional so partial reports
+// (e.g. inspect failed for one container) still ingest cleanly.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct IncomingContainer {
+    pub runtime:         String,
+    pub runtime_id:      String,
+    pub name:            String,
+    pub image:           Option<String>,
+    pub image_digest:    Option<String>,
+    pub status:          Option<String>,
+    pub ip:              Option<String>,
+    pub is_privileged:   Option<bool>,
+    pub run_user:        Option<String>,
+    pub network_mode:    Option<String>,
+    pub exposed_ports:   Option<String>,
+    pub mounts:          Option<String>,
+    pub capabilities_add: Option<String>,
+    pub read_only_fs:    Option<bool>,
+    pub restart_policy:  Option<String>,
+    pub health_check:    Option<bool>,
 }
 
 

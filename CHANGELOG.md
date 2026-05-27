@@ -7,6 +7,15 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Container support — server ingest (step 3/8).** Heartbeat handler now persists the `containers` array shipped by Linux agents into the `containers` table that landed in step 1. Three explicit cases per design doc §3 "Lifecycle":
+  - `containers` field **absent** (old agent or non-Linux) → leave existing rows alone; they age out via retention (step 4).
+  - `containers: []` → agent explicitly reports no containers; delete every container row for this host so the UI matches reality immediately.
+  - `containers: [...]` → upsert each entry keyed on `(host_system_id, runtime, name)`, preserving `first_seen`; delete any row for this host whose `(runtime, name)` is no longer in the report (stragglers from a previous tick).
+
+  Implemented as a private `ingest_containers` helper running inside the existing heartbeat transaction, so a transient DB error rolls back the systems UPDATE too — the agent retries the whole payload on the next tick. Stable scan-boundary timestamp (`now_str` captured once in Rust) keeps the upsert + straggler-delete monotonic. `INSERT ... ON CONFLICT DO UPDATE` preserves `first_seen` while refreshing everything else, so the "container has been running since X" date in the upcoming detail view is accurate across heartbeats.
+
+  Containers now flow end-to-end: agent discovers → server stores. Inventory UI (step 5) and container-only test evaluators (step 6) are next.
+
 - **Container support — agent discovery (step 2/8).** The Linux agent now detects locally-installed Docker / Podman runtimes and enumerates their containers on every heartbeat. For each container, it captures the runtime ID, name, image (with digest), status, IP, plus the metadata that will drive future container-only tests: privileged flag, run-as user, network mode, exposed ports, mounts, added capabilities, read-only-fs flag, restart policy, and presence of a `HEALTHCHECK`. Metadata is collected via one `<runtime> inspect` shell-out per container, parsed from the existing in-memory JSON. The new `containers` field on the heartbeat payload is omitted entirely (Option::None) when no runtime is installed, so old servers see no new field at all — schema groundwork from step 1 keeps existing servers receiving these heartbeats without complaint. Soft-fails on missing permission (rootless / no docker group). Non-Linux platforms return an empty list with zero shell-outs; LXC / LXD are intentionally not enumerated — install the agent inside the OS container per the design doc.
 
 - **Container support — schema groundwork (step 1/8).** Lays the database foundation for the upcoming container inventory and container-only tests; nothing reads or writes these yet, but a fresh install and any existing tenant on schema v25 will land at v26 with the new shape in place. Specifically:

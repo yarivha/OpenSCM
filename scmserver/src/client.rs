@@ -445,6 +445,21 @@ pub async fn send(
                         .into_response();
                 }
 
+                // Container inventory — only act when the agent sent the field
+                // (None = old agent / non-Linux, leave existing rows alone).
+                // Some([...]) including the empty case ingests as design doc §3.
+                if let Some(ref containers) = payload.containers {
+                    if let Err(e) = ingest_containers(&mut tx, tenant_id, id, containers).await {
+                        error!("Failed to ingest containers for agent {}: {}", id, e);
+                        tx.rollback().await.ok();
+                        return (
+                            StatusCode::INTERNAL_SERVER_ERROR,
+                            Json(serde_json::json!({"error": "Database error"})),
+                        )
+                            .into_response();
+                    }
+                }
+
                 // Check whether an admin has queued an UPGRADE for this system — that
                 // shows up as a row in the commands table with command_type='UPGRADE'.
                 // The matching agent_packages row gives us the URL / SHA256 / version
@@ -859,4 +874,97 @@ pub async fn receive_result(
                 .into_response()
         }
     }
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: ingest_containers
+// Apply a heartbeat's container list to the `containers` table for this host.
+// Semantics matching the design doc (§3, "Lifecycle"):
+//
+//   - `payload.containers == None`  → do nothing (old agent / non-Linux);
+//     existing rows continue to age out via the retention prune.
+//
+//   - `payload.containers == Some([])` → agent explicitly reports no
+//     containers; delete every row for this host so the UI matches reality
+//     immediately.
+//
+//   - `payload.containers == Some([...])` → upsert each entry keyed on
+//     `(host_system_id, runtime, name)`, preserving `first_seen`; delete any
+//     row for this host whose `(runtime, name)` is no longer in the list.
+//
+// Runs inside the heartbeat transaction so a transient DB error rolls back
+// the systems-table UPDATE too — the agent will retry the whole payload
+// on the next tick.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn ingest_containers(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tenant_id: &str,
+    host_system_id: i64,
+    incoming: &[crate::models::IncomingContainer],
+) -> Result<(), sqlx::Error> {
+    // Single stable timestamp for this scan boundary so the DELETE-stragglers
+    // step is monotonic (any row we just touched has last_seen >= now_str).
+    let now_str = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
+
+    for c in incoming {
+        sqlx::query(
+            "INSERT INTO containers
+               (tenant_id, host_system_id, runtime, runtime_id, name, image, image_digest,
+                status, ip, is_privileged, run_user, network_mode, exposed_ports, mounts,
+                capabilities_add, read_only_fs, restart_policy, health_check,
+                first_seen, last_seen)
+             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+             ON CONFLICT(host_system_id, runtime, name) DO UPDATE SET
+                runtime_id       = excluded.runtime_id,
+                image            = excluded.image,
+                image_digest     = excluded.image_digest,
+                status           = excluded.status,
+                ip               = excluded.ip,
+                is_privileged    = excluded.is_privileged,
+                run_user         = excluded.run_user,
+                network_mode     = excluded.network_mode,
+                exposed_ports    = excluded.exposed_ports,
+                mounts           = excluded.mounts,
+                capabilities_add = excluded.capabilities_add,
+                read_only_fs     = excluded.read_only_fs,
+                restart_policy   = excluded.restart_policy,
+                health_check     = excluded.health_check,
+                last_seen        = excluded.last_seen",
+        )
+        .bind(tenant_id)
+        .bind(host_system_id)
+        .bind(&c.runtime)
+        .bind(&c.runtime_id)
+        .bind(&c.name)
+        .bind(&c.image)
+        .bind(&c.image_digest)
+        .bind(&c.status)
+        .bind(&c.ip)
+        .bind(c.is_privileged.map(|b| if b { 1i64 } else { 0 }))
+        .bind(&c.run_user)
+        .bind(&c.network_mode)
+        .bind(&c.exposed_ports)
+        .bind(&c.mounts)
+        .bind(&c.capabilities_add)
+        .bind(c.read_only_fs.map(|b| if b { 1i64 } else { 0 }))
+        .bind(&c.restart_policy)
+        .bind(c.health_check.map(|b| if b { 1i64 } else { 0 }))
+        .bind(&now_str)
+        .bind(&now_str)
+        .execute(&mut **tx)
+        .await?;
+    }
+
+    // Delete stragglers — rows for this host that the agent didn't report this
+    // tick. Either the container was removed since the last heartbeat, or
+    // (when `incoming` is empty) the runtime is gone entirely. The retention
+    // prune is for stale rows from hosts that stop checking in altogether.
+    sqlx::query("DELETE FROM containers WHERE host_system_id = ? AND last_seen < ?")
+        .bind(host_system_id)
+        .bind(&now_str)
+        .execute(&mut **tx)
+        .await?;
+
+    Ok(())
 }
