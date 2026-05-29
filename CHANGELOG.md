@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Container support — canned starter policy (step 7/8).** New `cis-container-config-l1.json` lands in the OpenSCM-store under category "Containers": five tests exercising the full IMAGE + NETWORK surface (tag pinning, explicit registry source, host-network isolation, network-mode sanity, test/dev image-name drift). All five run server-side from cached inventory — no agent CMD path. Existing tenants get the policy on their next `/store` sync; the store's `index.json` ticks to v4. Real-world exercise of the Step 6 evaluator end-to-end.
+
 - **Container support — server-side evaluator (step 6/8).** Container-only test elements (`IMAGE`, `NETWORK`) are now actually runnable. When an admin clicks **Run Policy** the dispatcher splits the policy's tests two ways:
   - **Host tests** queue into the `commands` table for agent dispatch (existing path).
   - **Container tests** are evaluated server-side immediately against the cached container inventory — one result row per `(system, test, container)`. No agent round-trip; results appear the moment the policy run is triggered.
