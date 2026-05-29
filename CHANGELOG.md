@@ -7,6 +7,16 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Container support — server-side evaluator (step 6/8).** Container-only test elements (`IMAGE`, `NETWORK`) are now actually runnable. When an admin clicks **Run Policy** the dispatcher splits the policy's tests two ways:
+  - **Host tests** queue into the `commands` table for agent dispatch (existing path).
+  - **Container tests** are evaluated server-side immediately against the cached container inventory — one result row per `(system, test, container)`. No agent round-trip; results appear the moment the policy run is triggered.
+  - Routing is **data-driven** via a new `elements.evaluator` column (`'host'|'container'`) instead of hardcoded element-name lists. Adding a new container-only element in 0.5.x becomes a seed-row change in `elements` plus a handler in `container_eval.rs` — zero edits to the policy-run SQL.
+  - New `scmserver/src/container_eval.rs` module: `PreparedCondition` pre-lowercases needles and pre-compiles regexes once per condition (not once per container × condition); `evaluate()` reads only the column relevant to the (element, selement) pair; `combine_results()` mirrors the agent-side filter semantics.
+  - **Schema bump in v26 migration**: `elements` gains the `evaluator` column with default `'host'` and backfilled to `'container'` for IMAGE / NETWORK. The `results` table is rebuilt with widened primary key `(tenant_id, system_id, test_id, container_id)` so per-container results coexist with host results — previously the host PK would have collapsed every container's result into a single overwrite. `container_id` is `NOT NULL DEFAULT 0` (NULL would break PK uniqueness under SQLite's NULL-not-equal-anything rule). Both UPSERTs (heartbeat result-write in `client.rs`, container-eval result-write in `policies.rs`) updated to bind / target the full 4-column key.
+  - Implementation hoists every DB read out of the hot loop: one query for the test list, one for all conditions across those tests, one for all containers across in-scope hosts. Result writes batch into a single transaction.
+
+  Out of scope for v1: mixed host+container tests (currently silently excluded — both subqueries require one-or-the-other), per-test `target_type` (will land alongside the canned CIS Docker policy in step 7), the other 6 metadata-only elements from the design doc (`PRIVILEGED`, `RUN_USER`, `MOUNT`, `EXPOSED_PORT`, `READ_ONLY_FS`, `HEALTH_CHECK`).
+
 - **Container support — Systems-list inventory + detail modal (step 5/8).** The first user-visible payoff of the container work:
   - **Expand chevron** — every system row gains a left-side `▶` cell when the host has any containers; click to reveal a DataTables child row containing a nested table of that host's containers (runtime icon, name, image, IP, status).
   - **Detail modal** — clicking any container row opens a modal showing the full inventory metadata: runtime, image + digest, IP, run-user, network mode, privileged / read-only / health-check flags, restart policy, exposed ports, mount list, added capabilities, first/last seen timestamps. Mounts and ports render from the JSON cached at ingest — no extra round-trip.
@@ -30,7 +40,7 @@ All notable changes to OpenSCM are documented here.
 
 - **Container support — schema groundwork (step 1/8).** Lays the database foundation for the upcoming container inventory and container-only tests; nothing reads or writes these yet, but a fresh install and any existing tenant on schema v25 will land at v26 with the new shape in place. Specifically:
   - New `containers` table — per-host inventory keyed by `(host_system_id, runtime, name)`. Stores runtime identifier (docker / podman / kubernetes), image + digest, status, IP, plus cached metadata fields (privileged, run_user, network_mode, exposed_ports as JSON, mounts as JSON, capabilities, read-only-fs, restart_policy, health_check) for future container-only element evaluation. `first_seen` / `last_seen` drive retention.
-  - New `results.container_id` nullable column — NULL keeps existing host-level result semantics; future per-container results will set it.
+  - New `results.container_id` column and widened primary key `(tenant_id, system_id, test_id, container_id)` so per-container results can coexist with host results. `container_id` is `NOT NULL DEFAULT 0` — host rows bind 0 (existing semantics preserved); per-container rows bind the real container id.
   - Seed the first two container-only **elements** in the lookup table: `IMAGE` and `NETWORK`. Other container elements from the design doc (`PRIVILEGED`, `RUN_USER`, `MOUNT`, `EXPOSED_PORT`, `READ_ONLY_FS`, `HEALTH_CHECK`) are deferred to a later 0.5.x increment.
   - Seed five new **sub-elements**: `NAME`, `TAG`, `DIGEST`, `SOURCE` (for IMAGE — the source registry host), and `MODE` (for NETWORK). Avoided `REGISTRY` to prevent a name clash with the existing Windows-Registry `REGISTRY` element.
   - New per-tenant setting `container_retention_days` (default `7`, `0` = forever) — will drive a future daily-prune of stale container rows alongside the existing audit/report/notification prunes.

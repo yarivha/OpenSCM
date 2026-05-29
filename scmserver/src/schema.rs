@@ -329,8 +329,8 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             excluded     INTEGER NOT NULL DEFAULT 0,
             excluded_by  TEXT,
             excluded_at  DATETIME,
-            container_id INTEGER,
-            PRIMARY KEY (tenant_id, system_id, test_id),
+            container_id INTEGER NOT NULL DEFAULT 0,
+            PRIMARY KEY (tenant_id, system_id, test_id, container_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
             FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
@@ -488,11 +488,20 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Elements Table
+    //
+    // `evaluator` classifies where the element is evaluated:
+    //   'host'      — agent-side, dispatched via commands table (default)
+    //   'container' — server-side, against the cached `containers` inventory
+    // The policy-run dispatch routes tests on this column rather than on
+    // hardcoded element-name lists, so adding a new element is a data-only
+    // change (seed + condition handler) with no SQL/code editing in the
+    // routing layer.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS elements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR(191) NOT NULL UNIQUE,
-            description TEXT
+            description TEXT,
+            evaluator TEXT NOT NULL DEFAULT 'host'
         )",
     )
     .execute(pool)
@@ -663,17 +672,33 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Elements
-    for name in &[
-        "AGENT", "OS", "HOSTNAME", "IP", "DOMAIN", "ARCHITECTURE", "USER", "GROUP",
-        "FILE", "DIRECTORY", "PROCESS", "PACKAGE", "REGISTRY", "PORT", "CMD", "POWERSHELL",
-        "SERVICE", "IMAGE", "NETWORK",
+    // (name, evaluator) — 'host' is the default; container-evaluated elements
+    // are tagged 'container' so the policy-run dispatch routes them server-side.
+    for (name, evaluator) in &[
+        ("AGENT",        "host"),
+        ("OS",           "host"),
+        ("HOSTNAME",     "host"),
+        ("IP",           "host"),
+        ("DOMAIN",       "host"),
+        ("ARCHITECTURE", "host"),
+        ("USER",         "host"),
+        ("GROUP",        "host"),
+        ("FILE",         "host"),
+        ("DIRECTORY",    "host"),
+        ("PROCESS",      "host"),
+        ("PACKAGE",      "host"),
+        ("REGISTRY",     "host"),
+        ("PORT",         "host"),
+        ("CMD",          "host"),
+        ("POWERSHELL",   "host"),
+        ("SERVICE",      "host"),
+        ("IMAGE",        "container"),
+        ("NETWORK",      "container"),
     ] {
-        sqlx::query(
-            "INSERT OR IGNORE INTO elements (name) VALUES (?)"
-        )
-        .bind(name)
-        .execute(pool)
-        .await?;
+        sqlx::query("INSERT OR IGNORE INTO elements (name, evaluator) VALUES (?, ?)")
+            .bind(name).bind(evaluator)
+            .execute(pool)
+            .await?;
     }
 
     // Selements
@@ -1791,19 +1816,73 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query("CREATE INDEX IF NOT EXISTS idx_containers_image ON containers(image)")
             .execute(pool).await?;
 
+        // Rebuild `results` with a widened primary key that includes
+        // `container_id` so per-container results can coexist with host
+        // results. SQLite can't ALTER PRIMARY KEY in place, so we copy
+        // into a fresh table and rename. `container_id` defaults to 0 for
+        // host results (NULL would break the PK uniqueness).
         if !column_exists(pool, "results", "container_id").await {
+            // Brand-new column path — used when the v25→v26 migration runs
+            // for the first time. ADD COLUMN first so the SELECT below works,
+            // then rebuild the table to widen the PK.
             sqlx::query("ALTER TABLE results ADD COLUMN container_id INTEGER")
                 .execute(pool)
                 .await?;
         }
+        // Always rebuild the table — covers both the fresh-column case above
+        // and any earlier-tester case where the column already exists but is
+        // still nullable / not part of the PK.
+        sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS results_new (
+                tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
+                system_id    INTEGER,
+                test_id      INTEGER,
+                result       TEXT,
+                last_updated TEXT,
+                excluded     INTEGER NOT NULL DEFAULT 0,
+                excluded_by  TEXT,
+                excluded_at  DATETIME,
+                container_id INTEGER NOT NULL DEFAULT 0,
+                PRIMARY KEY (tenant_id, system_id, test_id, container_id),
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+                FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
+                FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
+            )"
+        ).execute(pool).await?;
+        sqlx::query(
+            "INSERT INTO results_new
+              (tenant_id, system_id, test_id, result, last_updated,
+               excluded, excluded_by, excluded_at, container_id)
+             SELECT tenant_id, system_id, test_id, result, last_updated,
+                    excluded, excluded_by, excluded_at,
+                    COALESCE(container_id, 0)
+             FROM results"
+        ).execute(pool).await?;
+        sqlx::query("DROP TABLE results").execute(pool).await?;
+        sqlx::query("ALTER TABLE results_new RENAME TO results").execute(pool).await?;
+        sqlx::query("PRAGMA foreign_keys = ON").execute(pool).await?;
 
-        // Container-only elements (deferred elements in 0.5.x: PRIVILEGED,
-        // RUN_USER, MOUNT, EXPOSED_PORT, READ_ONLY_FS, HEALTH_CHECK).
+        // Add `evaluator` column to `elements` and backfill. Routing in
+        // execute_policy_run_logic uses this column instead of hardcoded
+        // element-name lists, so adding new container elements becomes a
+        // seed-only change.
+        if !column_exists(pool, "elements", "evaluator").await {
+            sqlx::query("ALTER TABLE elements ADD COLUMN evaluator TEXT NOT NULL DEFAULT 'host'")
+                .execute(pool).await?;
+        }
+
+        // Container-only elements (deferred in 0.5.x: PRIVILEGED, RUN_USER,
+        // MOUNT, EXPOSED_PORT, READ_ONLY_FS, HEALTH_CHECK). Both rows tagged
+        // evaluator='container' so the dispatcher routes them server-side.
         for name in &["IMAGE", "NETWORK"] {
-            sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
-                .bind(name)
-                .execute(pool)
-                .await?;
+            sqlx::query(
+                "INSERT INTO elements (name, evaluator) VALUES (?, 'container')
+                 ON CONFLICT(name) DO UPDATE SET evaluator='container'"
+            )
+            .bind(name)
+            .execute(pool)
+            .await?;
         }
 
         // Sub-elements: NAME/TAG/DIGEST/REGISTRY for IMAGE; MODE for NETWORK.

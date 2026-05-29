@@ -27,6 +27,7 @@ pub mod scheduler;
 pub mod install;
 pub mod email;
 pub mod directories;
+pub mod container_eval;
 
 // 2. Imports needed for the public API
 use std::{sync::{Arc, atomic::{AtomicBool, Ordering}, OnceLock}, path::PathBuf, error::Error};
