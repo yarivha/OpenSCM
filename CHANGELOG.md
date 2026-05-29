@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Container groundwork — rename selement `REGISTRY` → `SOURCE`.** Step 1 seeded a `REGISTRY` selement for IMAGE-element tests (`IMAGE REGISTRY equals registry.corp.example.com`), but the name collided with the existing `REGISTRY` *element* (Windows Registry) and confused the test-builder dropdowns. New name `SOURCE` is unambiguous in IMAGE context (the image's source registry host). New v26→v27 migration drops the duplicate selement, inserts the renamed one, and migrates any `(IMAGE, REGISTRY)` test conditions an early adopter might have authored — there shouldn't be any (the IMAGE evaluator hasn't shipped yet), but cheap insurance. The Windows-Registry `REGISTRY` element is untouched.
+
 ### Added
 - **Container support — Systems-list inventory + detail modal (step 5/8).** The first user-visible payoff of the container work:
   - **Expand chevron** — every system row gains a left-side `▶` cell when the host has any containers; click to reveal a DataTables child row containing a nested table of that host's containers (runtime icon, name, image, IP, status).
