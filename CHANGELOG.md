@@ -6,9 +6,6 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
-### Fixed
-- **Container groundwork — rename selement `REGISTRY` → `SOURCE`.** Step 1 seeded a `REGISTRY` selement for IMAGE-element tests (`IMAGE REGISTRY equals registry.corp.example.com`), but the name collided with the existing `REGISTRY` *element* (Windows Registry) and confused the test-builder dropdowns. New name `SOURCE` is unambiguous in IMAGE context (the image's source registry host). New v26→v27 migration drops the duplicate selement, inserts the renamed one, and migrates any `(IMAGE, REGISTRY)` test conditions an early adopter might have authored — there shouldn't be any (the IMAGE evaluator hasn't shipped yet), but cheap insurance. The Windows-Registry `REGISTRY` element is untouched.
-
 ### Added
 - **Container support — Systems-list inventory + detail modal (step 5/8).** The first user-visible payoff of the container work:
   - **Expand chevron** — every system row gains a left-side `▶` cell when the host has any containers; click to reveal a DataTables child row containing a nested table of that host's containers (runtime icon, name, image, IP, status).
@@ -35,7 +32,7 @@ All notable changes to OpenSCM are documented here.
   - New `containers` table — per-host inventory keyed by `(host_system_id, runtime, name)`. Stores runtime identifier (docker / podman / kubernetes), image + digest, status, IP, plus cached metadata fields (privileged, run_user, network_mode, exposed_ports as JSON, mounts as JSON, capabilities, read-only-fs, restart_policy, health_check) for future container-only element evaluation. `first_seen` / `last_seen` drive retention.
   - New `results.container_id` nullable column — NULL keeps existing host-level result semantics; future per-container results will set it.
   - Seed the first two container-only **elements** in the lookup table: `IMAGE` and `NETWORK`. Other container elements from the design doc (`PRIVILEGED`, `RUN_USER`, `MOUNT`, `EXPOSED_PORT`, `READ_ONLY_FS`, `HEALTH_CHECK`) are deferred to a later 0.5.x increment.
-  - Seed five new **sub-elements**: `NAME`, `TAG`, `DIGEST`, `REGISTRY` (for IMAGE), and `MODE` (for NETWORK).
+  - Seed five new **sub-elements**: `NAME`, `TAG`, `DIGEST`, `SOURCE` (for IMAGE — the source registry host), and `MODE` (for NETWORK). Avoided `REGISTRY` to prevent a name clash with the existing Windows-Registry `REGISTRY` element.
   - New per-tenant setting `container_retention_days` (default `7`, `0` = forever) — will drive a future daily-prune of stale container rows alongside the existing audit/report/notification prunes.
   - Schema migration v25 → v26 with `column_exists` guard for the `results.container_id` ALTER; fresh-install path mirrors the same table creation and seed data.
 

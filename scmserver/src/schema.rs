@@ -1830,42 +1830,6 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v25 → v26 complete.");
     }
 
-    // v26 → v27: rename the IMAGE-context selement REGISTRY → SOURCE.
-    //   The original v25→v26 seeded a `REGISTRY` selement to support
-    //   `IMAGE REGISTRY equals registry.corp.example.com`, but that name
-    //   collided with the existing `REGISTRY` element (Windows registry).
-    //   Confusing in the test-builder dropdowns. Renamed to `SOURCE`,
-    //   which is unambiguous in IMAGE context (the image's source
-    //   registry host).
-    if version < 27 {
-        info!("Running schema migration v26 → v27 (rename selement REGISTRY → SOURCE)...");
-
-        // Drop the duplicate selement (the element table's REGISTRY row stays —
-        // that's the Windows Registry element and unrelated).
-        sqlx::query("DELETE FROM selements WHERE name = 'REGISTRY'")
-            .execute(pool)
-            .await?;
-        // Add the renamed selement.
-        sqlx::query("INSERT OR IGNORE INTO selements (name) VALUES ('SOURCE')")
-            .execute(pool)
-            .await?;
-        // Migrate any test conditions an early adopter might have authored
-        // against (IMAGE, REGISTRY) — there shouldn't be any (Step 6 evaluator
-        // hasn't shipped yet), but the cleanup is cheap insurance.
-        sqlx::query(
-            "UPDATE test_conditions SET selement = 'SOURCE'
-             WHERE element = 'IMAGE' AND selement = 'REGISTRY'",
-        )
-        .execute(pool)
-        .await
-        .ok();
-
-        sqlx::query("UPDATE schema_info SET version = 27")
-            .execute(pool)
-            .await?;
-        info!("Schema migration v26 → v27 complete.");
-    }
-
     Ok(())
 }
 
