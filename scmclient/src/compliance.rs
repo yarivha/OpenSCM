@@ -799,6 +799,27 @@ pub fn is_per_container_element(name: &str) -> bool {
     matches!(name.trim().to_uppercase().as_str(), "IMAGE" | "NETWORK")
 }
 
+/// Combine per-condition EvalResults into a test-level verdict string
+/// ("PASS" | "FAIL" | "NA") using the test's `filter` field. Same
+/// semantics for host tests (one call per test) and per-container tests
+/// (one call per container). Shared between agent.rs and runner.rs so
+/// both code paths apply identical filter logic.
+pub fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
+    if results.is_empty() { return "NA".to_string(); }
+    match filter {
+        "any" => {
+            if results.iter().any(|r| *r == EvalResult::Pass) { "PASS".to_string() }
+            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
+            else { "FAIL".to_string() }
+        }
+        _ => {
+            if results.iter().any(|r| *r == EvalResult::Fail) { "FAIL".to_string() }
+            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
+            else { "PASS".to_string() }
+        }
+    }
+}
+
 pub fn evaluate(
     element: &str,
     input: &str,

@@ -210,7 +210,7 @@ fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> Vec<Test
             TestOutcome {
                 external_id: t.external_id.clone(),
                 name: t.name.clone(),
-                result: combine_verdict(&results, t.filter.as_deref().unwrap_or("all")),
+                result: crate::compliance::combine_verdict(&results, t.filter.as_deref().unwrap_or("all")),
                 severity: t.severity.clone(),
                 container: Some(container.name.clone()),
             }
@@ -225,7 +225,7 @@ fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> Vec<Test
         cmd_enabled, ps_enabled,
         None,
     )).collect();
-    vec![host_outcome(t, combine_verdict(&results, t.filter.as_deref().unwrap_or("all")))]
+    vec![host_outcome(t, crate::compliance::combine_verdict(&results, t.filter.as_deref().unwrap_or("all")))]
 }
 
 fn host_outcome(t: &LocalTest, result: String) -> TestOutcome {
@@ -235,22 +235,6 @@ fn host_outcome(t: &LocalTest, result: String) -> TestOutcome {
         result,
         severity: t.severity.clone(),
         container: None,
-    }
-}
-
-fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
-    if results.is_empty() { return "NA".into(); }
-    match filter {
-        "any" => {
-            if results.iter().any(|r| *r == EvalResult::Pass) { "PASS".into() }
-            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".into() }
-            else { "FAIL".into() }
-        }
-        _ => {
-            if results.iter().any(|r| *r == EvalResult::Fail) { "FAIL".into() }
-            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".into() }
-            else { "PASS".into() }
-        }
     }
 }
 

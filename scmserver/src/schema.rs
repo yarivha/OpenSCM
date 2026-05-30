@@ -1749,8 +1749,9 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
     // v25 → v26: container support groundwork.
     //   - new `containers` table (per-host inventory of running app containers)
-    //   - `results.container_id` column (NULL = host-level; set = per-container)
-    //   - seed IMAGE + NETWORK elements and their sub-elements
+    //   - widen `results` primary key with `container_id` (0 for host results,
+    //     resolved containers.id for per-container results)
+    //   - seed CONTAINER, IMAGE, NETWORK elements + their sub-elements
     //   - new per-tenant `container_retention_days` setting (default 7)
     //
     // No code reads or writes these yet — this is structural groundwork the

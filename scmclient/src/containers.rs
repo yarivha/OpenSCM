@@ -2,9 +2,12 @@
 // containers.rs — host-side container discovery (Linux only)
 //
 // Detects locally-installed app-container runtimes (Docker, Podman in 0.5.0)
-// and enumerates their containers with enough metadata for the server-side
-// container-only test elements (IMAGE, NETWORK, etc.). Designed to be cheap
-// enough to run on every heartbeat tick:
+// and enumerates their containers with enough metadata to:
+//   1. Ship in the heartbeat payload so the server can render the inventory
+//      UI (Systems-list expand chevron + container detail modal).
+//   2. Be passed back to compliance::evaluate() when running per-container
+//      tests (IMAGE / NETWORK), one evaluate() call per container.
+// Designed to be cheap enough to run on every heartbeat tick:
 //
 //   - Runtime detection is a single `which`-style check
 //   - `ps` is one shell-out per runtime

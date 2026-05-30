@@ -259,7 +259,7 @@ async fn process_compliance_tests(
                         cmd_enabled, ps_enabled,
                         Some(container),
                     )).collect();
-                    let verdict = combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
+                    let verdict = crate::compliance::combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
                     debug!("Test ID {} container '{}' result: {}", test_id, container.name, verdict);
                     send_result(client_id_int, organization, test_id, &verdict,
                                 Some(container.runtime_id.clone()),
@@ -275,28 +275,11 @@ async fn process_compliance_tests(
                 cmd_enabled, ps_enabled,
                 None,
             )).collect();
-            let verdict = combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
+            let verdict = crate::compliance::combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
             debug!("Test ID {} result: {}", test_id, verdict);
             send_result(client_id_int, organization, test_id, &verdict, None, signing_key, http_client, result_url).await;
         }
         debug!("Completed evaluation of test ID {}", test_id);
-    }
-}
-
-// Shared filter-combination logic for both host and per-container test paths.
-fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
-    if results.is_empty() { return "NA".to_string(); }
-    match filter {
-        "any" => {
-            if results.iter().any(|r| *r == EvalResult::Pass) { "PASS".to_string() }
-            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
-            else { "FAIL".to_string() }
-        }
-        _ => {
-            if results.iter().any(|r| *r == EvalResult::Fail) { "FAIL".to_string() }
-            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
-            else { "PASS".to_string() }
-        }
     }
 }
 
