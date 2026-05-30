@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Schema v26→v27 catch-up migration.** Deployments that ran the early in-place edits of the v26 block during 0.5.0 development ended up at v26 with an outdated shape — missing the post-IMAGE/NETWORK container elements (`CONTAINER`, `PRIVILEGED`, `RUN_USER`, `MOUNT`, `EXPOSED_PORT`, `READ_ONLY_FS`, `HEALTH_CHECK`) and / or with the old 3-column `results` primary key. Symptoms: missing entries in the test-builder Element dropdown; `error returned from database: (code: 1) ON CONFLICT clause does not match any PRIMARY KEY or UNIQUE constraint` on every result POST. New v27 migration is idempotent: re-seeds elements via `INSERT OR IGNORE`, then introspects `sqlite_master` to see whether the `results` PK already includes `container_id` and only rebuilds the table when it doesn't. Fresh installs that landed cleanly at v26 traverse v27 as a no-op.
+
 ### Added
 - **Canned container policy — applicability gate via `CONTAINER EXISTS`** (`cis-container-config-l1` → **1.1.1**). All 11 tests in the starter policy now declare `CONTAINER EXISTS` as their applicability — on a host without Docker / Podman the tests short-circuit to NA via the standard applicability path, making "not applicable here" explicit in the policy JSON rather than an implicit fallback. Same end-user result as before; cleaner audit trail. Doubles as a worked example of the `CONTAINER` element being used the way it's intended (as an applicability gate, not as a standalone test).
 

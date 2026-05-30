@@ -1890,6 +1890,84 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v25 → v26 complete.");
     }
 
+    // v26 → v27: catch-up migration for deployments that landed at v26
+    // during early 0.5.0 dev before the in-place edits to the v26 block
+    // settled. Idempotent on fresh installs — the seeds are INSERT OR
+    // IGNORE and the results-table rebuild is gated on "PK does not
+    // include container_id". A clean v26 install passes both checks
+    // without touching anything; a stale v26 install gains whatever
+    // was added to the v26 block after it ran the first time.
+    if version < 27 {
+        info!("Running schema migration v26 → v27 (catch-up: container elements + results PK)...");
+
+        // 1. Re-seed every container-related element. Stale v26 installs
+        //    may be missing CONTAINER + the six metadata elements added
+        //    after IMAGE / NETWORK shipped.
+        for name in &[
+            "CONTAINER", "IMAGE", "NETWORK", "PRIVILEGED", "RUN_USER",
+            "MOUNT", "EXPOSED_PORT", "READ_ONLY_FS", "HEALTH_CHECK",
+        ] {
+            sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
+                .bind(name).execute(pool).await?;
+        }
+
+        // 2. Widen the `results` PK to include container_id if not already.
+        //    Read sqlite_master to see whether the current PK already has
+        //    container_id — if so, skip. Otherwise rebuild the table.
+        let needs_rebuild = sqlx::query_scalar::<_, Option<String>>(
+            "SELECT sql FROM sqlite_master WHERE type='table' AND name='results'"
+        )
+        .fetch_optional(pool).await
+        .ok().flatten().flatten()
+        .map(|sql| !sql.to_lowercase().contains("primary key (tenant_id, system_id, test_id, container_id)"))
+        .unwrap_or(false);
+
+        if needs_rebuild {
+            info!("Widening results PK to include container_id");
+            if !column_exists(pool, "results", "container_id").await {
+                sqlx::query("ALTER TABLE results ADD COLUMN container_id INTEGER")
+                    .execute(pool).await?;
+            }
+            sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
+            // Defensive — clear any partial state from an interrupted prior run.
+            sqlx::query("DROP TABLE IF EXISTS results_new").execute(pool).await?;
+            sqlx::query(
+                "CREATE TABLE results_new (
+                    tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
+                    system_id    INTEGER,
+                    test_id      INTEGER,
+                    result       TEXT,
+                    last_updated TEXT,
+                    excluded     INTEGER NOT NULL DEFAULT 0,
+                    excluded_by  TEXT,
+                    excluded_at  DATETIME,
+                    container_id INTEGER NOT NULL DEFAULT 0,
+                    PRIMARY KEY (tenant_id, system_id, test_id, container_id),
+                    FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+                    FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
+                    FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
+                )"
+            ).execute(pool).await?;
+            sqlx::query(
+                "INSERT INTO results_new
+                  (tenant_id, system_id, test_id, result, last_updated,
+                   excluded, excluded_by, excluded_at, container_id)
+                 SELECT tenant_id, system_id, test_id, result, last_updated,
+                        excluded, excluded_by, excluded_at,
+                        COALESCE(container_id, 0)
+                 FROM results"
+            ).execute(pool).await?;
+            sqlx::query("DROP TABLE results").execute(pool).await?;
+            sqlx::query("ALTER TABLE results_new RENAME TO results").execute(pool).await?;
+            sqlx::query("PRAGMA foreign_keys = ON").execute(pool).await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 27")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v26 → v27 complete.");
+    }
+
     Ok(())
 }
 
