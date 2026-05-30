@@ -3007,7 +3007,6 @@ dependencies = [
  "lettre",
  "mime_guess",
  "rand",
- "regex",
  "reqwest",
  "semver 1.0.28",
  "serde",

@@ -101,6 +101,7 @@ async fn send_result(
     organization: &str,
     test_id: i64,
     result: &str,
+    container_runtime_id: Option<String>,
     signing_key: &SigningKey,
     http_client: &reqwest::Client,
     result_url: &str,
@@ -110,6 +111,7 @@ async fn send_result(
         organization: organization.to_string(),
         test_id,
         result: result.to_string(),
+        container_runtime_id,
     };
 
     let signature = match sign_payload(&payload, signing_key) {
@@ -186,6 +188,8 @@ async fn process_compliance_tests(
                     c.element, c.selement, c.condition.as_deref().unwrap_or(""), c.sinput);
             }
             if !app_conditions.is_empty() {
+                // Applicability is always host-level — applies to the system as a
+                // whole, not to individual containers. Evaluate with container=None.
                 let app_results: Vec<EvalResult> = app_conditions.iter()
                     .map(|c| evaluate(
                         &c.element,
@@ -195,6 +199,7 @@ async fn process_compliance_tests(
                         c.sinput.as_deref().unwrap_or(""),
                         cmd_enabled,
                         ps_enabled,
+                        None,
                     ))
                     .collect();
                 
@@ -214,7 +219,7 @@ async fn process_compliance_tests(
 
                 if !is_applicable {
                     debug!("Test ID {} is not applicable — sending NA.", test_id);
-                    send_result(client_id_int, organization, test_id, "NA", signing_key, http_client, result_url).await;
+                    send_result(client_id_int, organization, test_id, "NA", None, signing_key, http_client, result_url).await;
                     debug!("Completed evaluation of test ID {}", test_id);
                     continue;
                 }
@@ -224,53 +229,74 @@ async fn process_compliance_tests(
         // =====================================================
         // TEST EVALUATION
         // =====================================================
-        let mut results = Vec::new();
-        for c in &test.conditions {
-            if c.element.is_empty() || c.element == "None" {
-                continue;
+        // Drop conditions with empty element/selement up front so both
+        // dispatch paths see only the real ones.
+        let conds: Vec<&crate::models::TestCondition> = test.conditions.iter()
+            .filter(|c| !c.element.is_empty() && c.element != "None"
+                     && !c.selement.is_empty() && c.selement != "None")
+            .collect();
+
+        let is_per_container = conds.iter()
+            .any(|c| crate::compliance::is_per_container_element(&c.element));
+
+        if is_per_container {
+            // Enumerate containers ONCE and iterate. Each container produces
+            // a separate result row identified by its runtime_id (which the
+            // server resolves to containers.id at result-receive time).
+            let containers = crate::containers::enumerate();
+            if containers.is_empty() {
+                // No containers on this host → the per-container test has
+                // nothing to evaluate against → single NA result at host
+                // scope. Honest signal in reports.
+                debug!("Test ID {} is per-container but host has zero containers — sending NA.", test_id);
+                send_result(client_id_int, organization, test_id, "NA", None, signing_key, http_client, result_url).await;
+            } else {
+                for container in &containers {
+                    let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
+                        &c.element, &c.input, &c.selement,
+                        c.condition.as_deref().unwrap_or(""),
+                        c.sinput.as_deref().unwrap_or(""),
+                        cmd_enabled, ps_enabled,
+                        Some(container),
+                    )).collect();
+                    let verdict = combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
+                    debug!("Test ID {} container '{}' result: {}", test_id, container.name, verdict);
+                    send_result(client_id_int, organization, test_id, &verdict,
+                                Some(container.runtime_id.clone()),
+                                signing_key, http_client, result_url).await;
+                }
             }
-            if c.selement.is_empty() || c.selement == "None" {
-                continue;
-            }
-            results.push(evaluate(
-                &c.element,
-                &c.input,
-                &c.selement,
+        } else {
+            // Host-scope test — single result, no container context.
+            let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
+                &c.element, &c.input, &c.selement,
                 c.condition.as_deref().unwrap_or(""),
                 c.sinput.as_deref().unwrap_or(""),
-                cmd_enabled,
-                ps_enabled,
-            ));
+                cmd_enabled, ps_enabled,
+                None,
+            )).collect();
+            let verdict = combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
+            debug!("Test ID {} result: {}", test_id, verdict);
+            send_result(client_id_int, organization, test_id, &verdict, None, signing_key, http_client, result_url).await;
         }
-
-        let final_result = if results.is_empty() {
-            "NA".to_string()
-        } else {
-            match test.filter.as_deref().unwrap_or("all") {
-                "any" => {
-                    if results.iter().any(|r| *r == EvalResult::Pass) {
-                        "PASS".to_string()
-                    } else if results.iter().all(|r| *r == EvalResult::Na) {
-                        "NA".to_string()
-                    } else {
-                        "FAIL".to_string()
-                    }
-                }
-                _ => {
-                    if results.iter().any(|r| *r == EvalResult::Fail) {
-                        "FAIL".to_string()
-                    } else if results.iter().all(|r| *r == EvalResult::Na) {
-                        "NA".to_string()
-                    } else {
-                        "PASS".to_string()
-                    }
-                }
-            }
-        };
-
-        debug!("Test ID {} result: {}", test_id, final_result);
-        send_result(client_id_int, organization, test_id, &final_result, signing_key, http_client, result_url).await;
         debug!("Completed evaluation of test ID {}", test_id);
+    }
+}
+
+// Shared filter-combination logic for both host and per-container test paths.
+fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
+    if results.is_empty() { return "NA".to_string(); }
+    match filter {
+        "any" => {
+            if results.iter().any(|r| *r == EvalResult::Pass) { "PASS".to_string() }
+            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
+            else { "FAIL".to_string() }
+        }
+        _ => {
+            if results.iter().any(|r| *r == EvalResult::Fail) { "FAIL".to_string() }
+            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".to_string() }
+            else { "PASS".to_string() }
+        }
     }
 }
 

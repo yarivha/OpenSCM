@@ -821,26 +821,43 @@ pub async fn receive_result(
     );
 
     let now = chrono::Utc::now().format("%Y-%m-%dT%H:%M:%S").to_string();
+
+    // Resolve container scope. The agent ships `container_runtime_id` when
+    // the result is per-container; the server looks up the matching row in
+    // `containers` to get its surrogate id. If the lookup misses (rare —
+    // would require the container to have vanished between heartbeat ingest
+    // and the result POST), fall back to container_id=0 so the row is still
+    // recorded but at host scope.
+    let container_id: i64 = match payload.container_runtime_id.as_deref().filter(|s| !s.is_empty()) {
+        Some(rid) => sqlx::query_scalar::<_, i64>(
+            "SELECT id FROM containers
+             WHERE host_system_id = ? AND runtime_id = ? AND tenant_id = ?",
+        )
+        .bind(payload.client_id).bind(rid).bind(tenant_id)
+        .fetch_optional(&pool).await
+        .ok().flatten()
+        .unwrap_or(0),
+        None => 0,
+    };
+
     // IMPORTANT: the DO UPDATE clause lists ONLY `result` and `last_updated`.
     // Per-finding exclusions live in the same row (excluded / excluded_by /
     // excluded_at) and must NEVER be touched by a client heartbeat — that's
     // the whole guarantee that re-running a policy cannot clear an exclusion.
     // Do not change this to `INSERT OR REPLACE` (which would delete + re-insert
     // and silently wipe the exclusion flag).
-    // container_id is part of the results PK (schema v26) — host results
-    // explicitly bind 0 so the ON CONFLICT target matches the unique key
-    // SQLite uses. Per-container results live alongside under the same
-    // (tenant, system, test) trio but with non-zero container_id, written
-    // server-side by execute_policy_run_logic.
+    // container_id is part of the results PK (schema v26): 0 for host results,
+    // the resolved containers.id for per-container results.
     if let Err(e) = sqlx::query(
         "INSERT INTO results (tenant_id, system_id, test_id, container_id, result, last_updated)
-     VALUES (?, ?, ?, 0, ?, ?)
+     VALUES (?, ?, ?, ?, ?, ?)
      ON CONFLICT(tenant_id, system_id, test_id, container_id)
      DO UPDATE SET result = excluded.result, last_updated = excluded.last_updated"
     )
     .bind(tenant_id)
     .bind(payload.client_id)
     .bind(payload.test_id)
+    .bind(container_id)
     .bind(normalized_result)
     .bind(&now)
     .execute(&pool)

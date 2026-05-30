@@ -97,6 +97,10 @@ struct TestOutcome {
     name: String,
     result: String,
     severity: Option<String>,
+    /// Container name when this outcome is per-container (IMAGE / NETWORK
+    /// test fired against a specific container). None for host-level outcomes.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    container: Option<String>,
 }
 
 // ============================================================
@@ -134,7 +138,7 @@ pub fn run(opts: RunOptions) -> u8 {
     };
 
     let outcomes: Vec<TestOutcome> = policy.tests.iter()
-        .map(|t| evaluate_test(t, opts.cmd_enabled, opts.ps_enabled))
+        .flat_map(|t| evaluate_test(t, opts.cmd_enabled, opts.ps_enabled))
         .collect();
 
     let summary = summarize(&outcomes);
@@ -153,8 +157,10 @@ pub fn run(opts: RunOptions) -> u8 {
 // without the network / signing layer.
 // ============================================================
 
-fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> TestOutcome {
-    // Applicability check — if conditions exist, short-circuit to NA when not applicable.
+fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> Vec<TestOutcome> {
+    // Applicability check — host-level, container=None. If not applicable,
+    // the test produces a single NA outcome regardless of how many
+    // containers exist.
     if !t.applicability.is_empty() {
         let app_results: Vec<EvalResult> = t.applicability.iter()
             .map(|c| evaluate(
@@ -162,6 +168,7 @@ fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> TestOutc
                 c.condition.as_deref().unwrap_or(""),
                 c.sinput.as_deref().unwrap_or(""),
                 cmd_enabled, ps_enabled,
+                None,
             ))
             .collect();
 
@@ -174,49 +181,76 @@ fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> TestOutc
         };
 
         if !is_applicable {
-            return TestOutcome {
-                external_id: t.external_id.clone(),
-                name: t.name.clone(),
-                result: "NA".into(),
-                severity: t.severity.clone(),
-            };
+            return vec![host_outcome(t, "NA".into())];
         }
     }
 
-    // Main conditions
-    let results: Vec<EvalResult> = t.conditions.iter()
+    let conds: Vec<&LocalCondition> = t.conditions.iter()
         .filter(|c| !c.element.is_empty() && c.element != "None"
                  && !c.selement.is_empty() && c.selement != "None")
-        .map(|c| evaluate(
-            &c.element, &c.input, &c.selement,
-            c.condition.as_deref().unwrap_or(""),
-            c.sinput.as_deref().unwrap_or(""),
-            cmd_enabled, ps_enabled,
-        ))
         .collect();
 
-    let result = if results.is_empty() {
-        "NA".into()
-    } else {
-        match t.filter.as_deref().unwrap_or("all") {
-            "any" => {
-                if results.iter().any(|r| *r == EvalResult::Pass) { "PASS".into() }
-                else if results.iter().all(|r| *r == EvalResult::Na) { "NA".into() }
-                else { "FAIL".into() }
-            }
-            _ => {
-                if results.iter().any(|r| *r == EvalResult::Fail) { "FAIL".into() }
-                else if results.iter().all(|r| *r == EvalResult::Na) { "NA".into() }
-                else { "PASS".into() }
-            }
-        }
-    };
+    let is_per_container = conds.iter()
+        .any(|c| crate::compliance::is_per_container_element(&c.element));
 
+    if is_per_container {
+        // Mirror the agent path: enumerate locally, one outcome per container.
+        let containers = crate::containers::enumerate();
+        if containers.is_empty() {
+            return vec![host_outcome(t, "NA".into())];
+        }
+        return containers.iter().map(|container| {
+            let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
+                &c.element, &c.input, &c.selement,
+                c.condition.as_deref().unwrap_or(""),
+                c.sinput.as_deref().unwrap_or(""),
+                cmd_enabled, ps_enabled,
+                Some(container),
+            )).collect();
+            TestOutcome {
+                external_id: t.external_id.clone(),
+                name: t.name.clone(),
+                result: combine_verdict(&results, t.filter.as_deref().unwrap_or("all")),
+                severity: t.severity.clone(),
+                container: Some(container.name.clone()),
+            }
+        }).collect();
+    }
+
+    // Host-scope test — single outcome.
+    let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
+        &c.element, &c.input, &c.selement,
+        c.condition.as_deref().unwrap_or(""),
+        c.sinput.as_deref().unwrap_or(""),
+        cmd_enabled, ps_enabled,
+        None,
+    )).collect();
+    vec![host_outcome(t, combine_verdict(&results, t.filter.as_deref().unwrap_or("all")))]
+}
+
+fn host_outcome(t: &LocalTest, result: String) -> TestOutcome {
     TestOutcome {
         external_id: t.external_id.clone(),
         name: t.name.clone(),
         result,
         severity: t.severity.clone(),
+        container: None,
+    }
+}
+
+fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
+    if results.is_empty() { return "NA".into(); }
+    match filter {
+        "any" => {
+            if results.iter().any(|r| *r == EvalResult::Pass) { "PASS".into() }
+            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".into() }
+            else { "FAIL".into() }
+        }
+        _ => {
+            if results.iter().any(|r| *r == EvalResult::Fail) { "FAIL".into() }
+            else if results.iter().all(|r| *r == EvalResult::Na) { "NA".into() }
+            else { "PASS".into() }
+        }
     }
 }
 
@@ -246,7 +280,10 @@ fn print_text(meta: &LocalPolicyMeta, outcomes: &[TestOutcome], summary: &RunSum
             "FAIL" => "FAIL",
             _      => "NA  ",
         };
-        println!("  [{}] {}", marker, o.name);
+        match &o.container {
+            Some(c) => println!("  [{}] {}  [container:{}]", marker, o.name, c),
+            None    => println!("  [{}] {}", marker, o.name),
+        }
     }
 
     println!("\nSummary: {} PASS, {} FAIL, {} NA  →  {}% compliant",
@@ -269,6 +306,7 @@ fn print_json(meta: &LocalPolicyMeta, outcomes: &[TestOutcome], summary: &RunSum
             name: o.name.clone(),
             result: o.result.clone(),
             severity: o.severity.clone(),
+            container: o.container.clone(),
         }).collect(),
     };
     match serde_json::to_string_pretty(&report) {

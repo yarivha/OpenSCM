@@ -488,20 +488,11 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .await?;
 
     // Elements Table
-    //
-    // `evaluator` classifies where the element is evaluated:
-    //   'host'      — agent-side, dispatched via commands table (default)
-    //   'container' — server-side, against the cached `containers` inventory
-    // The policy-run dispatch routes tests on this column rather than on
-    // hardcoded element-name lists, so adding a new element is a data-only
-    // change (seed + condition handler) with no SQL/code editing in the
-    // routing layer.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS elements (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             name VARCHAR(191) NOT NULL UNIQUE,
-            description TEXT,
-            evaluator TEXT NOT NULL DEFAULT 'host'
+            description TEXT
         )",
     )
     .execute(pool)
@@ -671,33 +662,18 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
-    // Elements
-    // (name, evaluator) — 'host' is the default; container-evaluated elements
-    // are tagged 'container' so the policy-run dispatch routes them server-side.
-    for (name, evaluator) in &[
-        ("AGENT",        "host"),
-        ("OS",           "host"),
-        ("HOSTNAME",     "host"),
-        ("IP",           "host"),
-        ("DOMAIN",       "host"),
-        ("ARCHITECTURE", "host"),
-        ("USER",         "host"),
-        ("GROUP",        "host"),
-        ("FILE",         "host"),
-        ("DIRECTORY",    "host"),
-        ("PROCESS",      "host"),
-        ("PACKAGE",      "host"),
-        ("REGISTRY",     "host"),
-        ("PORT",         "host"),
-        ("CMD",          "host"),
-        ("POWERSHELL",   "host"),
-        ("SERVICE",      "host"),
-        ("CONTAINER",    "host"),
-        ("IMAGE",        "container"),
-        ("NETWORK",      "container"),
+    // Elements — every element is evaluated agent-side via the standard
+    // compliance dispatch (commands table → heartbeat → result POST).
+    // Container-related elements (CONTAINER, IMAGE, NETWORK) work like
+    // any other: the agent enumerates its local container inventory and
+    // evaluates against it.
+    for name in &[
+        "AGENT", "OS", "HOSTNAME", "IP", "DOMAIN", "ARCHITECTURE", "USER", "GROUP",
+        "FILE", "DIRECTORY", "PROCESS", "PACKAGE", "REGISTRY", "PORT", "CMD",
+        "POWERSHELL", "SERVICE", "CONTAINER", "IMAGE", "NETWORK",
     ] {
-        sqlx::query("INSERT OR IGNORE INTO elements (name, evaluator) VALUES (?, ?)")
-            .bind(name).bind(evaluator)
+        sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
+            .bind(name)
             .execute(pool)
             .await?;
     }
@@ -1864,35 +1840,19 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         sqlx::query("ALTER TABLE results_new RENAME TO results").execute(pool).await?;
         sqlx::query("PRAGMA foreign_keys = ON").execute(pool).await?;
 
-        // Add `evaluator` column to `elements` and backfill. Routing in
-        // execute_policy_run_logic uses this column instead of hardcoded
-        // element-name lists, so adding new container elements becomes a
-        // seed-only change.
-        if !column_exists(pool, "elements", "evaluator").await {
-            sqlx::query("ALTER TABLE elements ADD COLUMN evaluator TEXT NOT NULL DEFAULT 'host'")
-                .execute(pool).await?;
-        }
-
-        // Container-only elements (server-side, per-container):
-        //   IMAGE / NETWORK     → evaluator='container'
-        // Container runtime check (agent-side, host-level):
-        //   CONTAINER           → evaluator='host' — agent checks for docker/podman
-        //                          binaries via the standard host dispatch path
+        // Container-related elements — all agent-side, evaluated locally
+        // by the client against its discovered container inventory.
+        //   CONTAINER — host-level "is a runtime installed" (EXISTS/NOT EXISTS)
+        //   IMAGE / NETWORK — per-container checks; agent ships one result
+        //                     per container with the container's runtime_id
         // Deferred to 0.5.x: PRIVILEGED, RUN_USER, MOUNT, EXPOSED_PORT,
         // READ_ONLY_FS, HEALTH_CHECK.
-        for name in &["IMAGE", "NETWORK"] {
-            sqlx::query(
-                "INSERT INTO elements (name, evaluator) VALUES (?, 'container')
-                 ON CONFLICT(name) DO UPDATE SET evaluator='container'"
-            )
-            .bind(name)
-            .execute(pool)
-            .await?;
+        for name in &["IMAGE", "NETWORK", "CONTAINER"] {
+            sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
+                .bind(name)
+                .execute(pool)
+                .await?;
         }
-        sqlx::query(
-            "INSERT INTO elements (name, evaluator) VALUES ('CONTAINER', 'host')
-             ON CONFLICT(name) DO UPDATE SET evaluator='host'"
-        ).execute(pool).await?;
 
         // Sub-elements: NAME/TAG/DIGEST/REGISTRY for IMAGE; MODE for NETWORK.
         // EQUALS / NOT EQUALS / CONTAINS already exist as conditions.

@@ -384,6 +384,12 @@ pub struct ComplianceResult {
     pub organization: String,
     pub test_id: i64,
     pub result: String,
+    /// Per-container result identifier (e.g. Docker's container hash).
+    /// None = host-level result; container_id will resolve to 0.
+    /// Some = the result handler looks up containers.id via
+    /// (host_system_id, runtime_id) and binds it on the result row.
+    #[serde(default)]
+    pub container_runtime_id: Option<String>,
 }
 
 

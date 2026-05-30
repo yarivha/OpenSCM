@@ -160,6 +160,40 @@ fn systemd_unit_state(name: &str) -> Option<SystemdUnit> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: image_part — parse a Docker-style image reference into
+//   reference  := [SOURCE/]NAME[:TAG][@DIGEST]
+//   SOURCE     := registry host  (default "docker.io" when no '/' before name)
+//   NAME       := optional namespace + repo (e.g. "library/nginx")
+//   TAG        := tag after ':'  (default "latest" when absent)
+// First path component is SOURCE only if it contains '.' or ':' or is
+// "localhost" — matches standard Docker reference parsing rules.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(Clone, Copy)]
+enum ImagePart { Source, Name, Tag }
+
+fn image_part(reference: &str, part: ImagePart) -> String {
+    let no_digest = reference.split('@').next().unwrap_or(reference);
+
+    let (source, rest) = match no_digest.split_once('/') {
+        Some((head, rest)) if head.contains('.') || head.contains(':') || head == "localhost" => {
+            (head.to_string(), rest.to_string())
+        }
+        _ => ("docker.io".to_string(), no_digest.to_string()),
+    };
+
+    let (name, tag) = match rest.rsplit_once(':') {
+        Some((n, t)) if !t.contains('/') => (n.to_string(), t.to_string()),
+        _ => (rest, "latest".to_string()),
+    };
+
+    match part {
+        ImagePart::Source => source,
+        ImagePart::Name   => name,
+        ImagePart::Tag    => tag,
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: container_runtime_present
 // True iff either the `docker` or `podman` CLI is callable on $PATH —
 // `--version` is the cheapest possible probe (no daemon connection, no
@@ -757,6 +791,14 @@ fn apply_version_condition(actual_str: &str, condition: &str, target_str: &str) 
 // MAIN EVALUATE FUNCTION
 // ============================================================
 
+/// Returns true for elements whose conditions are evaluated once per
+/// discovered container (yielding one result per container) rather than
+/// once per host. The agent's dispatch loop uses this to decide whether
+/// to iterate the container inventory for a given test.
+pub fn is_per_container_element(name: &str) -> bool {
+    matches!(name.trim().to_uppercase().as_str(), "IMAGE" | "NETWORK")
+}
+
 pub fn evaluate(
     element: &str,
     input: &str,
@@ -765,6 +807,7 @@ pub fn evaluate(
     sinput: &str,
     cmd_enabled: bool,
     ps_enabled:  bool,
+    container: Option<&crate::containers::DiscoveredContainer>,
 ) -> EvalResult {
     let element_l   = element.trim().to_lowercase();
     let selement_l  = selement.trim().to_lowercase();
@@ -1137,6 +1180,56 @@ pub fn evaluate(
                     error!("Unsupported container selement: '{}'. Use 'exists' or 'not exists'.", selement);
                     EvalResult::Na
                 }
+            }
+        }
+
+        // =========================================================
+        // IMAGE — per-container check against the container's image
+        // reference. Caller (agent.rs::process_compliance_tests) iterates
+        // discovered containers and invokes evaluate() once per container
+        // with `container = Some(&c)`. Sub-elements:
+        //   NAME   — image name without tag/registry
+        //   TAG    — tag after ':' ("latest" when absent)
+        //   DIGEST — pulled image digest (sha256:...)
+        //   SOURCE — registry host (docker.io if implicit)
+        // =========================================================
+        "image" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            let target: Option<String> = match selement_l.as_str() {
+                "name"   => c.image.as_deref().map(|s| image_part(s, ImagePart::Name)),
+                "tag"    => c.image.as_deref().map(|s| image_part(s, ImagePart::Tag)),
+                "source" => c.image.as_deref().map(|s| image_part(s, ImagePart::Source)),
+                "digest" => c.image_digest.clone(),
+                _ => {
+                    error!("Unsupported image selement: '{}'", selement);
+                    return EvalResult::Na;
+                }
+            };
+            match target {
+                Some(v) if apply_string_condition(&v, condition, sinput_trim) => EvalResult::Pass,
+                Some(_) => EvalResult::Fail,
+                None    => EvalResult::Na,
+            }
+        }
+
+        // =========================================================
+        // NETWORK — per-container check against the container's network
+        // configuration. Sub-elements:
+        //   MODE — host / bridge / none / container:<id> / named network
+        // =========================================================
+        "network" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            let target: Option<String> = match selement_l.as_str() {
+                "mode" => c.network_mode.clone(),
+                _ => {
+                    error!("Unsupported network selement: '{}'", selement);
+                    return EvalResult::Na;
+                }
+            };
+            match target {
+                Some(v) if apply_string_condition(&v, condition, sinput_trim) => EvalResult::Pass,
+                Some(_) => EvalResult::Fail,
+                None    => EvalResult::Na,
             }
         }
 

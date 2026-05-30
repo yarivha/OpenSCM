@@ -91,5 +91,10 @@ pub struct ComplianceResult {
     pub organization: String,
     pub test_id: i64,
     pub result: String, // "PASS", "FAIL", or "NA"
+    /// Container runtime ID (e.g. Docker's sha256 container ID) when this
+    /// result is per-container. Omitted for host-level results. Server
+    /// resolves to containers.id via (host_system_id, runtime_id).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub container_runtime_id: Option<String>,
 }
 

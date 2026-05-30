@@ -1929,10 +1929,11 @@ pub async fn execute_policy_run_logic(
     pool: &SqlitePool,
     tenant_id: &str,
 ) -> Result<(), sqlx::Error> {
-    // Host tests — queue into commands as before. Tests whose conditions are
-    // entirely against `container`-evaluator elements are excluded; those are
-    // evaluated inline by evaluate_container_tests below. Classification is
-    // data-driven via `elements.evaluator` rather than hardcoded element names.
+    // Every test queues into the commands table the same way — agent
+    // picks them up on its next heartbeat and evaluates locally against
+    // its own world (host facts AND its discovered container inventory).
+    // Per-container results come back with a `container_runtime_id`
+    // field that the result handler resolves to containers.id.
     sqlx::query(r#"
         INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id)
         SELECT ?, sig.system_id, tip.test_id
@@ -1941,144 +1942,9 @@ pub async fn execute_policy_run_logic(
         JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
         WHERE sip.policy_id = ?
           AND sip.tenant_id = ?
-          AND EXISTS (
-            SELECT 1 FROM test_conditions tc
-            JOIN elements e ON e.name = tc.element
-            WHERE tc.test_id = tip.test_id AND e.evaluator = 'host'
-          )
     "#)
     .bind(tenant_id).bind(id).bind(tenant_id)
     .execute(pool).await?;
-
-    evaluate_container_tests(id, pool, tenant_id).await?;
     Ok(())
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Evaluate every "container-only" test in a policy against every container
-// on every in-scope system. Writes one result row per (system, test,
-// container) with `container_id` populated.
-//
-// "Container-only" today = test whose conditions are ALL against elements
-// with evaluator='container'. Mixed tests (host + container conditions in
-// one test) are silently excluded from both paths until target_type lands
-// per the design doc.
-//
-// Implementation: four hoisted queries up front, then a flat double loop
-// in pure CPU, then one batch INSERT inside a transaction. That replaces
-// the O(M*K) per-(test,system) container fetch and the O(M*K*C) per-result
-// round-trip with O(1) queries regardless of policy / fleet size.
-// ─────────────────────────────────────────────────────────────────────────────
-async fn evaluate_container_tests(
-    policy_id: i32,
-    pool: &SqlitePool,
-    tenant_id: &str,
-) -> Result<(), sqlx::Error> {
-    use crate::container_eval::{evaluate, combine_results, PreparedCondition, EvalResult};
-    use std::collections::HashMap;
-
-    // 1. Container-only tests in this policy = tests with at least one
-    //    container condition and no non-container conditions.
-    #[derive(sqlx::FromRow)]
-    struct TestRow { id: i64, filter: String }
-    let tests: Vec<TestRow> = sqlx::query_as::<_, TestRow>(r#"
-        SELECT t.id AS id, COALESCE(t.filter, 'all') AS filter
-        FROM tests_in_policy tip
-        JOIN tests t ON t.id = tip.test_id
-        WHERE tip.policy_id = ?
-          AND tip.tenant_id = ?
-          AND EXISTS (
-            SELECT 1 FROM test_conditions tc
-            JOIN elements e ON e.name = tc.element
-            WHERE tc.test_id = t.id AND e.evaluator = 'container'
-          )
-          AND NOT EXISTS (
-            SELECT 1 FROM test_conditions tc
-            JOIN elements e ON e.name = tc.element
-            WHERE tc.test_id = t.id AND e.evaluator != 'container'
-          )
-    "#)
-    .bind(policy_id).bind(tenant_id)
-    .fetch_all(pool).await?;
-    if tests.is_empty() { return Ok(()); }
-
-    let test_ids: Vec<i64> = tests.iter().map(|t| t.id).collect();
-    let placeholders = std::iter::repeat("?").take(test_ids.len()).collect::<Vec<_>>().join(",");
-
-    // 2. All conditions for those tests in one query, grouped by test_id.
-    #[derive(sqlx::FromRow)]
-    struct CondRow {
-        test_id:   i64,
-        element:   String,
-        selement:  String,
-        condition: Option<String>,
-        sinput:    Option<String>,
-    }
-    let cond_sql = format!(
-        "SELECT test_id, element, selement, condition, sinput
-         FROM test_conditions
-         WHERE tenant_id = ? AND test_id IN ({})",
-        placeholders
-    );
-    let mut cq = sqlx::query_as::<_, CondRow>(&cond_sql).bind(tenant_id);
-    for id in &test_ids { cq = cq.bind(id); }
-    let mut conds_by_test: HashMap<i64, Vec<PreparedCondition>> = HashMap::new();
-    for c in cq.fetch_all(pool).await? {
-        conds_by_test.entry(c.test_id).or_default().push(PreparedCondition::new(
-            &c.element, &c.selement,
-            c.condition.as_deref().unwrap_or(""),
-            c.sinput.as_deref().unwrap_or(""),
-        ));
-    }
-
-    // 3. All containers across every in-scope system in one query, grouped
-    //    by host_system_id.
-    let containers_by_host_sql = r#"
-        SELECT c.id, c.host_system_id, c.image, c.image_digest, c.network_mode
-        FROM containers c
-        WHERE c.tenant_id = ?
-          AND c.host_system_id IN (
-            SELECT DISTINCT sig.system_id
-            FROM systems_in_policy sip
-            JOIN systems_in_groups sig ON sip.group_id = sig.group_id
-            WHERE sip.policy_id = ? AND sip.tenant_id = ?
-          )
-    "#;
-    let container_rows = sqlx::query(containers_by_host_sql)
-        .bind(tenant_id).bind(policy_id).bind(tenant_id)
-        .fetch_all(pool).await?;
-    if container_rows.is_empty() { return Ok(()); }
-
-    // 4. Evaluate in pure CPU + batch the writes inside one transaction.
-    let now = chrono::Utc::now().format("%Y-%m-%d %H:%M:%S").to_string();
-    let mut tx = pool.begin().await?;
-    for t in &tests {
-        let conds = match conds_by_test.get(&t.id) { Some(c) => c, None => continue };
-        for crow in &container_rows {
-            let container_id: i64 = sqlx::Row::try_get(crow, "id").unwrap_or(0);
-            let host_id:      i64 = sqlx::Row::try_get(crow, "host_system_id").unwrap_or(0);
-
-            let per_cond: Vec<EvalResult> = conds.iter().map(|c| evaluate(crow, c)).collect();
-            let verdict = combine_results(&per_cond, &t.filter);
-
-            sqlx::query(
-                "INSERT INTO results
-                   (tenant_id, system_id, test_id, container_id, result, last_updated)
-                 VALUES (?, ?, ?, ?, ?, ?)
-                 ON CONFLICT(tenant_id, system_id, test_id, container_id) DO UPDATE SET
-                   result = excluded.result,
-                   last_updated = excluded.last_updated",
-            )
-            .bind(tenant_id)
-            .bind(host_id)
-            .bind(t.id)
-            .bind(container_id)
-            .bind(verdict.as_str())
-            .bind(&now)
-            .execute(&mut *tx).await?;
-        }
-    }
-    tx.commit().await?;
-
-    Ok(())
-}
