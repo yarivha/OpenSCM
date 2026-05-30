@@ -670,7 +670,11 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     for name in &[
         "AGENT", "OS", "HOSTNAME", "IP", "DOMAIN", "ARCHITECTURE", "USER", "GROUP",
         "FILE", "DIRECTORY", "PROCESS", "PACKAGE", "REGISTRY", "PORT", "CMD",
-        "POWERSHELL", "SERVICE", "CONTAINER", "IMAGE", "NETWORK",
+        "POWERSHELL", "SERVICE",
+        // Container-related — agent-side, evaluated against the local
+        // container inventory.
+        "CONTAINER", "IMAGE", "NETWORK", "PRIVILEGED", "RUN_USER",
+        "MOUNT", "EXPOSED_PORT", "READ_ONLY_FS", "HEALTH_CHECK",
     ] {
         sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
             .bind(name)
@@ -1843,12 +1847,19 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
         // Container-related elements — all agent-side, evaluated locally
         // by the client against its discovered container inventory.
-        //   CONTAINER — host-level "is a runtime installed" (EXISTS/NOT EXISTS)
-        //   IMAGE / NETWORK — per-container checks; agent ships one result
-        //                     per container with the container's runtime_id
-        // Deferred to 0.5.x: PRIVILEGED, RUN_USER, MOUNT, EXPOSED_PORT,
-        // READ_ONLY_FS, HEALTH_CHECK.
-        for name in &["IMAGE", "NETWORK", "CONTAINER"] {
+        //   CONTAINER     — host-level "is a runtime installed" (EXISTS/NOT EXISTS)
+        //   IMAGE         — per-container image identity (NAME/TAG/DIGEST/SOURCE)
+        //   NETWORK       — per-container network configuration (MODE)
+        //   PRIVILEGED    — per-container --privileged flag (EXISTS/NOT EXISTS)
+        //   RUN_USER      — per-container running user (CONTENT)
+        //   MOUNT         — per-container bind mount source path (EXISTS/NOT EXISTS)
+        //   EXPOSED_PORT  — per-container published port (EXISTS/NOT EXISTS/COUNT)
+        //   READ_ONLY_FS  — per-container --read-only flag (EXISTS/NOT EXISTS)
+        //   HEALTH_CHECK  — per-container HEALTHCHECK defined (EXISTS/NOT EXISTS)
+        for name in &[
+            "CONTAINER", "IMAGE", "NETWORK", "PRIVILEGED", "RUN_USER",
+            "MOUNT", "EXPOSED_PORT", "READ_ONLY_FS", "HEALTH_CHECK",
+        ] {
             sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
                 .bind(name)
                 .execute(pool)

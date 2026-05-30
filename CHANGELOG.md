@@ -7,6 +7,18 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Container test elements — 6 more agent-side elements** rounding out the design-doc set. Each is a single match arm in `scmclient::compliance::evaluate()` plus a seed-row in `elements` — uniform with every other element, no architectural change.
+  - **`PRIVILEGED`** (`EXISTS` / `NOT EXISTS`) — checks `HostConfig.Privileged`. CIS Docker 5.4.
+  - **`RUN_USER`** (`CONTENT`) — checks `Config.User` with the standard string conditions. CIS Docker 4.1 ("don't run as root").
+  - **`MOUNT`** (`EXISTS` / `NOT EXISTS`, input = host path) — substring-matches against bind-mount `src` paths. CIS Docker 5.5 (block `/var/run/docker.sock` mount).
+  - **`EXPOSED_PORT`** (`EXISTS` / `NOT EXISTS` / `COUNT`, input = `port/proto`) — checks `NetworkSettings.Ports`. EXISTS substring-matches one entry; COUNT applies a numeric condition to the total.
+  - **`READ_ONLY_FS`** (`EXISTS` / `NOT EXISTS`) — checks `HostConfig.ReadonlyRootfs`. CIS Docker 5.12.
+  - **`HEALTH_CHECK`** (`EXISTS` / `NOT EXISTS`) — checks `Config.Healthcheck` presence. Observability hygiene.
+
+  All six route through `is_per_container_element` and yield one result per discovered container. Three small private helpers in `compliance.rs` (`bool_selement`, `container_mount_matches`, `container_exposed_ports`) handle the boolean-flag / JSON-parsing repetition. UI grouping in `tests.rs::is_container_element` extended so they land under the **Container** `<optgroup>` in the test-builder dropdown.
+
+  Canned policy **`cis-container-config-l1`** bumped to **1.1.0**: 5 tests → 11 tests, exercising every new element with a real-world example (privileged check, run-as-root, Docker-socket mount, SSH port exposure, read-only FS enforcement, HEALTHCHECK presence).
+
 - **Container test elements — `IMAGE`, `NETWORK`, `CONTAINER` (steps 6+7/8).** Three new compliance elements, all evaluated **agent-side** through the same dispatch path as every other element in OpenSCM (FILE, CMD, PROCESS, SERVICE, …). Uniform architecture: no separate server-side evaluator, no parallel dispatch path, no `evaluator` routing column. Applicability works for every element the same way.
   - **`IMAGE`** (per-container) — checks against the container's image reference. Sub-elements: `NAME`, `TAG`, `DIGEST`, `SOURCE` (registry host, parsed from the reference using standard Docker rules — `docker.io` for implicit, namespace-aware first-path-component detection).
   - **`NETWORK`** (per-container) — `MODE` sub-element checks `host`/`bridge`/`none`/`container:<id>`/named network.

@@ -194,6 +194,62 @@ fn image_part(reference: &str, part: ImagePart) -> String {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: bool_selement
+// Apply an EXISTS / NOT EXISTS selement to a boolean flag (e.g. is_privileged,
+// read_only_fs, health_check). Centralises the truth-table so every per-
+// container boolean element has identical semantics.
+// ─────────────────────────────────────────────────────────────────────────────
+fn bool_selement(selement_l: &str, flag: bool, raw_selement: &str) -> EvalResult {
+    match selement_l {
+        "exists"     => if flag  { EvalResult::Pass } else { EvalResult::Fail },
+        "not exists" => if !flag { EvalResult::Pass } else { EvalResult::Fail },
+        _ => {
+            error!("Unsupported boolean selement: '{}'. Use 'exists' or 'not exists'.", raw_selement);
+            EvalResult::Na
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: container_mount_matches
+// Returns true iff any bind mount on the container has a `src` containing the
+// caller-supplied path substring. The mounts field is a JSON array of
+// {src, dst, type, ro} objects produced at discovery time by containers.rs.
+// Path-style match is case-sensitive (Linux paths are).
+// ─────────────────────────────────────────────────────────────────────────────
+fn container_mount_matches(c: &crate::containers::DiscoveredContainer, needle: &str) -> bool {
+    let needle = needle.trim();
+    if needle.is_empty() { return false; }
+    let mounts_json = match c.mounts.as_deref() { Some(s) => s, None => return false };
+    let arr: serde_json::Value = match serde_json::from_str(mounts_json) {
+        Ok(v) => v, Err(_) => return false,
+    };
+    arr.as_array().map(|items| {
+        items.iter().any(|m| {
+            m.get("src").and_then(|v| v.as_str())
+                .map(|src| src.contains(needle))
+                .unwrap_or(false)
+        })
+    }).unwrap_or(false)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: container_exposed_ports
+// Returns the list of "port/proto" strings published by the container
+// (parsed from the cached exposed_ports JSON array). Empty list if the
+// container had no ports published or the JSON was malformed.
+// ─────────────────────────────────────────────────────────────────────────────
+fn container_exposed_ports(c: &crate::containers::DiscoveredContainer) -> Vec<String> {
+    let json = match c.exposed_ports.as_deref() { Some(s) => s, None => return Vec::new() };
+    let parsed: serde_json::Value = match serde_json::from_str(json) {
+        Ok(v) => v, Err(_) => return Vec::new(),
+    };
+    parsed.as_array().map(|items| {
+        items.iter().filter_map(|v| v.as_str().map(String::from)).collect()
+    }).unwrap_or_default()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: container_runtime_present
 // True iff either the `docker` or `podman` CLI is callable on $PATH —
 // `--version` is the cheapest possible probe (no daemon connection, no
@@ -796,7 +852,11 @@ fn apply_version_condition(actual_str: &str, condition: &str, target_str: &str) 
 /// once per host. The agent's dispatch loop uses this to decide whether
 /// to iterate the container inventory for a given test.
 pub fn is_per_container_element(name: &str) -> bool {
-    matches!(name.trim().to_uppercase().as_str(), "IMAGE" | "NETWORK")
+    matches!(
+        name.trim().to_uppercase().as_str(),
+        "IMAGE" | "NETWORK" | "PRIVILEGED" | "RUN_USER" | "MOUNT"
+            | "EXPOSED_PORT" | "READ_ONLY_FS" | "HEALTH_CHECK"
+    )
 }
 
 /// Combine per-condition EvalResults into a test-level verdict string
@@ -1251,6 +1311,125 @@ pub fn evaluate(
                 Some(v) if apply_string_condition(&v, condition, sinput_trim) => EvalResult::Pass,
                 Some(_) => EvalResult::Fail,
                 None    => EvalResult::Na,
+            }
+        }
+
+        // =========================================================
+        // PRIVILEGED — per-container --privileged flag (CIS Docker 5.4).
+        // EXISTS PASSes iff the container was started with --privileged.
+        // No input / condition / sinput needed.
+        // =========================================================
+        "privileged" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            match c.is_privileged {
+                Some(true)  => bool_selement(&selement_l, true,  selement),
+                Some(false) => bool_selement(&selement_l, false, selement),
+                None        => EvalResult::Na,
+            }
+        }
+
+        // =========================================================
+        // RUN_USER — per-container "what user is the container running
+        // as" (CIS Docker 4.1). Sub-element CONTENT compares the user
+        // string with the standard string conditions (EQUALS, NOT
+        // EQUALS, CONTAINS, REGEX).
+        // =========================================================
+        "run_user" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            if selement_l.as_str() != "content" {
+                error!("Unsupported run_user selement: '{}'. Use 'content'.", selement);
+                return EvalResult::Na;
+            }
+            match &c.run_user {
+                Some(v) if apply_string_condition(v, condition, sinput_trim) => EvalResult::Pass,
+                Some(_) => EvalResult::Fail,
+                None    => EvalResult::Na,
+            }
+        }
+
+        // =========================================================
+        // MOUNT — per-container "is this host path bind-mounted into
+        // the container" (CIS Docker 5.5). Input = host path to check
+        // (e.g. /var/run/docker.sock). Matches against the `src` field
+        // of each mount in the cached mounts JSON (case-sensitive —
+        // paths are).
+        // =========================================================
+        "mount" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            let any_match = container_mount_matches(c, input);
+            match selement_l.as_str() {
+                "exists"     => if any_match  { EvalResult::Pass } else { EvalResult::Fail },
+                "not exists" => if !any_match { EvalResult::Pass } else { EvalResult::Fail },
+                _ => {
+                    error!("Unsupported mount selement: '{}'. Use 'exists' or 'not exists'.", selement);
+                    EvalResult::Na
+                }
+            }
+        }
+
+        // =========================================================
+        // EXPOSED_PORT — per-container "is this port published to the
+        // host" check. Input = port spec (substring match against
+        // "port/proto" entries — e.g. "22" matches "22/tcp" and
+        // "22/udp", "443/tcp" matches only that exact entry). Sub-
+        // elements:
+        //   EXISTS / NOT EXISTS — any/no matching port published
+        //   COUNT               — numeric condition on total exposed ports
+        //                         (input is ignored; condition+sinput drive it)
+        // =========================================================
+        "exposed_port" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            let ports = container_exposed_ports(c);
+            match selement_l.as_str() {
+                "exists" => {
+                    let n = input.to_lowercase();
+                    let any = ports.iter().any(|p| p.to_lowercase().contains(&n));
+                    if any { EvalResult::Pass } else { EvalResult::Fail }
+                }
+                "not exists" => {
+                    let n = input.to_lowercase();
+                    let any = ports.iter().any(|p| p.to_lowercase().contains(&n));
+                    if !any { EvalResult::Pass } else { EvalResult::Fail }
+                }
+                "count" => {
+                    let n = ports.len().to_string();
+                    if apply_string_condition(&n, condition, sinput_trim) {
+                        EvalResult::Pass
+                    } else {
+                        EvalResult::Fail
+                    }
+                }
+                _ => {
+                    error!("Unsupported exposed_port selement: '{}'. Use 'exists', 'not exists', or 'count'.", selement);
+                    EvalResult::Na
+                }
+            }
+        }
+
+        // =========================================================
+        // READ_ONLY_FS — per-container --read-only flag (CIS Docker
+        // 5.12). EXISTS PASSes iff the root filesystem is mounted r/o.
+        // =========================================================
+        "read_only_fs" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            match c.read_only_fs {
+                Some(true)  => bool_selement(&selement_l, true,  selement),
+                Some(false) => bool_selement(&selement_l, false, selement),
+                None        => EvalResult::Na,
+            }
+        }
+
+        // =========================================================
+        // HEALTH_CHECK — per-container "is a HEALTHCHECK defined".
+        // Observability hygiene. EXISTS PASSes iff Config.Healthcheck
+        // is present in the inspect output.
+        // =========================================================
+        "health_check" => {
+            let c = match container { Some(c) => c, None => return EvalResult::Na };
+            match c.health_check {
+                Some(true)  => bool_selement(&selement_l, true,  selement),
+                Some(false) => bool_selement(&selement_l, false, selement),
+                None        => EvalResult::Na,
             }
         }
 

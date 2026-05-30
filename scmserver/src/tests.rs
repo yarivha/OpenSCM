@@ -32,7 +32,11 @@ use crate::handlers::{render_template, parse_form_data};
 /// `<select>`. Purely cosmetic — does not affect dispatch, which is
 /// uniform across every element (agent-side).
 pub fn is_container_element(name: &str) -> bool {
-    matches!(name.trim().to_uppercase().as_str(), "CONTAINER" | "IMAGE" | "NETWORK")
+    matches!(
+        name.trim().to_uppercase().as_str(),
+        "CONTAINER" | "IMAGE" | "NETWORK" | "PRIVILEGED" | "RUN_USER"
+            | "MOUNT" | "EXPOSED_PORT" | "READ_ONLY_FS" | "HEALTH_CHECK"
+    )
 }
 
 async fn fetch_lookup_tables(
