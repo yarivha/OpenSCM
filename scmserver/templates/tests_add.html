@@ -164,9 +164,16 @@
                           <div class="condition-label">Subject</div>
                           <select class="form-control" name="app_element_{{ i }}">
                             <option value="" selected>-- Select --</option>
-                            {% for element in elements %}
-                              <option>{{ element.name }}</option>
-                            {% endfor %}
+                            <optgroup label="Host">
+                              {% for element in host_elements %}
+                                <option>{{ element.name }}</option>
+                              {% endfor %}
+                            </optgroup>
+                            <optgroup label="Container">
+                              {% for element in container_elements %}
+                                <option>{{ element.name }}</option>
+                              {% endfor %}
+                            </optgroup>
                           </select>
                         </div>
 
@@ -247,9 +254,16 @@
                         <div class="condition-label">Subject</div>
                         <select class="form-control" name="element_{{ i }}">
                           <option value="" selected>-- Select --</option>
-                          {% for element in elements %}
-                            <option>{{ element.name }}</option>
-                          {% endfor %}
+                          <optgroup label="Host">
+                            {% for element in host_elements %}
+                              <option>{{ element.name }}</option>
+                            {% endfor %}
+                          </optgroup>
+                          <optgroup label="Container">
+                            {% for element in container_elements %}
+                              <option>{{ element.name }}</option>
+                            {% endfor %}
+                          </optgroup>
                         </select>
                       </div>
                       

@@ -27,6 +27,14 @@ use crate::handlers::{render_template, parse_form_data};
 // Load the elements, selements, and conditions reference tables used to
 // populate test-condition form dropdowns.
 // ─────────────────────────────────────────────────────────────────────────────
+/// Server-side classification used only by the test-builder UI to group
+/// container-related elements under their own `<optgroup>` in the Element
+/// `<select>`. Purely cosmetic — does not affect dispatch, which is
+/// uniform across every element (agent-side).
+pub fn is_container_element(name: &str) -> bool {
+    matches!(name.trim().to_uppercase().as_str(), "CONTAINER" | "IMAGE" | "NETWORK")
+}
+
 async fn fetch_lookup_tables(
     pool: &SqlitePool,
 ) -> Result<(Vec<Element>, Vec<SElement>, Vec<Condition>), sqlx::Error> {
@@ -244,7 +252,15 @@ pub async fn tests_add(
 
     match fetch_lookup_tables(&*pool).await {
         Ok((elements, selements, conditions)) => {
+            // Split into two lists so the template can render <optgroup>s.
+            // The combined `elements` list stays for any code path that
+            // doesn't want grouping.
+            let (container_elements, host_elements): (Vec<_>, Vec<_>) =
+                elements.iter().cloned()
+                    .partition(|e| is_container_element(&e.name));
             context.insert("elements", &elements);
+            context.insert("host_elements", &host_elements);
+            context.insert("container_elements", &container_elements);
             context.insert("selements", &selements);
             context.insert("conditions", &conditions);
         }
@@ -482,7 +498,15 @@ pub async fn tests_edit(
     let mut context = Context::new();
     match fetch_lookup_tables(&*pool).await {
         Ok((elements, selements, conditions)) => {
+            // Split into two lists so the template can render <optgroup>s.
+            // The combined `elements` list stays for any code path that
+            // doesn't want grouping.
+            let (container_elements, host_elements): (Vec<_>, Vec<_>) =
+                elements.iter().cloned()
+                    .partition(|e| is_container_element(&e.name));
             context.insert("elements", &elements);
+            context.insert("host_elements", &host_elements);
+            context.insert("container_elements", &container_elements);
             context.insert("selements", &selements);
             context.insert("conditions", &conditions);
         }

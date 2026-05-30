@@ -175,9 +175,16 @@
                           <div class="condition-label">Subject</div>
                           <select class="form-control" name="app_element_{{ i }}">
                             <option value="">-- Select --</option>
-                            {% for element in elements %}
-                              <option {% if ac and ac.element == element.name %}selected{% endif %}>{{ element.name }}</option>
-                            {% endfor %}
+                            <optgroup label="Host">
+                              {% for element in host_elements %}
+                                <option {% if ac and ac.element == element.name %}selected{% endif %}>{{ element.name }}</option>
+                              {% endfor %}
+                            </optgroup>
+                            <optgroup label="Container">
+                              {% for element in container_elements %}
+                                <option {% if ac and ac.element == element.name %}selected{% endif %}>{{ element.name }}</option>
+                              {% endfor %}
+                            </optgroup>
                           </select>
                         </div>
                         <div class="col-md-2">
@@ -257,9 +264,16 @@
                         <div class="condition-label">Subject</div>
                         <select name="element_{{ i }}" class="form-control">
                           <option value=""></option>
-                          {% for element in elements %}
-                            <option {% if tc and tc.element == element.name %}selected{% endif %}>{{ element.name }}</option>
-                          {% endfor %}
+                          <optgroup label="Host">
+                            {% for element in host_elements %}
+                              <option {% if tc and tc.element == element.name %}selected{% endif %}>{{ element.name }}</option>
+                            {% endfor %}
+                          </optgroup>
+                          <optgroup label="Container">
+                            {% for element in container_elements %}
+                              <option {% if tc and tc.element == element.name %}selected{% endif %}>{{ element.name }}</option>
+                            {% endfor %}
+                          </optgroup>
                         </select>
                       </div>
                       <div class="col-md-2">

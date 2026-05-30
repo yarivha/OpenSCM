@@ -470,7 +470,7 @@ pub struct PolicyFailRow {
 
 
 // A test condition element (e.g. FILE, REGISTRY, CMD) from the elements table.
-#[derive(Serialize, Deserialize)]
+#[derive(Serialize, Deserialize, Clone)]
 pub struct Element {
     pub id: i32,
     pub name: String,
