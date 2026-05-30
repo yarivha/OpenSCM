@@ -7,6 +7,10 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Canned container policy — applicability gate via `CONTAINER EXISTS`** (`cis-container-config-l1` → **1.1.1**). All 11 tests in the starter policy now declare `CONTAINER EXISTS` as their applicability — on a host without Docker / Podman the tests short-circuit to NA via the standard applicability path, making "not applicable here" explicit in the policy JSON rather than an implicit fallback. Same end-user result as before; cleaner audit trail. Doubles as a worked example of the `CONTAINER` element being used the way it's intended (as an applicability gate, not as a standalone test).
+
+- **Test-builder UI — Container elements grouped under their own `<optgroup>`.** The Element `<select>` in both the Add Test and Edit Test forms (and in their applicability-condition selects) now renders two visual groups — **Host** (AGENT / OS / CMD / FILE / SERVICE / …) and **Container** (CONTAINER / IMAGE / NETWORK / PRIVILEGED / RUN_USER / MOUNT / EXPOSED_PORT / READ_ONLY_FS / HEALTH_CHECK). Browser-native rendering, italic headers, indented options, search-as-you-type all work. Classification lives in one place (`scmserver/src/tests.rs::is_container_element`) so adding a future container element automatically lands in the right group.
+
 - **Container test elements — 6 more agent-side elements** rounding out the design-doc set. Each is a single match arm in `scmclient::compliance::evaluate()` plus a seed-row in `elements` — uniform with every other element, no architectural change.
   - **`PRIVILEGED`** (`EXISTS` / `NOT EXISTS`) — checks `HostConfig.Privileged`. CIS Docker 5.4.
   - **`RUN_USER`** (`CONTENT`) — checks `Config.User` with the standard string conditions. CIS Docker 4.1 ("don't run as root").
@@ -28,7 +32,7 @@ All notable changes to OpenSCM are documented here.
   - **Canned starter policy** `cis-container-config-l1.json` lands in the OpenSCM-store under category "Containers": 5 tests exercising IMAGE + NETWORK (tag pinning, explicit registry source, host-network isolation, network-mode sanity, test/dev image-name drift).
   - **Schema (v26)**: `results` primary key widened to `(tenant_id, system_id, test_id, container_id)` so per-container results coexist with host results. `container_id NOT NULL DEFAULT 0` — host rows bind 0, per-container rows bind the resolved id. Both UPSERTs (heartbeat result-write in `client.rs`, all paths) updated to target the full 4-column key.
 
-  Out of scope for v1: the other 6 metadata-only elements from the design doc (`PRIVILEGED`, `RUN_USER`, `MOUNT`, `EXPOSED_PORT`, `READ_ONLY_FS`, `HEALTH_CHECK`) — adding any is now a single match arm in `scmclient/src/compliance.rs` plus a seed-row, no architectural change required.
+  The other 6 metadata-only elements from the design doc (`PRIVILEGED`, `RUN_USER`, `MOUNT`, `EXPOSED_PORT`, `READ_ONLY_FS`, `HEALTH_CHECK`) ship alongside — see the entry just above.
 
 - **Container support — Systems-list inventory + detail modal (step 5/8).** The first user-visible payoff of the container work:
   - **Expand chevron** — every system row gains a left-side `▶` cell when the host has any containers; click to reveal a DataTables child row containing a nested table of that host's containers (runtime icon, name, image, IP, status).
