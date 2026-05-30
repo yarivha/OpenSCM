@@ -31,6 +31,17 @@ async fn column_exists(pool: &SqlitePool, table: &str, column: &str) -> bool {
     count > 0
 }
 
+async fn table_exists(pool: &SqlitePool, table: &str) -> bool {
+    let count: i64 = sqlx::query_scalar(
+        "SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name=?"
+    )
+    .bind(table)
+    .fetch_one(pool)
+    .await
+    .unwrap_or(0);
+    count > 0
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: create_tables
 // Issues all CREATE TABLE IF NOT EXISTS statements for a fresh database.
@@ -1911,54 +1922,59 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 .bind(name).execute(pool).await?;
         }
 
-        // 2. Widen the `results` PK to include container_id if not already.
-        //    Read sqlite_master to see whether the current PK already has
-        //    container_id — if so, skip. Otherwise rebuild the table.
-        let needs_rebuild = sqlx::query_scalar::<_, Option<String>>(
+        // 2. Make sure `results` exists with the new shape. Defensive against
+        //    every state we've seen in the wild during 0.5.0 dev:
+        //      (a) results exists with old 3-col PK  — common stale case
+        //      (b) results exists with new 4-col PK  — clean v26 install (no-op)
+        //      (c) results missing; results_new left over   — prior v26 attempt
+        //                                                     died after DROP results
+        //      (d) results missing; results_v27_backup left — prior v27 attempt
+        //                                                     died after DROP results
+        //      (e) results missing entirely                  — DB inconsistent
+        let results_sql: Option<String> = sqlx::query_scalar::<_, Option<String>>(
             "SELECT sql FROM sqlite_master WHERE type='table' AND name='results'"
         )
         .fetch_optional(pool).await
-        .ok().flatten().flatten()
-        .map(|sql| !sql.to_lowercase().contains("primary key (tenant_id, system_id, test_id, container_id)"))
-        .unwrap_or(false);
+        .ok().flatten().flatten();
+        let already_widened = results_sql.as_deref()
+            .map(|sql| sql.to_lowercase().contains("primary key (tenant_id, system_id, test_id, container_id)"))
+            .unwrap_or(false);
 
-        if needs_rebuild {
-            info!("Widening results PK to include container_id");
-
-            // Make sure the column exists on the current table before we
-            // try to SELECT it into the backup (the backup query references
-            // container_id explicitly).
-            if !column_exists(pool, "results", "container_id").await {
-                sqlx::query("ALTER TABLE results ADD COLUMN container_id INTEGER")
-                    .execute(pool).await?;
-            }
+        if !already_widened {
+            info!("Rebuilding results table with widened primary key");
 
             sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
 
-            // Defensive: drop any leftovers from interrupted prior attempts.
-            // `results_new` was the staging name used by the v26 in-place
-            // rebuild; `results_v27_backup` is unique to this migration.
+            // Pick whichever table actually holds our data right now. Order
+            // of preference reflects which is most likely to be the freshest
+            // snapshot if multiple exist.
+            let source: Option<&str> =
+                if table_exists(pool, "results").await { Some("results") }
+                else if table_exists(pool, "results_v27_backup").await { Some("results_v27_backup") }
+                else if table_exists(pool, "results_new").await { Some("results_new") }
+                else { None };
+
+            // Stage data (if any) into a transient holding table.
+            sqlx::query("DROP TABLE IF EXISTS _results_staging").execute(pool).await?;
+            if let Some(src) = source {
+                let has_cid = column_exists(pool, src, "container_id").await;
+                let cid_expr = if has_cid { "COALESCE(container_id, 0)" } else { "0" };
+                let stage_sql = format!(
+                    "CREATE TABLE _results_staging AS
+                     SELECT tenant_id, system_id, test_id, result, last_updated,
+                            excluded, excluded_by, excluded_at,
+                            {} AS container_id
+                     FROM {}", cid_expr, src
+                );
+                sqlx::query(&stage_sql).execute(pool).await?;
+            }
+
+            // Clean every table name we might collide with.
+            sqlx::query("DROP TABLE IF EXISTS results").execute(pool).await?;
             sqlx::query("DROP TABLE IF EXISTS results_new").execute(pool).await?;
             sqlx::query("DROP TABLE IF EXISTS results_v27_backup").execute(pool).await?;
 
-            // 1. Dump current data into a uniquely-named backup table.
-            //    CREATE TABLE AS doesn't preserve constraints / PK — fine for
-            //    a transient holding pen.
-            sqlx::query(
-                "CREATE TABLE results_v27_backup AS
-                 SELECT tenant_id, system_id, test_id, result, last_updated,
-                        excluded, excluded_by, excluded_at,
-                        COALESCE(container_id, 0) AS container_id
-                 FROM results"
-            ).execute(pool).await?;
-
-            // 2. Drop the original. We recreate it under the same name
-            //    rather than RENAME-ing a staging table in, which can
-            //    collide with stray sqlite_master entries on a fragmented
-            //    install.
-            sqlx::query("DROP TABLE results").execute(pool).await?;
-
-            // 3. Recreate with the new shape directly under the original name.
+            // Recreate the canonical table with the new shape.
             sqlx::query(
                 "CREATE TABLE results (
                     tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
@@ -1977,18 +1993,18 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 )"
             ).execute(pool).await?;
 
-            // 4. Copy data back from the backup.
-            sqlx::query(
-                "INSERT INTO results
-                   (tenant_id, system_id, test_id, result, last_updated,
-                    excluded, excluded_by, excluded_at, container_id)
-                 SELECT tenant_id, system_id, test_id, result, last_updated,
-                        excluded, excluded_by, excluded_at, container_id
-                 FROM results_v27_backup"
-            ).execute(pool).await?;
-
-            // 5. Drop the backup.
-            sqlx::query("DROP TABLE results_v27_backup").execute(pool).await?;
+            // Restore from staging if we had any data to preserve.
+            if source.is_some() {
+                sqlx::query(
+                    "INSERT INTO results
+                       (tenant_id, system_id, test_id, result, last_updated,
+                        excluded, excluded_by, excluded_at, container_id)
+                     SELECT tenant_id, system_id, test_id, result, last_updated,
+                            excluded, excluded_by, excluded_at, container_id
+                     FROM _results_staging"
+                ).execute(pool).await?;
+                sqlx::query("DROP TABLE _results_staging").execute(pool).await?;
+            }
 
             sqlx::query("PRAGMA foreign_keys = ON").execute(pool).await?;
         }
