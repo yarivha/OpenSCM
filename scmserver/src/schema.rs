@@ -692,6 +692,7 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ("CMD",          "host"),
         ("POWERSHELL",   "host"),
         ("SERVICE",      "host"),
+        ("CONTAINER",    "host"),
         ("IMAGE",        "container"),
         ("NETWORK",      "container"),
     ] {
@@ -1872,9 +1873,13 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 .execute(pool).await?;
         }
 
-        // Container-only elements (deferred in 0.5.x: PRIVILEGED, RUN_USER,
-        // MOUNT, EXPOSED_PORT, READ_ONLY_FS, HEALTH_CHECK). Both rows tagged
-        // evaluator='container' so the dispatcher routes them server-side.
+        // Container-only elements (server-side, per-container):
+        //   IMAGE / NETWORK     → evaluator='container'
+        // Container runtime check (agent-side, host-level):
+        //   CONTAINER           → evaluator='host' — agent checks for docker/podman
+        //                          binaries via the standard host dispatch path
+        // Deferred to 0.5.x: PRIVILEGED, RUN_USER, MOUNT, EXPOSED_PORT,
+        // READ_ONLY_FS, HEALTH_CHECK.
         for name in &["IMAGE", "NETWORK"] {
             sqlx::query(
                 "INSERT INTO elements (name, evaluator) VALUES (?, 'container')
@@ -1884,6 +1889,10 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         }
+        sqlx::query(
+            "INSERT INTO elements (name, evaluator) VALUES ('CONTAINER', 'host')
+             ON CONFLICT(name) DO UPDATE SET evaluator='host'"
+        ).execute(pool).await?;
 
         // Sub-elements: NAME/TAG/DIGEST/REGISTRY for IMAGE; MODE for NETWORK.
         // EQUALS / NOT EQUALS / CONTAINS already exist as conditions.

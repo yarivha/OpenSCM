@@ -159,6 +159,23 @@ fn systemd_unit_state(name: &str) -> Option<SystemdUnit> {
     Some(state)
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: container_runtime_present
+// True iff either the `docker` or `podman` CLI is callable on $PATH —
+// `--version` is the cheapest possible probe (no daemon connection, no
+// container enumeration). Used by the CONTAINER EXISTS / NOT EXISTS test
+// element. Works on any platform; on Windows/macOS hosts with Docker
+// Desktop running, the CLI is on PATH and this returns true.
+// ─────────────────────────────────────────────────────────────────────────────
+fn container_runtime_present() -> bool {
+    let probe = |bin: &str| -> bool {
+        Command::new(bin).arg("--version").output()
+            .map(|o| o.status.success())
+            .unwrap_or(false)
+    };
+    probe("docker") || probe("podman")
+}
+
 fn service_is_active(name: &str) -> Option<bool> {
     #[cfg(target_os = "linux")]
     {
@@ -1105,6 +1122,25 @@ pub fn evaluate(
         // SERVICE — cross-platform service state via shell-out.
         // Sub-elements: ACTIVE | INACTIVE | ENABLED | DISABLED
         // Input = service name (e.g. "sshd", "auditd", "firewalld").
+        // =========================================================
+        // CONTAINER — host-level "does a container runtime exist here?"
+        // PASS for EXISTS iff `docker` or `podman` is on $PATH.
+        // PASS for NOT EXISTS iff neither is on $PATH.
+        // Input / condition / sinput are ignored.
+        // =========================================================
+        "container" => {
+            let runtime_present = container_runtime_present();
+            match selement_l.as_str() {
+                "exists"     => if runtime_present  { EvalResult::Pass } else { EvalResult::Fail },
+                "not exists" => if !runtime_present { EvalResult::Pass } else { EvalResult::Fail },
+                _ => {
+                    error!("Unsupported container selement: '{}'. Use 'exists' or 'not exists'.", selement);
+                    EvalResult::Na
+                }
+            }
+        }
+
+        // =========================================================
         // No sinput / condition needed — sub-elements are boolean.
         // =========================================================
         "service" => {

@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **`CONTAINER` element — host-level "is a container runtime installed".** Agent-side element (same dispatch path as PROCESS / SERVICE / FILE), not a server-side one. The agent runs `docker --version` and `podman --version`; `CONTAINER EXISTS` PASSes if either succeeds, FAILs if neither does. `CONTAINER NOT EXISTS` is the inverse. Input, condition, and sinput are all ignored — the check is a binary "any runtime present". Because it's agent-evaluated, it works in the standard `applicability` section: gate any host-level test (CMD, FILE, PROCESS, …) to run only on container hosts, with NA on the rest. Seeded with `evaluator='host'` in v26 (fresh-install and migration).
+
 - **Container support — canned starter policy (step 7/8).** New `cis-container-config-l1.json` lands in the OpenSCM-store under category "Containers": five tests exercising the full IMAGE + NETWORK surface (tag pinning, explicit registry source, host-network isolation, network-mode sanity, test/dev image-name drift). All five run server-side from cached inventory — no agent CMD path. Existing tenants get the policy on their next `/store` sync; the store's `index.json` ticks to v4. Real-world exercise of the Step 6 evaluator end-to-end.
 
 - **Container support — server-side evaluator (step 6/8).** Container-only test elements (`IMAGE`, `NETWORK`) are now actually runnable. When an admin clicks **Run Policy** the dispatcher splits the policy's tests two ways:
