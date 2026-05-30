@@ -1924,15 +1924,43 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
 
         if needs_rebuild {
             info!("Widening results PK to include container_id");
+
+            // Make sure the column exists on the current table before we
+            // try to SELECT it into the backup (the backup query references
+            // container_id explicitly).
             if !column_exists(pool, "results", "container_id").await {
                 sqlx::query("ALTER TABLE results ADD COLUMN container_id INTEGER")
                     .execute(pool).await?;
             }
+
             sqlx::query("PRAGMA foreign_keys = OFF").execute(pool).await?;
-            // Defensive — clear any partial state from an interrupted prior run.
+
+            // Defensive: drop any leftovers from interrupted prior attempts.
+            // `results_new` was the staging name used by the v26 in-place
+            // rebuild; `results_v27_backup` is unique to this migration.
             sqlx::query("DROP TABLE IF EXISTS results_new").execute(pool).await?;
+            sqlx::query("DROP TABLE IF EXISTS results_v27_backup").execute(pool).await?;
+
+            // 1. Dump current data into a uniquely-named backup table.
+            //    CREATE TABLE AS doesn't preserve constraints / PK — fine for
+            //    a transient holding pen.
             sqlx::query(
-                "CREATE TABLE results_new (
+                "CREATE TABLE results_v27_backup AS
+                 SELECT tenant_id, system_id, test_id, result, last_updated,
+                        excluded, excluded_by, excluded_at,
+                        COALESCE(container_id, 0) AS container_id
+                 FROM results"
+            ).execute(pool).await?;
+
+            // 2. Drop the original. We recreate it under the same name
+            //    rather than RENAME-ing a staging table in, which can
+            //    collide with stray sqlite_master entries on a fragmented
+            //    install.
+            sqlx::query("DROP TABLE results").execute(pool).await?;
+
+            // 3. Recreate with the new shape directly under the original name.
+            sqlx::query(
+                "CREATE TABLE results (
                     tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
                     system_id    INTEGER,
                     test_id      INTEGER,
@@ -1948,17 +1976,20 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                     FOREIGN KEY (test_id) REFERENCES tests (id) ON DELETE CASCADE
                 )"
             ).execute(pool).await?;
+
+            // 4. Copy data back from the backup.
             sqlx::query(
-                "INSERT INTO results_new
-                  (tenant_id, system_id, test_id, result, last_updated,
-                   excluded, excluded_by, excluded_at, container_id)
+                "INSERT INTO results
+                   (tenant_id, system_id, test_id, result, last_updated,
+                    excluded, excluded_by, excluded_at, container_id)
                  SELECT tenant_id, system_id, test_id, result, last_updated,
-                        excluded, excluded_by, excluded_at,
-                        COALESCE(container_id, 0)
-                 FROM results"
+                        excluded, excluded_by, excluded_at, container_id
+                 FROM results_v27_backup"
             ).execute(pool).await?;
-            sqlx::query("DROP TABLE results").execute(pool).await?;
-            sqlx::query("ALTER TABLE results_new RENAME TO results").execute(pool).await?;
+
+            // 5. Drop the backup.
+            sqlx::query("DROP TABLE results_v27_backup").execute(pool).await?;
+
             sqlx::query("PRAGMA foreign_keys = ON").execute(pool).await?;
         }
 
