@@ -32,9 +32,14 @@ use crate::handlers::{render_template, parse_form_data};
 /// `<select>`. Purely cosmetic — does not affect dispatch, which is
 /// uniform across every element (agent-side).
 pub fn is_container_element(name: &str) -> bool {
+    // CONTAINER is deliberately NOT in this set — it's a host-level attribute
+    // ("does a container runtime exist on this host?") that lives in the same
+    // mental category as PROCESS or SERVICE EXISTS. Only the per-container
+    // elements (those that yield one result per container) go under the
+    // Container <optgroup>.
     matches!(
         name.trim().to_uppercase().as_str(),
-        "CONTAINER" | "IMAGE" | "NETWORK" | "PRIVILEGED" | "RUN_USER"
+        "IMAGE" | "NETWORK" | "PRIVILEGED" | "RUN_USER"
             | "MOUNT" | "EXPOSED_PORT" | "READ_ONLY_FS" | "HEALTH_CHECK"
     )
 }
