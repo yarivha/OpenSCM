@@ -470,11 +470,28 @@
       $(this).text(formatLocalTime($(this).data('utc')));
     });
 
+    // Load container inventory BEFORE DataTables init so the rowCallback
+    // (below) can reference it. The blob is server-rendered JSON keyed by
+    // system_id; each value is an array of containers for that host.
+    let containersBySystem = {};
+    try {
+      const blob = document.getElementById('containers-by-system');
+      containersBySystem = JSON.parse(blob ? blob.textContent : '{}');
+    } catch (e) { containersBySystem = {}; }
+
     // 3. DataTables
     //   Column 0: hidden status (used for the pending-first sort)
     //   Column 1: expand chevron (not sortable, not searchable)
     //   Column 2: checkbox (not sortable, not searchable)
     //   Column 3: ID  |  Column 4: Name  | ...
+    //
+    // rowCallback fires for every row at every redraw — initial render,
+    // pagination, sort, search, and responsive resize. We use it instead of
+    // a one-shot $.each(...) so:
+    //   (a) rows on non-current pages get their chevron painted when the
+    //       user paginates to them, AND
+    //   (b) the chevron survives the async redraw that `responsive: true`
+    //       does after init (which was wiping our cell content).
     const table = $("#systems_table").DataTable({
       "responsive": true,
       "lengthChange": true,
@@ -485,7 +502,18 @@
         { "targets": 1, "orderable": false, "searchable": false, "className": "text-center" },
         { "targets": 2, "orderable": false, "searchable": false, "className": "text-center" }
       ],
-      "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"]
+      "buttons": ["copy", "csv", "excel", "pdf", "print", "colvis"],
+      "rowCallback": function(row, _data, _displayIndex) {
+        const sid = $(row).data('system-id');
+        const list = containersBySystem[sid];
+        const cell = $(row).find('td.expand-toggle');
+        if (list && list.length > 0) {
+          cell.html('<span class="text-muted">▶</span>');
+          cell.attr('title', list.length + ' container' + (list.length === 1 ? '' : 's'));
+        } else {
+          cell.empty().removeAttr('title');
+        }
+      }
     });
 
     table.buttons().container().appendTo('#systems_table_wrapper .col-md-6:eq(0)');
@@ -572,15 +600,11 @@
 
     // ─────────────────────────────────────────────────────────────────────
     // Container inventory — chevron in column 1 expands a DataTables child
-    // row with the host's containers. JSON blob is preloaded; click on a
-    // container row opens the detail modal.
+    // row with the host's containers. The chevron itself is painted by the
+    // DataTables rowCallback above (which fires on every redraw, so it
+    // survives pagination / sort / responsive resize). Below: helpers for
+    // rendering the child-row table and the container detail modal.
     // ─────────────────────────────────────────────────────────────────────
-    let containersBySystem = {};
-    try {
-      const blob = document.getElementById('containers-by-system');
-      containersBySystem = JSON.parse(blob ? blob.textContent : '{}');
-    } catch (e) { containersBySystem = {}; }
-
     function runtimeIcon(rt) {
       if (rt === 'docker') return '<i class="fab fa-docker text-primary mr-1" title="Docker"></i>';
       if (rt === 'podman') return '<i class="fas fa-cube text-warning mr-1" title="Podman"></i>';
@@ -609,17 +633,6 @@
       });
       return h + '</tbody></table></div>';
     }
-
-    // Paint a small ▶ on rows where the host has any containers.
-    $('#systems_table tbody tr').each(function() {
-      const sid = $(this).data('system-id');
-      const list = containersBySystem[sid];
-      const cell = $(this).find('td.expand-toggle');
-      if (list && list.length > 0) {
-        cell.html('<span class="text-muted">▶</span>');
-        cell.attr('title', list.length + ' container' + (list.length === 1 ? '' : 's'));
-      }
-    });
 
     // Cache the rendered HTML on the row so we can re-show after a redraw.
     $('#systems_table tbody').on('click', 'td.expand-toggle', function() {
