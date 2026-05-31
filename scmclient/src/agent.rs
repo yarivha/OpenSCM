@@ -236,6 +236,29 @@ async fn process_compliance_tests(
                      && !c.selement.is_empty() && c.selement != "None")
             .collect();
 
+        // Print the test shape — filter, every condition, the dispatch decision.
+        // Gives the operator an at-a-glance view of what the agent is about to
+        // do without having to trace through individual condition logs.
+        debug!(
+            "Test ID {} '{}' — filter='{}', {} condition(s):",
+            test_id,
+            test.name,
+            test.filter.as_deref().unwrap_or("all"),
+            conds.len()
+        );
+        for (i, c) in conds.iter().enumerate() {
+            debug!(
+                "  cond[{}]: element='{}' selement='{}' input='{}' condition='{}' sinput='{}' (per-container={})",
+                i,
+                c.element,
+                c.selement,
+                c.input,
+                c.condition.as_deref().unwrap_or(""),
+                c.sinput.as_deref().unwrap_or(""),
+                crate::compliance::is_per_container_element(&c.element),
+            );
+        }
+
         let is_per_container = conds.iter()
             .any(|c| crate::compliance::is_per_container_element(&c.element));
 
@@ -244,23 +267,33 @@ async fn process_compliance_tests(
             // a separate result row identified by its runtime_id (which the
             // server resolves to containers.id at result-receive time).
             let containers = crate::containers::enumerate();
+            debug!(
+                "Test ID {} dispatch: per-container — discovered {} container(s)",
+                test_id, containers.len()
+            );
             if containers.is_empty() {
-                // No containers on this host → the per-container test has
-                // nothing to evaluate against → single NA result at host
-                // scope. Honest signal in reports.
                 debug!("Test ID {} is per-container but host has zero containers — sending NA.", test_id);
                 send_result(client_id_int, organization, test_id, "NA", None, signing_key, http_client, result_url).await;
             } else {
                 for container in &containers {
-                    let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
-                        &c.element, &c.input, &c.selement,
-                        c.condition.as_deref().unwrap_or(""),
-                        c.sinput.as_deref().unwrap_or(""),
-                        cmd_enabled, ps_enabled,
-                        Some(container),
-                    )).collect();
+                    debug!(
+                        "Test ID {} evaluating against container '{}' (runtime={}, runtime_id={}, image={:?}, run_user={:?}, net_mode={:?}, privileged={:?})",
+                        test_id, container.name, container.runtime, &container.runtime_id[..container.runtime_id.len().min(12)],
+                        container.image, container.run_user, container.network_mode, container.is_privileged
+                    );
+                    let results: Vec<EvalResult> = conds.iter().enumerate().map(|(i, c)| {
+                        let r = evaluate(
+                            &c.element, &c.input, &c.selement,
+                            c.condition.as_deref().unwrap_or(""),
+                            c.sinput.as_deref().unwrap_or(""),
+                            cmd_enabled, ps_enabled,
+                            Some(container),
+                        );
+                        debug!("  cond[{}] {} {} → {:?}", i, c.element, c.selement, r);
+                        r
+                    }).collect();
                     let verdict = crate::compliance::combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
-                    debug!("Test ID {} container '{}' result: {}", test_id, container.name, verdict);
+                    debug!("Test ID {} container '{}' final verdict: {}", test_id, container.name, verdict);
                     send_result(client_id_int, organization, test_id, &verdict,
                                 Some(container.runtime_id.clone()),
                                 signing_key, http_client, result_url).await;
@@ -268,15 +301,20 @@ async fn process_compliance_tests(
             }
         } else {
             // Host-scope test — single result, no container context.
-            let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
-                &c.element, &c.input, &c.selement,
-                c.condition.as_deref().unwrap_or(""),
-                c.sinput.as_deref().unwrap_or(""),
-                cmd_enabled, ps_enabled,
-                None,
-            )).collect();
+            debug!("Test ID {} dispatch: host-scope", test_id);
+            let results: Vec<EvalResult> = conds.iter().enumerate().map(|(i, c)| {
+                let r = evaluate(
+                    &c.element, &c.input, &c.selement,
+                    c.condition.as_deref().unwrap_or(""),
+                    c.sinput.as_deref().unwrap_or(""),
+                    cmd_enabled, ps_enabled,
+                    None,
+                );
+                debug!("  cond[{}] {} {} → {:?}", i, c.element, c.selement, r);
+                r
+            }).collect();
             let verdict = crate::compliance::combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
-            debug!("Test ID {} result: {}", test_id, verdict);
+            debug!("Test ID {} final verdict: {}", test_id, verdict);
             send_result(client_id_int, organization, test_id, &verdict, None, signing_key, http_client, result_url).await;
         }
         debug!("Completed evaluation of test ID {}", test_id);
