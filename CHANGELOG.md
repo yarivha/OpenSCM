@@ -8,6 +8,16 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.5.1] - 2026-05-31
+
+### Fixed
+- **Container chevron missing for some hosts in the Systems list.** Two related bugs surfaced on tenants whose container-having hosts spanned multiple DataTables pages:
+  - Rows on non-current pages never got the `▶` chevron — the previous paint was a one-shot `$.each(...)` at init time, but DataTables detaches non-current-page rows from the DOM, so the iterator only ever saw page 1. Paginating to other pages attached the rows but left the `expand-toggle` cells empty.
+  - Even rows on the *current* page sometimes had empty cells — `responsive: true` performs an async redraw after init that wipes any pre-paint DOM mutations.
+  - Both fixed by hooking into DataTables' `rowCallback`, which fires for every row at every redraw (initial render, pagination, sort, search, responsive resize). The chevron now survives every lifecycle event. `containersBySystem` is initialised above the `DataTable()` init so the callback can reference it; the dedicated `$.each` paint loop is removed as redundant.
+
+---
+
 ## [0.5.0] - 2026-05-31
 
 ### Fixed
