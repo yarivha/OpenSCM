@@ -237,9 +237,19 @@ fn enrich(runtime: &str, id: &str, c: &mut DiscoveredContainer) {
     }
 
     if let Some(cfg) = root.get("Config") {
-        c.run_user = cfg.get("User").and_then(|v| v.as_str())
-            .filter(|s| !s.is_empty())
-            .map(String::from);
+        // Config.User is "" when the Dockerfile has no explicit USER
+        // directive — which means the container runs as the image's
+        // built-in default user. In practice that's almost always
+        // root (uid 0). Reporting empty as "root" makes
+        // `RUN_USER CONTAINS root` checks actually flag the case the
+        // test author expects, rather than returning NA for every
+        // unconfigured container.
+        c.run_user = Some(
+            cfg.get("User").and_then(|v| v.as_str())
+                .filter(|s| !s.is_empty())
+                .map(String::from)
+                .unwrap_or_else(|| "root".to_string())
+        );
         c.health_check = Some(cfg.get("Healthcheck").is_some());
     }
 }
