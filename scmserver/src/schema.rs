@@ -149,19 +149,23 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             tests_passed INTEGER DEFAULT 0,
             tests_failed INTEGER DEFAULT 0,
             total_tests INTEGER DEFAULT 0,
+            compliance_dirty INTEGER NOT NULL DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
     .execute(pool)
     .await?;
 
-    // System Groups Table
+    // System Groups Table — auto_managed flag distinguishes manual
+    // (admin-curated) groups from auto groups whose membership is
+    // determined by a rule in auto_group_rules.  Immutable after create.
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS system_groups (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
             name VARCHAR(191) NOT NULL,
             description TEXT,
+            auto_managed INTEGER NOT NULL DEFAULT 0,
             UNIQUE(name, tenant_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
@@ -178,6 +182,28 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             PRIMARY KEY (tenant_id, system_id, group_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
+            FOREIGN KEY (group_id) REFERENCES system_groups (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+
+    // Auto-Group Rules Table — one rule per auto group (UNIQUE(group_id)).
+    // `conditions` holds a JSON array of {field, op, value} objects evaluated
+    // with AND semantics.  Membership is reconciled by apply_auto_groups()
+    // on heartbeat (when a rule-relevant field changes) and on rule edit.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS auto_group_rules (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+            group_id INTEGER NOT NULL UNIQUE,
+            name TEXT NOT NULL,
+            description TEXT,
+            conditions TEXT NOT NULL,
+            enabled INTEGER NOT NULL DEFAULT 1,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (group_id) REFERENCES system_groups (id) ON DELETE CASCADE
         )",
     )
@@ -2013,6 +2039,69 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v26 → v27 complete.");
+    }
+
+    // v27 → v28: automatic group assignment.
+    //
+    //   • system_groups.auto_managed  — group type (0 = manual, 1 = auto)
+    //   • systems.compliance_dirty    — set when a system's auto-group
+    //                                   membership changed and its current
+    //                                   compliance needs a recalc on the
+    //                                   next scheduler tick.
+    //   • auto_group_rules            — one rule per auto group, UNIQUE(group_id).
+    //
+    // All three columns/tables are nullable-safe and back-compat: existing
+    // groups stay auto_managed = 0 (manual), existing systems stay
+    // compliance_dirty = 0, and no auto_group_rules rows exist until an
+    // admin creates an auto group.
+    if version < 28 {
+        info!("Running schema migration v27 → v28 (automatic group assignment)...");
+
+        if !column_exists(pool, "system_groups", "auto_managed").await {
+            sqlx::query(
+                "ALTER TABLE system_groups
+                    ADD COLUMN auto_managed INTEGER NOT NULL DEFAULT 0"
+            ).execute(pool).await?;
+        }
+
+        if !column_exists(pool, "systems", "compliance_dirty").await {
+            sqlx::query(
+                "ALTER TABLE systems
+                    ADD COLUMN compliance_dirty INTEGER NOT NULL DEFAULT 0"
+            ).execute(pool).await?;
+        }
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS auto_group_rules (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+                group_id INTEGER NOT NULL UNIQUE,
+                name TEXT NOT NULL,
+                description TEXT,
+                conditions TEXT NOT NULL,
+                enabled INTEGER NOT NULL DEFAULT 1,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
+                FOREIGN KEY (group_id) REFERENCES system_groups (id) ON DELETE CASCADE
+            )"
+        ).execute(pool).await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_agr_tenant_enabled
+                ON auto_group_rules (tenant_id, enabled)"
+        ).execute(pool).await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_systems_compliance_dirty
+                ON systems (tenant_id, compliance_dirty)
+                WHERE compliance_dirty = 1"
+        ).execute(pool).await?;
+
+        sqlx::query("UPDATE schema_info SET version = 28")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v27 → v28 complete.");
     }
 
     Ok(())

@@ -6,6 +6,14 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Schema v27 → v28 — automatic group assignment groundwork.** Three additions that the upcoming auto-groups feature builds on, all back-compat with existing data:
+  - `system_groups.auto_managed` (INTEGER, default 0) — group type flag. `0` = manual (admin-curated, existing behaviour). `1` = auto (membership reconciled by a rule). Immutable after group creation. All existing groups remain manual.
+  - `systems.compliance_dirty` (INTEGER, default 0) — set to `1` when a system's auto-group membership changed on heartbeat and its current compliance needs a recalc on the next scheduler tick. Consumed and cleared by `recalculate_current_compliance`. Lets the heartbeat hot path stay fast while still keeping compliance fresh within one scheduler interval. Indexed on `(tenant_id, compliance_dirty) WHERE compliance_dirty = 1` so the scheduler sweep is O(dirty), not O(all systems).
+  - `auto_group_rules` table — one rule per auto group via `UNIQUE(group_id)`. Holds `name`, `description`, `conditions` (JSON array of `{field, op, value}` AND-evaluated), and `enabled` flag. FK to `system_groups` with `ON DELETE CASCADE` so deleting an auto group cleanly removes its rule. Indexed on `(tenant_id, enabled)` for the heartbeat fast-path lookup.
+
+  No behavioural change yet — only the column/table groundwork. Membership eval, heartbeat hook, and admin UI land in subsequent steps.
+
 ---
 
 ## [0.5.1] - 2026-05-31
