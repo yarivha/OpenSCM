@@ -195,8 +195,18 @@ pub async fn policies_add(
         }
     };
 
+    // Pull auto_managed so the template can render a visual marker on
+    // auto-groups in the duallistbox. Auto groups ARE selectable as
+    // policy scope (rule-driven membership is fine for compliance
+    // scope); the marker is purely to help admins tell them apart from
+    // manual groups in the picker.  Order: manual first, then auto,
+    // each alphabetical — admins typically reach for manual groups
+    // when defining policy scope, and grouping by type avoids a mixed
+    // list that's hard to scan.
     let groups_result = sqlx::query(
-        "SELECT id, name FROM system_groups WHERE tenant_id = ?",
+        "SELECT id, name, auto_managed FROM system_groups
+         WHERE tenant_id = ?
+         ORDER BY auto_managed ASC, name ASC",
     )
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
@@ -208,6 +218,7 @@ pub async fn policies_add(
             .map(|row| SystemGroup {
                 id: row.get("id"),
                 name: row.get("name"),
+                auto_managed: row.try_get("auto_managed").unwrap_or(0),
                 ..Default::default()
             })
             .collect(),
@@ -501,15 +512,24 @@ pub async fn policies_edit(
         Err(e) => { error!("Failed to fetch tests for policy edit {}: {}", id, e); vec![] }
     };
 
+    // Auto-groups are valid policy targets — pull the flag so the picker
+    // can mark them.  Manual first, then auto, alphabetical within each.
     let groups_result = sqlx::query(
-        "SELECT id, name FROM system_groups WHERE tenant_id = ?",
+        "SELECT id, name, auto_managed FROM system_groups
+         WHERE tenant_id = ?
+         ORDER BY auto_managed ASC, name ASC",
     )
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
     .await;
 
     let system_groups: Vec<SystemGroup> = match groups_result {
-        Ok(rows) => rows.into_iter().map(|r| SystemGroup { id: r.get("id"), name: r.get("name"), ..Default::default() }).collect(),
+        Ok(rows) => rows.into_iter().map(|r| SystemGroup {
+            id: r.get("id"),
+            name: r.get("name"),
+            auto_managed: r.try_get("auto_managed").unwrap_or(0),
+            ..Default::default()
+        }).collect(),
         Err(e) => { error!("Failed to fetch system groups for policy edit {}: {}", id, e); vec![] }
     };
 

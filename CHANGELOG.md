@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Policy editor's group picker visually marks auto-managed groups.** The group duallistbox on `/policies/add` and `/policies/edit/{id}` already included auto groups (no `auto_managed` filter), but they rendered as plain names — admins couldn't tell at a glance which entries would update automatically vs which they had to maintain. Each auto-group entry now appears as `✨ <name> (auto)` with `data-auto="1"` on the `<option>`. Order: manual groups first (alphabetical), then auto groups (alphabetical). A help line below the picker spells out that auto and manual groups can be mixed freely in a single policy — useful for "linux fleet (auto) + special-handling list (manual)" combinations.
+
 ### Fixed
 - **`derive_os_family` now recognises `"Mac OS …"` (with a space) as macOS.** User report: an auto-group with rule `os_family contains "mac"` failed to match a Mac whose agent reported `os = "Mac OS 26.5.0"` (the literal display string `os_info 3.x` emits on Apple Silicon). The matcher's macOS branch only checked for `"darwin"` and `"macos"` (no space), so the lowercased input `"mac os 26.5.0"` fell through to the catch-all `"other"`. Once `os_family` was `None`, `match_opt_string(None, …)` short-circuited to `false` and the system never joined the group. Broadened the macOS branch to also match `"mac os"` (with space) and the `mac…` prefix — covers `"Mac OS"`, `"Mac OS X"`, `"macOS"`, `"Darwin"`, and `"Macintosh"`, all verified by a new regression test (`derive_os_family_macos_variants`). Linux / Windows / BSD strings stay on their own branches (no false positives). 23/23 tests pass.
 

@@ -98,12 +98,21 @@
               <div class="card-body">
                 <select name="system_groups" class="duallistbox" multiple="multiple">
                   {% for group in system_groups %}
+                    {# ✨ prefix + (auto) suffix mark rule-managed groups so they're
+                       distinguishable from manual ones in the duallistbox. Both
+                       kinds are valid policy scope — auto groups just have
+                       rule-driven membership. #}
                     <option value="{{ group.id }}"
-                      {% for connection in systems_in_policy %}{% if group.id == connection.group_id %}selected="selected"{% endif %}{% endfor %}>
-                      {{ group.name }}
-                    </option>
+                            data-auto="{{ group.auto_managed }}"
+                      {% for connection in systems_in_policy %}{% if group.id == connection.group_id %}selected="selected"{% endif %}{% endfor %}>{% if group.auto_managed == 1 %}✨ {% endif %}{{ group.name }}{% if group.auto_managed == 1 %} (auto){% endif %}</option>
                   {% endfor %}
                 </select>
+                <small class="form-text text-muted mt-2">
+                  <i class="fas fa-info-circle mr-1"></i>
+                  Groups marked <strong>✨ (auto)</strong> are rule-managed —
+                  their membership is reconciled automatically on every heartbeat.
+                  Manual groups and auto groups can be combined freely in a single policy.
+                </small>
               </div>
             </div>
           </div>
