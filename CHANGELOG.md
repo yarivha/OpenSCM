@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Scheduler consumes `systems.compliance_dirty`.** New TASK F in the 60-second scheduler loop: if any system has `compliance_dirty = 1`, clear the flag and run `recalculate_current_compliance`. This is what makes the heartbeat-time auto-group reconciliation actually reflect in compliance scores — without it, a system that moved into a new auto group (and therefore picked up new policies via the group → policy → tests chain) would carry stale `compliance_score` / `tests_passed` / `tests_failed` until the next admin action or restart. The COUNT pre-check keeps the no-dirt-flags steady state cheap (one indexed scan against the partial index `idx_systems_compliance_dirty`). Clear-before-recalc ordering means concurrent heartbeats setting NEW flags during the recalc window survive to the next tick — bounded one-tick (60s) lag matches the "accept the lag" decision from the design doc.
+
 ### Changed
 - **Manual group pickers filter out auto-managed groups.** Three places where an admin would otherwise be able to pick an auto group, only to have the choice undone on the next heartbeat:
   - **Systems list — "Add to Group" bulk modal**: the dropdown now only lists `auto_managed = 0` groups. If no manual groups exist the modal shows the existing "Create a group first" prompt.

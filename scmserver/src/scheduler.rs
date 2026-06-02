@@ -10,7 +10,7 @@
 use sqlx::{SqlitePool, Row};
 use tokio::time::{self, Duration};
 use chrono::{Utc, Timelike, Datelike};
-use tracing::{info, error};
+use tracing::{info, warn, error};
 use reqwest::Client;
 
 use crate::models::PolicySchedule;
@@ -528,6 +528,44 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 
                 // --- TASK D: VERSION UPDATE CHECK ---
                 check_for_updates(&loop_pool).await;
+            }
+
+            // --- TASK F: AUTO-GROUP COMPLIANCE DIRTY BIT ---
+            // Heartbeats whose auto-group membership churned set
+            // systems.compliance_dirty = 1 (see auto_groups::apply_auto_groups).
+            // We consume the bit here rather than synchronously recalculating
+            // on the heartbeat hot path — keeps /send fast even when a rule
+            // edit triggers cascading membership changes across many systems.
+            //
+            // Strategy: clear the flag BEFORE running the recalc, so any
+            // concurrent heartbeat that flags a NEW system during the recalc
+            // window survives to the next tick.  Worst case is one tick (60s)
+            // of latency, which matches the "accept the lag" decision in
+            // docs/design/0.5.2-auto-groups.md §14 Q2.
+            //
+            // The COUNT keeps the no-op path cheap (one indexed scan against
+            // the partial index `idx_systems_compliance_dirty`).
+            let dirty_count: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM systems WHERE compliance_dirty = 1"
+            )
+            .fetch_one(&loop_pool)
+            .await
+            .unwrap_or(0);
+
+            if dirty_count > 0 {
+                info!("auto-groups: {} system(s) flagged compliance_dirty — recalculating", dirty_count);
+
+                if let Err(e) = sqlx::query(
+                    "UPDATE systems SET compliance_dirty = 0 WHERE compliance_dirty = 1"
+                )
+                .execute(&loop_pool)
+                .await {
+                    warn!("auto-groups: could not clear compliance_dirty bits: {}", e);
+                }
+
+                if let Err(e) = recalculate_current_compliance(&loop_pool).await {
+                    error!("auto-groups: compliance recalc after membership churn failed: {}", e);
+                }
             }
 
             // --- TASK E: DAILY RETENTION PRUNE ---
