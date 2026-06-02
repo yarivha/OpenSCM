@@ -33,6 +33,11 @@ use crate::auto_groups;
 use crate::handlers::{render_template, parse_form_data};
 use crate::models::{AuthSession, ErrorQuery, UserRole};
 
+// Maximum number of condition rows the click-based rule editor renders.
+// Tests cap at 10 (see tests_add.html); auto-group rules rarely exceed 4-5
+// in practice, so 8 leaves plenty of headroom without bloating the page.
+const MAX_COND: usize = 8;
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper — redirect_err
 // Build a redirect back to /system_groups carrying a URL-encoded error.
@@ -64,12 +69,13 @@ pub async fn auto_add(
     if let Some(msg) = query.error_message {
         ctx.insert("error_message", &msg);
     }
-    // Pre-fill with a minimal example so admins land in a form that's
-    // already valid JSON; deleting / replacing is easier than constructing
-    // from scratch.
-    ctx.insert("default_conditions", &serde_json::json!([
-        { "field": "os_family", "operator": "equals", "value": "linux" }
-    ]).to_string());
+    // Click-based editor: empty rows. The template renders MAX_COND row
+    // scaffolds, hidden by default, revealed one-by-one via "Add Condition".
+    // No initial row data — the admin builds the rule from scratch with
+    // dropdowns + a single value input per row.
+    ctx.insert("conditions",   &Vec::<(String, String, String)>::new());
+    ctx.insert("max_cond",     &MAX_COND);
+    ctx.insert("row_ids",      &(1..=MAX_COND).collect::<Vec<usize>>());
 
     render_template(&tera, Some(&pool), "auto_groups_add.html", ctx, Some(auth))
         .await
@@ -106,12 +112,14 @@ pub async fn auto_add_save(
     };
     let description = form.get("description")
         .and_then(|v| v.first()).cloned().unwrap_or_default();
-    let conditions_raw = form.get("conditions")
-        .and_then(|v| v.first()).cloned().unwrap_or_default();
 
-    // Validate conditions BEFORE opening any transaction — keeps the
-    // error path cheap and the rollback unnecessary in the common
-    // "admin pasted broken JSON" case.
+    // Assemble the conditions JSON from the click-editor form fields
+    // (field_1, op_1, value_1, …). Validate up front so the rollback
+    // path stays cheap in the common "incomplete row" case.
+    let conditions_raw = match auto_groups::build_conditions_json_from_form(&form, MAX_COND) {
+        Ok(s) => s,
+        Err(e) => return redirect_err(format!("Rule conditions: {}", e)),
+    };
     if let Err(e) = auto_groups::validate_conditions_json(&conditions_raw) {
         return redirect_err(format!("Invalid rule conditions: {}", e));
     }
@@ -249,17 +257,24 @@ pub async fn auto_edit(
         .filter_map(|r| r.try_get::<String, _>("name").ok())
         .collect();
 
+    // Explode the stored JSON conditions into per-row tuples for the
+    // click editor.  Returns Vec<(field, operator, display_value)>.
+    let conds_raw = row.try_get::<String, _>("conditions").unwrap_or_default();
+    let conditions = auto_groups::explode_conditions_for_form(&conds_raw);
+
     let mut ctx = Context::new();
     if let Some(msg) = query.error_message {
         ctx.insert("error_message", &msg);
     }
-    ctx.insert("group_id",      &id);
-    ctx.insert("group_name",    &row.try_get::<String, _>("name").unwrap_or_default());
-    ctx.insert("description",   &row.try_get::<Option<String>, _>("description")
-                                       .ok().flatten().unwrap_or_default());
-    ctx.insert("conditions",    &row.try_get::<String, _>("conditions").unwrap_or_default());
-    ctx.insert("enabled",       &(row.try_get::<i64, _>("enabled").unwrap_or(1) == 1));
-    ctx.insert("matching",      &matching);
+    ctx.insert("group_id",    &id);
+    ctx.insert("group_name",  &row.try_get::<String, _>("name").unwrap_or_default());
+    ctx.insert("description", &row.try_get::<Option<String>, _>("description")
+                                     .ok().flatten().unwrap_or_default());
+    ctx.insert("conditions",  &conditions);
+    ctx.insert("max_cond",    &MAX_COND);
+    ctx.insert("row_ids",     &(1..=MAX_COND).collect::<Vec<usize>>());
+    ctx.insert("enabled",     &(row.try_get::<i64, _>("enabled").unwrap_or(1) == 1));
+    ctx.insert("matching",    &matching);
 
     render_template(&tera, Some(&pool), "auto_groups_edit.html", ctx, Some(auth))
         .await
@@ -295,11 +310,17 @@ pub async fn auto_edit_save(
     };
     let description = form.get("description")
         .and_then(|v| v.first()).cloned().unwrap_or_default();
-    let conditions_raw = form.get("conditions")
-        .and_then(|v| v.first()).cloned().unwrap_or_default();
     // Checkboxes only appear in the form when checked.
     let enabled: i64 = if form.contains_key("enabled") { 1 } else { 0 };
 
+    // Assemble + validate conditions from the click-editor form fields.
+    let conditions_raw = match auto_groups::build_conditions_json_from_form(&form, MAX_COND) {
+        Ok(s) => s,
+        Err(e) => return Redirect::to(&format!(
+            "/system_groups/auto/edit/{}?error_message={}",
+            id, urlencoding::encode(&format!("Rule conditions: {}", e))
+        )).into_response(),
+    };
     if let Err(e) = auto_groups::validate_conditions_json(&conditions_raw) {
         return Redirect::to(&format!(
             "/system_groups/auto/edit/{}?error_message={}",

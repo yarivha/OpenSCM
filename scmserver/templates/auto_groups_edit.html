@@ -1,4 +1,32 @@
 {% extends "base.html" %}
+
+{% block head %}
+<style>
+  .dark-mode .card { background-color: #343a40 !important; color: #fff; border: 1px solid #4b545c; }
+  .dark-mode .card-header { border-bottom: 1px solid #4b545c; }
+
+  .logic-container {
+    background: rgba(0,0,0,0.02);
+    border: 1px solid #dee2e6;
+    border-radius: 8px;
+    padding: 20px;
+  }
+  .dark-mode .logic-container { background: rgba(255,255,255,0.02); border-color: #4b545c; }
+
+  .condition-row {
+    background: #fff;
+    border: 1px solid #e9ecef;
+    padding: 15px 10px;
+    border-radius: 6px;
+    transition: all 0.2s;
+  }
+  .dark-mode .condition-row { background: #3f474e; border-color: #4b545c; }
+
+  .condition-label { font-size: 0.75rem; font-weight: bold; color: #6c757d; text-transform: uppercase; margin-bottom: 4px; }
+  .dark-mode .condition-label { color: #adb5bd; }
+</style>
+{% endblock %}
+
 {% block content %}
 <div class="content-wrapper">
   <section class="content-header">
@@ -34,16 +62,16 @@
 
       <div class="row">
         <div class="col-lg-8">
-          <div class="card card-outline card-primary shadow-sm">
-            <div class="card-header">
-              <h3 class="card-title">Rule Definition</h3>
-              <div class="card-tools">
-                <span class="badge badge-{% if enabled %}success{% else %}secondary{% endif %}">
-                  {% if enabled %}ENABLED{% else %}DISABLED{% endif %}
-                </span>
+          <form method="POST" action="/system_groups/auto/edit/{{ group_id }}">
+            <div class="card card-primary card-outline shadow-sm">
+              <div class="card-header">
+                <h3 class="card-title">Group Identity</h3>
+                <div class="card-tools">
+                  <span class="badge badge-{% if enabled %}success{% else %}secondary{% endif %}">
+                    {% if enabled %}ENABLED{% else %}DISABLED{% endif %}
+                  </span>
+                </div>
               </div>
-            </div>
-            <form method="POST" action="/system_groups/auto/edit/{{ group_id }}">
               <div class="card-body">
                 <div class="form-group">
                   <label for="name">Group Name *</label>
@@ -55,21 +83,10 @@
                   <input type="text" name="description" id="description"
                          class="form-control" value="{{ description }}">
                 </div>
-                <div class="form-group">
-                  <label for="conditions">Rule Conditions (JSON, AND-combined) *</label>
-                  <textarea name="conditions" id="conditions" rows="10"
-                            class="form-control font-monospace" required
-                            style="font-family: monospace;">{{ conditions }}</textarea>
-                  <small class="form-text text-muted">
-                    All conditions must match for a system to join the group.
-                  </small>
-                  <div id="cond-feedback" class="mt-2"></div>
-                </div>
-                <div class="form-group">
+                <div class="form-group mb-0">
                   <div class="form-check">
                     <input type="checkbox" name="enabled" id="enabled"
-                           class="form-check-input"
-                           {% if enabled %}checked{% endif %}>
+                           class="form-check-input" {% if enabled %}checked{% endif %}>
                     <label class="form-check-label" for="enabled">
                       Rule is enabled
                       <small class="text-muted ml-2">
@@ -79,25 +96,120 @@
                   </div>
                 </div>
               </div>
-              <div class="card-footer text-right">
-                <a href="/system_groups" class="btn btn-default">Cancel</a>
-                <form method="POST" action="/system_groups/auto/toggle/{{ group_id }}" style="display:inline">
-                  <button type="submit" class="btn btn-warning"
-                          onclick="return confirm('Toggle this rule\'s enabled state? Matching systems will be re-evaluated.');">
-                    <i class="fas fa-power-off mr-1"></i>
-                    {% if enabled %}Disable{% else %}Enable{% endif %}
+            </div>
+
+            <div class="card card-info card-outline shadow-sm mt-3">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-project-diagram mr-2"></i>Rule Conditions</h3>
+              </div>
+              <div class="card-body">
+                <div class="logic-container">
+                  <div class="d-flex align-items-center mb-4">
+                    <h5 class="m-0">A system joins this group when</h5>
+                    <span class="badge badge-info mx-2" style="font-size: 0.85rem;">ALL</span>
+                    <h5 class="m-0">of the following conditions match:</h5>
+                  </div>
+
+                  <div id="conditionsContainer">
+                    {% for i in row_ids %}
+                      {% set idx = i - 1 %}
+                      {% set has_data = idx < conditions | length %}
+                      {% if has_data %}
+                        {% set cond = conditions | nth(n=idx) %}
+                      {% endif %}
+                      <div class="condition-row mb-3 row align-items-end shadow-sm"
+                           data-id="cond_{{ i }}"
+                           {% if not has_data %}style="display: none;"{% endif %}>
+                        <div class="col-md-3">
+                          <div class="condition-label">Field</div>
+                          <select class="form-control field-select" name="field_{{ i }}"
+                                  data-row="{{ i }}" onchange="onFieldChange(this)">
+                            <option value="">-- Select field --</option>
+                            <optgroup label="Identity">
+                              <option value="hostname"            {% if has_data and cond.0 == "hostname" %}selected{% endif %}>Hostname</option>
+                              <option value="ip"                  {% if has_data and cond.0 == "ip" %}selected{% endif %}>IP Address</option>
+                              <option value="status"              {% if has_data and cond.0 == "status" %}selected{% endif %}>Status (active / pending)</option>
+                            </optgroup>
+                            <optgroup label="Platform">
+                              <option value="os"                  {% if has_data and cond.0 == "os" %}selected{% endif %}>OS (full string)</option>
+                              <option value="os_family"           {% if has_data and cond.0 == "os_family" %}selected{% endif %}>OS Family (linux / macos / windows / freebsd)</option>
+                              <option value="arch"                {% if has_data and cond.0 == "arch" %}selected{% endif %}>Architecture (x86_64 / aarch64 / arm64)</option>
+                              <option value="platform"            {% if has_data and cond.0 == "platform" %}selected{% endif %}>Platform ("arch-os_family")</option>
+                              <option value="ver"                 {% if has_data and cond.0 == "ver" %}selected{% endif %}>Agent Version (semver)</option>
+                            </optgroup>
+                            <optgroup label="Telemetry">
+                              <option value="mem_total_mb"        {% if has_data and cond.0 == "mem_total_mb" %}selected{% endif %}>Memory (MB)</option>
+                              <option value="disk_total_gb"       {% if has_data and cond.0 == "disk_total_gb" %}selected{% endif %}>Disk (GB)</option>
+                              <option value="uptime_secs"         {% if has_data and cond.0 == "uptime_secs" %}selected{% endif %}>Uptime (seconds)</option>
+                            </optgroup>
+                            <optgroup label="Containers">
+                              <option value="containers_exists"   {% if has_data and cond.0 == "containers_exists" %}selected{% endif %}>Containers Running (bool)</option>
+                              <option value="has_runtime"         {% if has_data and cond.0 == "has_runtime" %}selected{% endif %}>Container Runtime (docker / podman)</option>
+                              <option value="any_container_image" {% if has_data and cond.0 == "any_container_image" %}selected{% endif %}>Any Container Image</option>
+                            </optgroup>
+                          </select>
+                        </div>
+
+                        <div class="col-md-3">
+                          <div class="condition-label">Operator</div>
+                          <select class="form-control op-select" name="op_{{ i }}"
+                                  data-row="{{ i }}"
+                                  {% if has_data %}data-preselect-op="{{ cond.1 }}"{% endif %}>
+                            <option value="">-- Select operator --</option>
+                          </select>
+                        </div>
+
+                        <div class="col-md-5">
+                          <div class="condition-label">Value</div>
+                          <input type="text" class="form-control value-input"
+                                 name="value_{{ i }}" data-row="{{ i }}"
+                                 value="{% if has_data %}{{ cond.2 }}{% endif %}"
+                                 placeholder="Pick a field to see hints">
+                        </div>
+
+                        <div class="col-md-1 text-right">
+                          {% if i != 1 %}
+                          <button type="button" class="btn btn-outline-danger btn-sm"
+                                  onclick="removeCondition(this)" title="Remove condition">
+                            <i class="fas fa-trash"></i>
+                          </button>
+                          {% endif %}
+                        </div>
+                      </div>
+                    {% endfor %}
+                  </div>
+
+                  <button type="button" class="btn btn-outline-info btn-sm mt-2"
+                          onclick="addCondition()">
+                    <i class="fas fa-plus mr-1"></i> Add Condition
                   </button>
-                </form>
-                <button type="submit" class="btn btn-primary">
+                  <small class="text-muted ml-2">
+                    Up to {{ max_cond }} conditions. All must match (AND).
+                  </small>
+                </div>
+              </div>
+              <div class="card-footer text-right">
+                <a href="/system_groups" class="btn btn-secondary px-4">Cancel</a>
+                <button type="submit" class="btn btn-success px-5 ml-2 shadow-sm">
                   <i class="fas fa-save mr-1"></i> Save Changes
                 </button>
               </div>
-            </form>
-          </div>
+            </div>
+          </form>
+
+          <!-- Toggle lives outside the main form so it can POST independently. -->
+          <form method="POST" action="/system_groups/auto/toggle/{{ group_id }}"
+                class="text-right mt-2">
+            <button type="submit" class="btn btn-warning btn-sm"
+                    onclick="return confirm('Toggle this rule\'s enabled state? Matching systems will be re-evaluated.');">
+              <i class="fas fa-power-off mr-1"></i>
+              {% if enabled %}Disable rule{% else %}Enable rule{% endif %}
+            </button>
+          </form>
         </div>
 
         <div class="col-lg-4">
-          <div class="card card-outline card-info shadow-sm">
+          <div class="card card-outline card-success shadow-sm">
             <div class="card-header">
               <h3 class="card-title">
                 <i class="fas fa-network-wired mr-1"></i>
@@ -127,27 +239,138 @@
 
 {% block scripts %}
 <script>
-(function () {
-  const ta = document.getElementById('conditions');
-  const fb = document.getElementById('cond-feedback');
-  function check() {
-    const raw = ta.value.trim();
-    if (!raw) { fb.innerHTML = ''; return; }
-    try {
-      const v = JSON.parse(raw);
-      if (!Array.isArray(v)) {
-        fb.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> JSON must be an array of conditions.</span>';
-      } else if (v.length === 0) {
-        fb.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> Array must contain at least one condition.</span>';
-      } else {
-        fb.innerHTML = '<span class="text-success"><i class="fas fa-check"></i> Valid JSON (' + v.length + ' condition' + (v.length === 1 ? '' : 's') + '). Server validates field / operator semantics on save.</span>';
-      }
-    } catch (e) {
-      fb.innerHTML = '<span class="text-danger"><i class="fas fa-times"></i> ' + e.message + '</span>';
+  // ============================================================
+  // Field → operator catalog. Mirrors Field::accepts() in
+  // scmserver/src/auto_groups.rs. Keep both in sync when adding
+  // a new field or operator.
+  // ============================================================
+  const FIELD_META = {
+    hostname:            { type: "string", placeholder: "e.g. web-prod-01" },
+    ip:                  { type: "ip",     placeholder: "10.0.0.5  or for in_cidr: 10.0.0.0/24" },
+    os:                  { type: "string", placeholder: "e.g. Ubuntu 24.04" },
+    os_family:           { type: "enum",   placeholder: "linux | macos | windows | freebsd | openbsd | netbsd" },
+    arch:                { type: "enum",   placeholder: "x86_64 | aarch64 | arm64 | i686" },
+    platform:            { type: "string", placeholder: "e.g. x86_64-linux" },
+    ver:                 { type: "semver", placeholder: "e.g. 0.5.2  (semver compare with eq/ne/lt/le/gt/ge)" },
+    status:              { type: "enum",   placeholder: "active | pending" },
+    mem_total_mb:        { type: "number", placeholder: "e.g. 16000" },
+    disk_total_gb:       { type: "number", placeholder: "e.g. 500" },
+    uptime_secs:         { type: "number", placeholder: "e.g. 86400 (one day)" },
+    containers_exists:   { type: "bool",   placeholder: "true  or  false" },
+    has_runtime:         { type: "enum",   placeholder: "docker | podman" },
+    any_container_image: { type: "string", placeholder: "e.g. nginx, postgres:16" },
+  };
+
+  const OPS_BY_TYPE = {
+    string: [
+      ["equals","equals"],["not_equals","not equals"],["contains","contains"],
+      ["not_contains","does not contain"],["starts_with","starts with"],
+      ["ends_with","ends with"],["regex","matches regex"],
+    ],
+    ip: [
+      ["equals","equals"],["not_equals","not equals"],["contains","contains"],
+      ["not_contains","does not contain"],["starts_with","starts with"],
+      ["ends_with","ends with"],["regex","matches regex"],["in_cidr","in CIDR"],
+    ],
+    number: [
+      ["eq","= (equals)"],["ne","≠ (not equals)"],["lt","<"],["le","≤"],["gt",">"],["ge","≥"],
+    ],
+    enum: [
+      ["equals","equals"],["not_equals","not equals"],
+      ["in","in (comma-separated list)"],["not_in","not in (comma-separated list)"],
+    ],
+    bool: [
+      ["equals","equals"],["not_equals","not equals"],
+    ],
+    semver: [
+      ["equals","equals (string)"],["not_equals","not equals (string)"],
+      ["contains","contains"],["not_contains","does not contain"],
+      ["starts_with","starts with"],["ends_with","ends with"],["regex","matches regex"],
+      ["eq","= (semver)"],["ne","≠ (semver)"],["lt","< (semver)"],["le","≤ (semver)"],
+      ["gt","> (semver)"],["ge","≥ (semver)"],
+    ],
+  };
+
+  function refreshRow(rowId, preselectedOp) {
+    const fieldEl = document.querySelector(`.field-select[data-row="${rowId}"]`);
+    const opEl    = document.querySelector(`.op-select[data-row="${rowId}"]`);
+    const valEl   = document.querySelector(`.value-input[data-row="${rowId}"]`);
+    if (!fieldEl || !opEl || !valEl) return;
+
+    const meta = FIELD_META[fieldEl.value];
+    if (!meta) {
+      opEl.innerHTML = '<option value="">-- Select field first --</option>';
+      valEl.placeholder = "Pick a field to see hints";
+      return;
+    }
+    const ops = OPS_BY_TYPE[meta.type] || [];
+    const target = preselectedOp || opEl.dataset.preselectOp || '';
+    opEl.innerHTML = '<option value="">-- Select operator --</option>' +
+      ops.map(([v, label]) =>
+        `<option value="${v}"${v === target ? ' selected' : ''}>${label}</option>`
+      ).join('');
+    valEl.placeholder = meta.placeholder;
+  }
+
+  function onFieldChange(selectEl) {
+    refreshRow(selectEl.dataset.row);
+  }
+
+  // On load, populate the operator dropdowns for every visible row that
+  // came pre-filled from the server (the template sets data-preselect-op).
+  document.addEventListener('DOMContentLoaded', function () {
+    document.querySelectorAll('.field-select').forEach(el => {
+      if (el.value) refreshRow(el.dataset.row);
+    });
+  });
+
+  const maxConditions = {{ max_cond }};
+  // Track which rows are currently visible (pre-filled rows count as used).
+  let usedIndexes = new Set();
+  document.querySelectorAll('.condition-row').forEach(row => {
+    if (row.style.display !== 'none') {
+      usedIndexes.add(parseInt(row.dataset.id.replace('cond_', ''), 10));
+    }
+  });
+  // The first row is always considered "used" so the form has at least one
+  // visible slot even when there are zero conditions (defensive — shouldn't
+  // happen post-validation, but keeps the editor usable).
+  if (usedIndexes.size === 0) usedIndexes.add(1);
+
+  function getNextAvailableIndex() {
+    for (let i = 1; i <= maxConditions; i++) {
+      if (!usedIndexes.has(i)) return i;
+    }
+    return -1;
+  }
+
+  function addCondition() {
+    if (usedIndexes.size >= maxConditions) {
+      alert("Maximum of " + maxConditions + " conditions reached.");
+      return;
+    }
+    const id = getNextAvailableIndex();
+    if (id === -1) return;
+    usedIndexes.add(id);
+    const row = document.querySelector(`.condition-row[data-id="cond_${id}"]`);
+    if (row) {
+      row.style.display = '';
+      row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
     }
   }
-  ta.addEventListener('input', check);
-  check();
-})();
+
+  function removeCondition(button) {
+    const row = button.closest('.condition-row');
+    if (!row) return;
+    const dataId = row.getAttribute('data-id');
+    const conditionId = parseInt(dataId.replace('cond_', ''), 10);
+    row.querySelectorAll('input, select').forEach(el => {
+      if (el.tagName === 'SELECT') el.selectedIndex = 0;
+      else el.value = '';
+    });
+    refreshRow(conditionId);
+    row.style.display = 'none';
+    usedIndexes.delete(conditionId);
+  }
 </script>
 {% endblock %}

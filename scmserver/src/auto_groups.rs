@@ -399,6 +399,157 @@ pub fn parse_conditions(raw: &str) -> Result<Vec<Condition>, String> {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Public — build_conditions_json_from_form
+// Assembles the canonical `conditions` JSON blob from the indexed form fields
+// posted by the click-based rule editor (auto_groups_add.html /
+// auto_groups_edit.html).  For each i ∈ 1..=max_rows it reads form keys
+// `field_i`, `op_i`, `value_i`; rows where all three are blank are dropped
+// (the UI uses hidden empty rows that the admin reveals via "Add Condition").
+//
+// Value coercion is driven by the operator:
+//
+//   • `in` / `not_in`  → split the raw value on commas, trim, build a JSON
+//                        array of strings.
+//   • numeric ops (`eq`/`ne`/`lt`/`le`/`gt`/`ge`) on a numeric field
+//                        (mem/disk/uptime)
+//                      → parse as i64 / f64, build JSON number.
+//   • semver numeric ops on the `ver` field  → keep as string (validator
+//                        accepts string values for semver-compare ops).
+//   • bool ops on `containers_exists`        → parse "true" / "1" / "yes" → true,
+//                        anything else → false.
+//   • everything else  → JSON string (the universal fallback; matches the
+//                        string-typed validation path in validate_value).
+//
+// The resulting string is the same shape validate_conditions_json already
+// accepts, so the handler can pipe it straight through that validator for
+// the final shape / regex / CIDR checks.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn build_conditions_json_from_form(
+    form: &std::collections::HashMap<String, Vec<String>>,
+    max_rows: usize,
+) -> Result<String, String> {
+    let mut out: Vec<serde_json::Value> = Vec::new();
+
+    for i in 1..=max_rows {
+        let field = form.get(&format!("field_{}", i))
+            .and_then(|v| v.first()).cloned().unwrap_or_default();
+        let op    = form.get(&format!("op_{}", i))
+            .and_then(|v| v.first()).cloned().unwrap_or_default();
+        let value = form.get(&format!("value_{}", i))
+            .and_then(|v| v.first()).cloned().unwrap_or_default();
+
+        // Drop fully-blank rows so the hidden template scaffolding doesn't
+        // bleed into the saved rule.  A partial row (one of the three set)
+        // is treated as an error so we don't silently keep half-finished
+        // input.
+        let any_set = !field.is_empty() || !op.is_empty() || !value.is_empty();
+        let all_set = !field.is_empty() && !op.is_empty() && !value.is_empty();
+        if !any_set { continue; }
+        if !all_set {
+            return Err(format!(
+                "condition #{} is incomplete — pick a field, operator, and value",
+                i
+            ));
+        }
+
+        let v_json = coerce_value(&field, &op, &value)?;
+        out.push(serde_json::json!({
+            "field":    field,
+            "operator": op,
+            "value":    v_json,
+        }));
+    }
+
+    if out.is_empty() {
+        return Err("rule must contain at least one condition".to_string());
+    }
+
+    serde_json::to_string(&out)
+        .map_err(|e| format!("could not serialise conditions: {}", e))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public — explode_conditions_for_form
+// Inverse of build_conditions_json_from_form.  Parses a stored conditions
+// JSON blob into per-row (field, operator, display_value) triples suitable
+// for pre-filling the click-based edit form.  Display value is the
+// human-typed form the admin originally entered:
+//   • arrays           → comma-joined string (matches the `in`/`not_in` UI)
+//   • numbers / bools  → their text form
+//   • strings          → as-is
+//
+// Tolerates malformed JSON (returns empty Vec) so the edit form is still
+// usable to repair a broken rule.
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn explode_conditions_for_form(raw: &str) -> Vec<(String, String, String)> {
+    let parsed: Vec<CondJson> = match serde_json::from_str(raw) {
+        Ok(v) => v,
+        Err(_) => return Vec::new(),
+    };
+    parsed.into_iter().map(|c| {
+        let display = match &c.value {
+            serde_json::Value::String(s) => s.clone(),
+            serde_json::Value::Number(n) => n.to_string(),
+            serde_json::Value::Bool(b)   => b.to_string(),
+            serde_json::Value::Array(a)  => a.iter().filter_map(|v| v.as_str().map(str::to_string))
+                                            .collect::<Vec<_>>().join(", "),
+            _ => String::new(),
+        };
+        (c.field, c.operator, display)
+    }).collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper — coerce_value
+// Per-operator + per-field type coercion used by build_conditions_json_from_form.
+// See that function's doc-comment for the full rule table.  Errors carry the
+// row-position context from the caller; this helper only knows about the
+// triple it was handed.
+// ─────────────────────────────────────────────────────────────────────────────
+fn coerce_value(field: &str, op: &str, raw: &str)
+    -> Result<serde_json::Value, String>
+{
+    // Membership ops always take an array of strings.
+    if op == "in" || op == "not_in" {
+        let parts: Vec<serde_json::Value> = raw.split(',')
+            .map(|s| s.trim()).filter(|s| !s.is_empty())
+            .map(|s| serde_json::Value::String(s.to_string()))
+            .collect();
+        if parts.is_empty() {
+            return Err(format!("operator '{}' needs at least one comma-separated value", op));
+        }
+        return Ok(serde_json::Value::Array(parts));
+    }
+
+    // Boolean field — coerce common truthy / falsy strings.
+    if field == "containers_exists" {
+        let truthy = matches!(raw.to_ascii_lowercase().as_str(),
+                              "true" | "1" | "yes" | "on");
+        return Ok(serde_json::Value::Bool(truthy));
+    }
+
+    // Numeric fields with numeric-compare ops → JSON number.
+    let is_numeric_field = matches!(field, "mem_total_mb" | "disk_total_gb" | "uptime_secs");
+    let is_numeric_op    = matches!(op, "eq" | "ne" | "lt" | "le" | "gt" | "ge");
+    if is_numeric_field && is_numeric_op {
+        if let Ok(n) = raw.parse::<i64>() {
+            return Ok(serde_json::json!(n));
+        }
+        if let Ok(n) = raw.parse::<f64>() {
+            // serde_json::Number::from_f64 returns None for NaN / inf.
+            return serde_json::Number::from_f64(n)
+                .map(serde_json::Value::Number)
+                .ok_or_else(|| "value must be a finite number".to_string());
+        }
+        return Err(format!("'{}' is not a number", raw));
+    }
+
+    // Everything else — pass through as a string. Validators downstream check
+    // regex compilability, CIDR parsing, etc.
+    Ok(serde_json::Value::String(raw.to_string()))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Public — validate_conditions_json
 // Stricter wrapper around parse_conditions for the rule-save handler:
 // additionally requires at least one condition.  Use this on POST /auto_groups
@@ -830,5 +981,104 @@ mod tests {
         assert!(parse_conditions(
             &json!([{"field":"ip","operator":"in_cidr","value":"not-a-cidr"}]).to_string()
         ).is_err());
+    }
+
+    // ─── build / explode form helpers (click editor) ────────────────────────
+
+    fn form(pairs: &[(&str, &str)]) -> std::collections::HashMap<String, Vec<String>> {
+        let mut m = std::collections::HashMap::new();
+        for (k, v) in pairs {
+            m.entry(k.to_string()).or_insert_with(Vec::new).push(v.to_string());
+        }
+        m
+    }
+
+    #[test]
+    fn form_builds_string_condition() {
+        let f = form(&[("field_1", "hostname"), ("op_1", "equals"), ("value_1", "web-01")]);
+        let s = build_conditions_json_from_form(&f, 4).unwrap();
+        // Round-trips through the validator cleanly.
+        validate_conditions_json(&s).unwrap();
+        assert!(s.contains("\"hostname\""));
+        assert!(s.contains("\"web-01\""));
+    }
+
+    #[test]
+    fn form_coerces_numeric_value_to_number() {
+        let f = form(&[("field_1", "mem_total_mb"), ("op_1", "ge"), ("value_1", "16000")]);
+        let s = build_conditions_json_from_form(&f, 4).unwrap();
+        // Number, not string.
+        assert!(s.contains("\"value\":16000"));
+        validate_conditions_json(&s).unwrap();
+    }
+
+    #[test]
+    fn form_coerces_bool_value() {
+        let f = form(&[("field_1", "containers_exists"), ("op_1", "equals"), ("value_1", "True")]);
+        let s = build_conditions_json_from_form(&f, 4).unwrap();
+        assert!(s.contains("\"value\":true"));
+        validate_conditions_json(&s).unwrap();
+    }
+
+    #[test]
+    fn form_splits_in_list_on_commas() {
+        let f = form(&[("field_1", "arch"), ("op_1", "in"),
+                       ("value_1", "x86_64, aarch64 , arm64")]);
+        let s = build_conditions_json_from_form(&f, 4).unwrap();
+        // All three values present, trimmed.
+        assert!(s.contains("\"x86_64\""));
+        assert!(s.contains("\"aarch64\""));
+        assert!(s.contains("\"arm64\""));
+        validate_conditions_json(&s).unwrap();
+    }
+
+    #[test]
+    fn form_skips_fully_blank_rows() {
+        let f = form(&[
+            ("field_1", "hostname"), ("op_1", "equals"), ("value_1", "x"),
+            ("field_2", ""),         ("op_2", ""),       ("value_2", ""),
+            ("field_3", "os_family"), ("op_3", "equals"), ("value_3", "linux"),
+        ]);
+        let s = build_conditions_json_from_form(&f, 4).unwrap();
+        // Two conditions, blank middle row dropped.
+        let parsed: serde_json::Value = serde_json::from_str(&s).unwrap();
+        assert_eq!(parsed.as_array().unwrap().len(), 2);
+    }
+
+    #[test]
+    fn form_rejects_partial_rows() {
+        let f = form(&[("field_1", "hostname"), ("op_1", "equals"), ("value_1", "")]);
+        assert!(build_conditions_json_from_form(&f, 4).is_err());
+    }
+
+    #[test]
+    fn form_rejects_empty_rule() {
+        let f = form(&[]);
+        assert!(build_conditions_json_from_form(&f, 4).is_err());
+    }
+
+    #[test]
+    fn explode_roundtrips_string() {
+        let raw = json!([{"field":"hostname","operator":"equals","value":"web-01"}]).to_string();
+        let out = explode_conditions_for_form(&raw);
+        assert_eq!(out, vec![("hostname".into(), "equals".into(), "web-01".into())]);
+    }
+
+    #[test]
+    fn explode_flattens_array_to_csv() {
+        let raw = json!([{"field":"arch","operator":"in","value":["x86_64","aarch64"]}]).to_string();
+        let out = explode_conditions_for_form(&raw);
+        assert_eq!(out[0].2, "x86_64, aarch64");
+    }
+
+    #[test]
+    fn explode_stringifies_number_and_bool() {
+        let raw = json!([
+            {"field":"mem_total_mb","operator":"ge","value":16000},
+            {"field":"containers_exists","operator":"equals","value":true},
+        ]).to_string();
+        let out = explode_conditions_for_form(&raw);
+        assert_eq!(out[0].2, "16000");
+        assert_eq!(out[1].2, "true");
     }
 }

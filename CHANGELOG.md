@@ -6,6 +6,15 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Auto-group rule editor is now fully click-driven (matches the test-builder pattern).** The JSON textarea is gone — admins build rules with three dropdowns + one value input per row, "Add Condition" / trash-can buttons, up to 8 condition rows. No JSON syntax to learn, no curly braces to escape.
+  - **Field dropdown** is grouped by category (Identity / Platform / Telemetry / Containers) with a friendly label per field. The picker mirrors the `Field` enum in `auto_groups.rs` exactly.
+  - **Operator dropdown** is field-aware: picking a field instantly repopulates the operator list with only the operators that field's type accepts. Mirrors `Field::accepts()` in the evaluator — the two are explicitly documented as paired.
+  - **Value input** carries a per-field placeholder hint (e.g. `10.0.0.5  or for in_cidr: 10.0.0.0/24` for the IP field, `docker | podman` for `has_runtime`, `true  or  false` for booleans). Admins see expected shape before typing.
+  - **Server-side coercion** of the typed value happens in the new `build_conditions_json_from_form` helper: `in` / `not_in` strings split on commas → JSON array; numeric ops on numeric fields parse as number; `containers_exists` parses truthy strings (`true`/`1`/`yes`/`on`) as `true`. The resulting JSON goes straight through the existing `validate_conditions_json` — one validator, two front-ends.
+  - **Edit form pre-fills** every row from the stored JSON via `explode_conditions_for_form`: arrays flatten to comma-joined strings, numbers / bools stringify, strings pass through. Round-tripping a rule through save → reload → save is a no-op.
+  - **10 new unit tests** in `auto_groups::tests` cover the form helpers: numeric / bool coercion, comma-split, blank-row dropping, partial-row rejection, empty-rule rejection, and explode round-trip for all three value shapes (string, number, array).
+
 ### Added
 - **Scheduler consumes `systems.compliance_dirty`.** New TASK F in the 60-second scheduler loop: if any system has `compliance_dirty = 1`, clear the flag and run `recalculate_current_compliance`. This is what makes the heartbeat-time auto-group reconciliation actually reflect in compliance scores — without it, a system that moved into a new auto group (and therefore picked up new policies via the group → policy → tests chain) would carry stale `compliance_score` / `tests_passed` / `tests_failed` until the next admin action or restart. The COUNT pre-check keeps the no-dirt-flags steady state cheap (one indexed scan against the partial index `idx_systems_compliance_dirty`). Clear-before-recalc ordering means concurrent heartbeats setting NEW flags during the recalc window survive to the next tick — bounded one-tick (60s) lag matches the "accept the lag" decision from the design doc.
 
