@@ -826,13 +826,31 @@ fn match_opt_string(field: Option<&str>, op: Operator, value: &serde_json::Value
 
 fn match_string(field: &str, op: Operator, value: &serde_json::Value) -> bool {
     use Operator::*;
+    // Substring / prefix / suffix matches are CASE-INSENSITIVE. This matches
+    // the universal admin-UI expectation ("contains 'mac'" should match
+    // "Mac OS 14.5" without forcing the admin to know the exact casing the
+    // agent reports) and side-steps the case mismatch between the normalized
+    // os_family ("macos", "linux") and the human capitalisation an admin
+    // would naturally type ("Mac", "Linux").  For case-sensitive matching
+    // an admin can fall back to `regex` (Rust's `regex` crate is
+    // case-sensitive by default; `(?i)` inside the pattern opts back in).
+    //
+    // `equals` / `not_equals` stay case-sensitive — exact-match semantics
+    // are explicit, and changing them would silently broaden existing rules.
+    let ci_contains    = |haystack: &str, needle: &str|
+        haystack.to_lowercase().contains(&needle.to_lowercase());
+    let ci_starts_with = |haystack: &str, needle: &str|
+        haystack.to_lowercase().starts_with(&needle.to_lowercase());
+    let ci_ends_with   = |haystack: &str, needle: &str|
+        haystack.to_lowercase().ends_with(&needle.to_lowercase());
+
     match op {
         Equals     => value.as_str().is_some_and(|v| field == v),
         NotEquals  => value.as_str().is_some_and(|v| field != v),
-        Contains   => value.as_str().is_some_and(|v| field.contains(v)),
-        NotContains=> value.as_str().is_some_and(|v| !field.contains(v)),
-        StartsWith => value.as_str().is_some_and(|v| field.starts_with(v)),
-        EndsWith   => value.as_str().is_some_and(|v| field.ends_with(v)),
+        Contains   => value.as_str().is_some_and(|v| ci_contains(field, v)),
+        NotContains=> value.as_str().is_some_and(|v| !ci_contains(field, v)),
+        StartsWith => value.as_str().is_some_and(|v| ci_starts_with(field, v)),
+        EndsWith   => value.as_str().is_some_and(|v| ci_ends_with(field, v)),
         Regex => {
             let Some(pat) = value.as_str() else { return false; };
             regex::Regex::new(pat).map(|r| r.is_match(field)).unwrap_or(false)
@@ -982,6 +1000,33 @@ mod tests {
         assert!(parse_conditions(
             &json!([{"field":"hostname","operator":"regex","value":"["}]).to_string()
         ).is_err());
+    }
+
+    #[test]
+    fn string_substring_ops_are_case_insensitive() {
+        // Regression — contains / not_contains / starts_with / ends_with
+        // all fold case so an admin writing `os contains "Mac"` matches an
+        // agent that reported `"Mac OS 14.5"`, and `os_family contains
+        // "Linux"` matches the normalized lowercase `"linux"`.  equals
+        // remains case-sensitive (explicit-match semantics).
+        let mut s = snap();
+        s.os = Some("Mac OS 14.5".into());
+        s.os_family = Some("macos".into());
+
+        assert!(eval_condition(&cond("os", "contains",    json!("mac")), &s),
+                "lowercase needle should match mixed-case haystack");
+        assert!(eval_condition(&cond("os", "contains",    json!("MAC")), &s),
+                "uppercase needle should match mixed-case haystack");
+        assert!(eval_condition(&cond("os_family", "contains", json!("Mac")), &s),
+                "capitalised needle should match normalised lowercase field");
+        assert!(eval_condition(&cond("os", "starts_with", json!("mac")), &s));
+        assert!(eval_condition(&cond("os", "ends_with",   json!("14.5")), &s));
+        assert!(eval_condition(&cond("os", "not_contains", json!("windows")), &s));
+
+        // equals is still strict.
+        assert!(!eval_condition(&cond("os_family", "equals", json!("Mac")), &s),
+                "equals must remain case-sensitive");
+        assert!(eval_condition(&cond("os_family", "equals", json!("macos")), &s));
     }
 
     #[test]
