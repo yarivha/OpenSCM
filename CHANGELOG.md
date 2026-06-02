@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **`derive_os_family` now recognises `"Mac OS …"` (with a space) as macOS.** User report: an auto-group with rule `os_family contains "mac"` failed to match a Mac whose agent reported `os = "Mac OS 26.5.0"` (the literal display string `os_info 3.x` emits on Apple Silicon). The matcher's macOS branch only checked for `"darwin"` and `"macos"` (no space), so the lowercased input `"mac os 26.5.0"` fell through to the catch-all `"other"`. Once `os_family` was `None`, `match_opt_string(None, …)` short-circuited to `false` and the system never joined the group. Broadened the macOS branch to also match `"mac os"` (with space) and the `mac…` prefix — covers `"Mac OS"`, `"Mac OS X"`, `"macOS"`, `"Darwin"`, and `"Macintosh"`, all verified by a new regression test (`derive_os_family_macos_variants`). Linux / Windows / BSD strings stay on their own branches (no false positives). 23/23 tests pass.
+
 ### Changed
 - **Auto-group substring operators (`contains` / `not_contains` / `starts_with` / `ends_with`) are now case-insensitive.** Matches the universal admin-UI expectation — `os contains "Mac"` matches a system whose agent reports `"Mac OS 14.5"`, and `os_family contains "Linux"` matches the normalised lowercase `"linux"`. Side-steps the case mismatch between the `os_family` normalization (always lowercase) and the natural admin capitalisation. `equals` / `not_equals` remain case-sensitive — explicit-match semantics — and `regex` is unchanged (case-sensitive by default; admins can write `(?i)` to opt out). One new unit test (`string_substring_ops_are_case_insensitive`) locks in the behaviour. 22/22 tests pass.
 

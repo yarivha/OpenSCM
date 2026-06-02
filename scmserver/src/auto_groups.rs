@@ -236,14 +236,27 @@ impl SystemSnapshot {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper — derive_os_family
-// Maps a free-form `systems.os` string ("Ubuntu 24.04", "Debian GNU/Linux",
-// "Microsoft Windows Server 2022", "Darwin 23.5.0", "FreeBSD 14.0") to a
-// stable enum-ish lowercase tag.  Substring sniffing on lowercase os.
+// Maps a free-form `systems.os` string to a stable enum-ish lowercase tag.
+// Substring sniffing on lowercase os.  Examples of inputs seen in the wild:
+//
+//   Linux:   "Ubuntu 24.04", "Debian GNU/Linux 12", "Rocky Linux 9.3", …
+//   macOS:   "Mac OS 26.5.0"   ← os_info 3.x display name on Apple Silicon
+//            "Mac OS X 10.15.7" ← older macOS via os_info
+//            "macOS 14.5"
+//            "Darwin 23.5.0"    ← falls through to uname-style on some setups
+//   Windows: "Microsoft Windows Server 2022", "Windows 11"
+//   BSDs:    "FreeBSD 14.0", "OpenBSD 7.4", "NetBSD 10.0"
+//
+// The macOS branch checks `"mac"` (which covers both "mac os" with the space
+// that os_info actually emits, and the no-space "macos" some agents send)
+// plus `"darwin"`.  `"mac"` is broad enough to hit anything starting Mac…
+// while still being safe — no Linux distro string contains it.
 // ─────────────────────────────────────────────────────────────────────────────
 fn derive_os_family(os: Option<&str>) -> Option<String> {
     let s = os?.to_ascii_lowercase();
     let fam = if s.contains("windows")                              { "windows" }
-              else if s.contains("darwin") || s.contains("macos")    { "macos" }
+              else if s.contains("darwin") || s.contains("macos")
+                   || s.contains("mac os") || s.starts_with("mac")  { "macos" }
               else if s.contains("freebsd")                          { "freebsd" }
               else if s.contains("openbsd")                          { "openbsd" }
               else if s.contains("netbsd")                           { "netbsd" }
@@ -974,6 +987,24 @@ mod tests {
         assert!(eval_condition(&cond("os_family", "in",
             json!(["linux", "freebsd"])), &s));
         assert!(!eval_condition(&cond("os_family", "equals", json!("windows")), &s));
+    }
+
+    #[test]
+    fn derive_os_family_macos_variants() {
+        // Regression — user report: `os = "Mac OS 26.5.0"` (the literal string
+        // os_info 3.x emits on Apple Silicon) was deriving os_family = "other"
+        // because the matcher only checked for "darwin" / "macos" with no space.
+        assert_eq!(derive_os_family(Some("Mac OS 26.5.0")),    Some("macos".into()));
+        assert_eq!(derive_os_family(Some("Mac OS X 10.15.7")), Some("macos".into()));
+        assert_eq!(derive_os_family(Some("macOS 14.5")),       Some("macos".into()));
+        assert_eq!(derive_os_family(Some("Darwin 23.5.0")),    Some("macos".into()));
+        assert_eq!(derive_os_family(Some("Macintosh")),        Some("macos".into()));
+
+        // Negative cases — make sure the broadened "mac" / "mac os" prefix
+        // doesn't catch unrelated strings.
+        assert_eq!(derive_os_family(Some("Ubuntu 24.04")),     Some("linux".into()));
+        assert_eq!(derive_os_family(Some("Microsoft Windows Server 2022")), Some("windows".into()));
+        assert_eq!(derive_os_family(Some("FreeBSD 14.0")),     Some("freebsd".into()));
     }
 
     #[test]
