@@ -18,6 +18,7 @@ pub mod client;
 pub mod dashboard;
 pub mod systems;
 pub mod groups;
+pub mod auto_groups;
 pub mod tests;
 pub mod policies;
 pub mod reports;
