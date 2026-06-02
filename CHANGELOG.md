@@ -6,6 +6,13 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **Manual group pickers filter out auto-managed groups.** Three places where an admin would otherwise be able to pick an auto group, only to have the choice undone on the next heartbeat:
+  - **Systems list — "Add to Group" bulk modal**: the dropdown now only lists `auto_managed = 0` groups. If no manual groups exist the modal shows the existing "Create a group first" prompt.
+  - **Per-system edit page — "Groups" multi-select**: same filter. Auto memberships still display on the systems list / detail (read-only) — they're just not editable from here. Admins manage them via the rule editor.
+  - **Per-system edit save**: the DELETE-then-INSERT cycle now only clears manual memberships before re-inserting. Auto memberships survive the save untouched. Without this, saving the edit form would wipe rule-driven memberships and the next heartbeat would re-add them — visible churn and audit-log noise for zero benefit.
+  - **Bulk `/systems/bulk/add_group` POST validator**: extended to require `auto_managed = 0` on the target group. Defence in depth against a replayed / hand-crafted POST.
+
 ### Added
 - **Admin UI for auto-groups — `/system_groups/auto/{add,edit,toggle}`.** Admins create and manage auto-managed groups from the unified System Groups page.
   - **New Auto Group** button (Admin-gated, alongside the existing Editor-gated **New Group**). Both buttons live in the same card header so admins don't need to hunt for a separate menu.

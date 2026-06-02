@@ -230,7 +230,16 @@ pub async fn systems(
         .collect();
 
 
-    let groups_result = sqlx::query("SELECT id, name FROM system_groups WHERE tenant_id = ? ORDER BY name ASC")
+    // Only manual groups appear in the "Add to Group" picker on the systems
+    // list — auto-managed groups derive their membership from a rule, so
+    // pushing a system in by hand would be undone on the next heartbeat.
+    // (Defence in depth: the bulk POST validator below also rejects auto
+    // targets in case the form is replayed against a now-auto group.)
+    let groups_result = sqlx::query(
+        "SELECT id, name FROM system_groups
+         WHERE tenant_id = ? AND auto_managed = 0
+         ORDER BY name ASC"
+    )
         .bind(&auth.tenant_id)
         .fetch_all(&pool)
         .await;
@@ -456,10 +465,16 @@ pub async fn systems_edit(
         has_telemetry: false,
     };
 
+    // Edit form's group picker shows manual groups only. Auto-group
+    // membership is rule-driven — exposing those in the form would either
+    // (a) wipe them on save (DELETE-then-INSERT pattern below) or
+    // (b) silently re-add them on next heartbeat. Either way it's
+    // confusing. Auto memberships ARE displayed on the systems list /
+    // detail (read-only); admins edit them via the rule editor.
     let groups_result = sqlx::query(
         "SELECT sg.id AS group_id, sg.name AS group_name, sg.description AS group_description
          FROM system_groups AS sg
-         WHERE sg.tenant_id = ?",
+         WHERE sg.tenant_id = ? AND sg.auto_managed = 0",
     )
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
@@ -544,10 +559,21 @@ pub async fn systems_edit_save(
     let form_data = parse_form_data(&raw_string);
     let selected_groups = form_data.get("groups").cloned();
 
+    // Clear only this system's MANUAL group memberships. Auto-managed
+    // memberships are owned by the rule evaluator (auto_groups.rs) and
+    // must survive this DELETE-then-INSERT cycle — otherwise saving the
+    // edit form would wipe them and the next heartbeat would re-add them
+    // (visible churn + audit-log noise).
     if let Err(e) = sqlx::query(
-        "DELETE FROM systems_in_groups WHERE system_id = ? AND tenant_id = ?",
+        "DELETE FROM systems_in_groups
+         WHERE system_id = ? AND tenant_id = ?
+           AND group_id IN (
+             SELECT id FROM system_groups
+             WHERE tenant_id = ? AND auto_managed = 0
+           )"
     )
     .bind(id)
+    .bind(&auth.tenant_id)
     .bind(&auth.tenant_id)
     .execute(&mut *tx)
     .await
@@ -879,9 +905,13 @@ pub async fn systems_bulk_add_group(
         return Redirect::to("/systems?error_message=No+systems+selected").into_response();
     }
 
-    // Verify group belongs to this tenant
+    // Verify group belongs to this tenant AND is manual. Defence in depth
+    // against a replayed / hand-crafted POST against an auto group —
+    // membership there is rule-driven and would be undone on next heartbeat
+    // anyway, but rejecting up front avoids confusing audit-log entries.
     let group_exists: bool = sqlx::query_scalar(
-        "SELECT COUNT(*) FROM system_groups WHERE id = ? AND tenant_id = ?",
+        "SELECT COUNT(*) FROM system_groups
+         WHERE id = ? AND tenant_id = ? AND auto_managed = 0",
     )
     .bind(group_id)
     .bind(&auth.tenant_id)
@@ -890,7 +920,9 @@ pub async fn systems_bulk_add_group(
     .unwrap_or(0i64) > 0;
 
     if !group_exists {
-        return Redirect::to("/systems?error_message=Invalid+group").into_response();
+        return Redirect::to(
+            "/systems?error_message=Invalid+group+or+auto-managed+group+cannot+be+added+to+manually"
+        ).into_response();
     }
 
     let mut added = 0usize;
