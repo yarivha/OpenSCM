@@ -8,6 +8,19 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.5.4] - 2026-06-02
+
+**Two database performance fixes surfaced by sqlx slow-statement logging on a production SaaS instance.** Neither was a regression — both are pre-existing costs that grew with data volume — but both are cheaply fixable. Schema v30 (index-only).
+
+### Fixed
+- **Auto-prune of inactive systems is now sargable (was a full scan every 60 s).** `prune_inactive_systems` (scheduler TASK B, runs once per minute) computed `(strftime('%s','now') - strftime('%s', last_seen)) > ?` **per row**, which is non-sargable — no index on `last_seen` could be used, so every tick scanned the full set of a tenant's active systems (observed at ~1.1 s even when deleting zero rows). The cutoff timestamp is now computed in Rust and the query filters `last_seen < ?`, which combined with the new `idx_systems_prune (tenant_id, status, last_seen)` is a range scan. Semantics are identical (`now − last_seen > N·60s` ⟺ `last_seen < now − N min`); SQLite's `CURRENT_TIMESTAMP` format sorts chronologically as a string so the comparison is correct.
+- **Compliance recalc gets a covering index.** The `update_test_stats` correlated subqueries (`UPDATE tests SET systems_passed = (SELECT COUNT(*) FROM results …)`) filter results on `(tenant_id, test_id, result, excluded)` and join `systems` on `system_id` — none of which the existing `idx_results_tenant_test (tenant_id, test_id)` fully covered, so each per-test COUNT did heap fetches (observed at ~1.0 s for 651 tests on the startup global recompute). New `idx_results_recalc_cover (tenant_id, test_id, result, excluded, system_id)` lets those counts run from the index. Benefits the once-per-restart startup recalc and the per-tenant TASK F recalcs introduced in 0.5.3.
+
+### Database
+- **Schema v29 → v30** — adds `idx_systems_prune` and `idx_results_recalc_cover`. Pure index additions, no data change, fully idempotent (`CREATE INDEX IF NOT EXISTS`). Fresh installs get both in `initialize_database`.
+
+---
+
 ## [0.5.3] - 2026-06-02
 
 **Performance pass on auto-group reconciliation + compliance recalc.** No behavioural change — identical group memberships and compliance numbers — but the heartbeat hot path and the post-rule-save sweep get materially cheaper, and a membership change no longer triggers a full-fleet compliance recompute on multi-tenant deployments. Full rationale in `docs/design/0.5.3-auto-groups-perf.md`.

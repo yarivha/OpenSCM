@@ -627,9 +627,19 @@ async fn create_indexes(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         .execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_results_tenant_test ON results (tenant_id, test_id)")
         .execute(pool).await?;
+    // Covering index for the compliance-recalc correlated subqueries
+    // (update_test_stats): everything they filter/count on lives in the index,
+    // so the COUNT(*) per test is an index range scan rather than a heap fetch.
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_results_recalc_cover ON results (tenant_id, test_id, result, excluded, system_id)")
+        .execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_test_conditions_tenant_test ON test_conditions (tenant_id, test_id)")
         .execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_systems_tenant_status ON systems (tenant_id, status)")
+        .execute(pool).await?;
+    // Supports the auto-prune-inactive sweep (runs every 60s): once the prune
+    // query is sargable (last_seen < cutoff), this turns its full scan of a
+    // tenant's active systems into a range scan.
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_systems_prune ON systems (tenant_id, status, last_seen)")
         .execute(pool).await?;
     sqlx::query("CREATE INDEX IF NOT EXISTS idx_systems_tenant_score ON systems (tenant_id, compliance_score)")
         .execute(pool).await?;
@@ -2131,6 +2141,35 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v28 → v29 complete.");
+    }
+
+    // v29 → v30: performance indexes surfaced by slow-statement logging.
+    //
+    //   • idx_results_recalc_cover — covering index for the compliance-recalc
+    //     correlated subqueries (update_test_stats). The COUNT(*) per test now
+    //     scans the index instead of fetching rows.
+    //   • idx_systems_prune — supports the sargable auto-prune sweep
+    //     (last_seen < cutoff), which runs every 60s. Turns a full scan of a
+    //     tenant's active systems into a range scan.
+    //
+    // Pure index additions — no data change, fully idempotent.
+    if version < 30 {
+        info!("Running schema migration v29 → v30 (performance indexes)...");
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_results_recalc_cover
+                ON results (tenant_id, test_id, result, excluded, system_id)"
+        ).execute(pool).await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_systems_prune
+                ON systems (tenant_id, status, last_seen)"
+        ).execute(pool).await?;
+
+        sqlx::query("UPDATE schema_info SET version = 30")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v29 → v30 complete.");
     }
 
     Ok(())

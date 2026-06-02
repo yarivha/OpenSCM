@@ -679,15 +679,26 @@ async fn prune_inactive_systems(pool: &SqlitePool) {
     };
 
     for (tenant_id, minutes) in tenants {
+        // Compute the cutoff timestamp in Rust rather than doing per-row
+        // strftime math in SQL.  `last_seen < ?` is sargable, so with
+        // idx_systems_prune (tenant_id, status, last_seen) this is a range
+        // scan instead of a full scan of the tenant's active systems on every
+        // 60s tick.  SQLite stores CURRENT_TIMESTAMP as "%Y-%m-%d %H:%M:%S",
+        // which sorts lexically == chronologically, so a string comparison
+        // against a same-format cutoff is correct.
+        let cutoff = (Utc::now() - chrono::Duration::minutes(minutes))
+            .format("%Y-%m-%d %H:%M:%S")
+            .to_string();
+
         let deleted = sqlx::query(
             "DELETE FROM systems
              WHERE tenant_id = ?
                AND status = 'active'
                AND last_seen IS NOT NULL
-               AND (CAST(strftime('%s','now') AS INTEGER) - CAST(strftime('%s', last_seen) AS INTEGER)) > ?",
+               AND last_seen < ?",
         )
         .bind(&tenant_id)
-        .bind(minutes * 60)
+        .bind(&cutoff)
         .execute(pool)
         .await;
 
