@@ -1,0 +1,153 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1>
+            <i class="fas fa-magic mr-2 text-primary"></i>
+            Edit Auto Group — <span class="text-muted">{{ group_name }}</span>
+          </h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/system_groups">System Groups</a></li>
+            <li class="breadcrumb-item active">Edit Auto Group</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Attention</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-lg-8">
+          <div class="card card-outline card-primary shadow-sm">
+            <div class="card-header">
+              <h3 class="card-title">Rule Definition</h3>
+              <div class="card-tools">
+                <span class="badge badge-{% if enabled %}success{% else %}secondary{% endif %}">
+                  {% if enabled %}ENABLED{% else %}DISABLED{% endif %}
+                </span>
+              </div>
+            </div>
+            <form method="POST" action="/system_groups/auto/edit/{{ group_id }}">
+              <div class="card-body">
+                <div class="form-group">
+                  <label for="name">Group Name *</label>
+                  <input type="text" name="name" id="name" required maxlength="191"
+                         class="form-control" value="{{ group_name }}">
+                </div>
+                <div class="form-group">
+                  <label for="description">Description</label>
+                  <input type="text" name="description" id="description"
+                         class="form-control" value="{{ description }}">
+                </div>
+                <div class="form-group">
+                  <label for="conditions">Rule Conditions (JSON, AND-combined) *</label>
+                  <textarea name="conditions" id="conditions" rows="10"
+                            class="form-control font-monospace" required
+                            style="font-family: monospace;">{{ conditions }}</textarea>
+                  <small class="form-text text-muted">
+                    All conditions must match for a system to join the group.
+                  </small>
+                  <div id="cond-feedback" class="mt-2"></div>
+                </div>
+                <div class="form-group">
+                  <div class="form-check">
+                    <input type="checkbox" name="enabled" id="enabled"
+                           class="form-check-input"
+                           {% if enabled %}checked{% endif %}>
+                    <label class="form-check-label" for="enabled">
+                      Rule is enabled
+                      <small class="text-muted ml-2">
+                        — disabling drops every matching system out of the group on save
+                      </small>
+                    </label>
+                  </div>
+                </div>
+              </div>
+              <div class="card-footer text-right">
+                <a href="/system_groups" class="btn btn-default">Cancel</a>
+                <form method="POST" action="/system_groups/auto/toggle/{{ group_id }}" style="display:inline">
+                  <button type="submit" class="btn btn-warning"
+                          onclick="return confirm('Toggle this rule\'s enabled state? Matching systems will be re-evaluated.');">
+                    <i class="fas fa-power-off mr-1"></i>
+                    {% if enabled %}Disable{% else %}Enable{% endif %}
+                  </button>
+                </form>
+                <button type="submit" class="btn btn-primary">
+                  <i class="fas fa-save mr-1"></i> Save Changes
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="col-lg-4">
+          <div class="card card-outline card-info shadow-sm">
+            <div class="card-header">
+              <h3 class="card-title">
+                <i class="fas fa-network-wired mr-1"></i>
+                Currently matching ({{ matching | length }})
+              </h3>
+            </div>
+            <div class="card-body" style="max-height: 320px; overflow-y: auto;">
+              {% if matching %}
+                {% for m in matching %}
+                  <span class="badge badge-info mr-1 mb-1"><i class="fas fa-server fa-xs mr-1"></i>{{ m }}</span>
+                {% endfor %}
+              {% else %}
+                <span class="text-muted">No systems currently match this rule.</span>
+              {% endif %}
+            </div>
+            <div class="card-footer text-muted" style="font-size: 0.78rem;">
+              Updates on save / toggle. Membership is also reconciled on every heartbeat
+              of an affected system — see <code>docs/design/0.5.2-auto-groups.md</code>.
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+(function () {
+  const ta = document.getElementById('conditions');
+  const fb = document.getElementById('cond-feedback');
+  function check() {
+    const raw = ta.value.trim();
+    if (!raw) { fb.innerHTML = ''; return; }
+    try {
+      const v = JSON.parse(raw);
+      if (!Array.isArray(v)) {
+        fb.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> JSON must be an array of conditions.</span>';
+      } else if (v.length === 0) {
+        fb.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> Array must contain at least one condition.</span>';
+      } else {
+        fb.innerHTML = '<span class="text-success"><i class="fas fa-check"></i> Valid JSON (' + v.length + ' condition' + (v.length === 1 ? '' : 's') + '). Server validates field / operator semantics on save.</span>';
+      }
+    } catch (e) {
+      fb.innerHTML = '<span class="text-danger"><i class="fas fa-times"></i> ' + e.message + '</span>';
+    }
+  }
+  ta.addEventListener('input', check);
+  check();
+})();
+</script>
+{% endblock %}

@@ -19,6 +19,7 @@ pub mod dashboard;
 pub mod systems;
 pub mod groups;
 pub mod auto_groups;
+pub mod auto_groups_admin;
 pub mod tests;
 pub mod policies;
 pub mod reports;
@@ -302,6 +303,12 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/system_groups/add", get(groups::system_groups_add).post(groups::system_groups_add_save))
         .route("/system_groups/delete/{id}", get(groups::system_groups_delete))
         .route("/system_groups/edit/{id}", get(groups::system_groups_edit).post(groups::system_groups_edit_save))
+        .route("/system_groups/auto/add",
+               get(auto_groups_admin::auto_add).post(auto_groups_admin::auto_add_save))
+        .route("/system_groups/auto/edit/{id}",
+               get(auto_groups_admin::auto_edit).post(auto_groups_admin::auto_edit_save))
+        .route("/system_groups/auto/toggle/{id}",
+               post(auto_groups_admin::auto_toggle))
         .route("/tests", get(tests::tests))
         .route("/tests/add", get(tests::tests_add).post(tests::tests_add_save))
         .route("/tests/delete/{id}", get(tests::tests_delete))

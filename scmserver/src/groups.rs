@@ -42,13 +42,13 @@ pub async fn system_groups(
     }
 
     let gc_sql = format!(
-        "SELECT sg.id, sg.name, sg.description,
+        "SELECT sg.id, sg.name, sg.description, sg.auto_managed,
             {gc} AS systems
          FROM system_groups AS sg
          LEFT JOIN systems_in_groups AS sig ON sg.id = sig.group_id
          LEFT JOIN systems AS s ON sig.system_id = s.id
          WHERE sg.tenant_id = ?
-         GROUP BY sg.id, sg.name, sg.description",
+         GROUP BY sg.id, sg.name, sg.description, sg.auto_managed",
         gc = "GROUP_CONCAT(s.name)",
     );
     let rows_result = sqlx::query(&gc_sql)
@@ -64,6 +64,7 @@ pub async fn system_groups(
                 name: row.get("name"),
                 description: row.try_get("description").ok(),
                 systems: row.try_get("systems").ok(),
+                auto_managed: row.try_get("auto_managed").unwrap_or(0),
             })
             .collect(),
         Err(e) => {
@@ -321,7 +322,21 @@ pub async fn system_groups_delete(
 
 
 
-    // ON DELETE CASCADE handles systems_in_groups automatically
+    // Capture type + name before the DELETE so the audit row carries
+    // meaningful identifiers (the row vanishes via CASCADE in a moment).
+    let (was_auto, prior_name): (i64, Option<String>) =
+        match sqlx::query("SELECT auto_managed, name FROM system_groups WHERE id = ? AND tenant_id = ?")
+            .bind(id)
+            .bind(&auth.tenant_id)
+            .fetch_optional(&pool)
+            .await
+        {
+            Ok(Some(r)) => (r.try_get("auto_managed").unwrap_or(0),
+                            r.try_get("name").ok()),
+            _ => (0, None),
+        };
+
+    // ON DELETE CASCADE handles systems_in_groups AND auto_group_rules.
     if let Err(e) = sqlx::query(
         "DELETE FROM system_groups WHERE id = ? AND tenant_id = ?",
     )
@@ -336,8 +351,18 @@ pub async fn system_groups_delete(
         return Redirect::to(&format!("/system_groups?error_message={}", encoded)).into_response();
     }
 
+    // Audit — distinguish manual vs auto so the trail is searchable.
+    crate::audit::record(
+        &pool, &auth.tenant_id, Some(&auth), None,
+        if was_auto == 1 { "auto_group_delete" } else { "group_delete" },
+        Some(if was_auto == 1 { "auto_group" } else { "group" }),
+        Some(&id.to_string()),
+        prior_name.as_deref().map(|n| format!("name={:?}", n)).as_deref(),
+    ).await;
+
     let _ = sync_tx.send(()).await;
-    info!("System group ID {} deleted by '{}'. Compliance update signaled.", id, auth.username);
+    info!("System group ID {} ({}) deleted by '{}'. Compliance update signaled.",
+          id, if was_auto == 1 { "auto" } else { "manual" }, auth.username);
     Redirect::to("/system_groups").into_response()
 }
 
@@ -359,7 +384,7 @@ pub async fn system_groups_edit(
     }
 
     let row_result = sqlx::query(
-        "SELECT id, name, description FROM system_groups WHERE id = ? AND tenant_id = ?",
+        "SELECT id, name, description, auto_managed FROM system_groups WHERE id = ? AND tenant_id = ?",
     )
     .bind(id)
     .bind(&auth.tenant_id)
@@ -380,11 +405,21 @@ pub async fn system_groups_edit(
         }
     };
 
+    // Auto groups are edited via the dedicated rule editor — the manual
+    // edit form has no UI for the rule conditions and would silently strip
+    // them on save. Redirect cleanly so an admin who clicked Edit on an
+    // auto group lands in the right place.
+    let auto_managed: i64 = row.try_get("auto_managed").unwrap_or(0);
+    if auto_managed == 1 {
+        return Redirect::to(&format!("/system_groups/auto/edit/{}", id)).into_response();
+    }
+
     let group = SystemGroup {
         id: row.try_get("id").unwrap_or(None),
         name: row.get("name"),
         description: row.try_get("description").ok(),
         systems: None,
+        ..Default::default()
     };
 
     let systems_result = sqlx::query(

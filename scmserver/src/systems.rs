@@ -473,6 +473,7 @@ pub async fn systems_edit(
                 name: row.get("group_name"),
                 description: row.try_get("group_description").ok(),
                 systems: None,
+                ..Default::default()
             })
             .collect(),
         Err(e) => {

@@ -89,6 +89,11 @@ pub struct SystemGroup {
     pub name: String,
     pub description: Option<String>,
     pub systems: Option<String>,
+    /// 0 = manual (admin-curated), 1 = auto (membership reconciled by a rule
+    /// in auto_group_rules). Immutable after group creation. See
+    /// docs/design/0.5.2-auto-groups.md.
+    #[serde(default)]
+    pub auto_managed: i64,
 }
 
 

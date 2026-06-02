@@ -1,0 +1,137 @@
+{% extends "base.html" %}
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1><i class="fas fa-magic mr-2 text-primary"></i>New Auto-Managed Group</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/system_groups">System Groups</a></li>
+            <li class="breadcrumb-item active">New Auto Group</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {% if error_message %}
+      <div class="alert alert-danger alert-dismissible shadow-sm">
+        <button type="button" class="close" data-dismiss="alert" aria-hidden="true">&times;</button>
+        <h5><i class="icon fas fa-ban"></i> Attention</h5>
+        {{ error_message }}
+      </div>
+      {% endif %}
+
+      <div class="row">
+        <div class="col-lg-8">
+          <div class="card card-outline card-primary shadow-sm">
+            <div class="card-header"><h3 class="card-title">Group Definition</h3></div>
+            <form method="POST" action="/system_groups/auto/add">
+              <div class="card-body">
+                <div class="form-group">
+                  <label for="name">Group Name *</label>
+                  <input type="text" name="name" id="name" required maxlength="191"
+                         class="form-control" placeholder="e.g. linux-web-prod">
+                </div>
+                <div class="form-group">
+                  <label for="description">Description</label>
+                  <input type="text" name="description" id="description"
+                         class="form-control" placeholder="Optional — short note about the group's purpose">
+                </div>
+                <div class="form-group">
+                  <label for="conditions">Rule Conditions (JSON, AND-combined) *</label>
+                  <textarea name="conditions" id="conditions" rows="10"
+                            class="form-control font-monospace" required
+                            style="font-family: monospace;">{{ default_conditions }}</textarea>
+                  <small class="form-text text-muted">
+                    Each entry: <code>{"field": "...", "operator": "...", "value": ...}</code>.
+                    All entries must match for a system to join the group.
+                    See sidebar for fields, operators, and examples.
+                  </small>
+                  <div id="cond-feedback" class="mt-2"></div>
+                </div>
+              </div>
+              <div class="card-footer text-right">
+                <a href="/system_groups" class="btn btn-default">Cancel</a>
+                <button type="submit" class="btn btn-primary">
+                  <i class="fas fa-save mr-1"></i> Create Auto Group
+                </button>
+              </div>
+            </form>
+          </div>
+        </div>
+
+        <div class="col-lg-4">
+          <div class="card card-outline card-info shadow-sm">
+            <div class="card-header"><h3 class="card-title"><i class="fas fa-info-circle mr-1"></i> Reference</h3></div>
+            <div class="card-body" style="font-size: 0.875rem;">
+              <p><strong>Fields:</strong></p>
+              <ul class="pl-3 mb-2">
+                <li><code>hostname</code>, <code>ip</code>, <code>os</code>, <code>os_family</code>, <code>arch</code>, <code>platform</code></li>
+                <li><code>ver</code> (agent version — semver compare)</li>
+                <li><code>status</code> (active / pending / …)</li>
+                <li><code>mem_total_mb</code>, <code>disk_total_gb</code>, <code>uptime_secs</code></li>
+                <li><code>containers_exists</code> (bool)</li>
+                <li><code>has_runtime</code> (docker / podman)</li>
+                <li><code>any_container_image</code></li>
+              </ul>
+              <p class="mb-1"><strong>Operators:</strong></p>
+              <ul class="pl-3 mb-2">
+                <li>string: <code>equals</code>, <code>not_equals</code>, <code>contains</code>, <code>not_contains</code>, <code>starts_with</code>, <code>ends_with</code>, <code>regex</code></li>
+                <li>numeric / semver: <code>eq</code>, <code>ne</code>, <code>lt</code>, <code>le</code>, <code>gt</code>, <code>ge</code></li>
+                <li>set: <code>in</code>, <code>not_in</code></li>
+                <li>IP: <code>in_cidr</code></li>
+              </ul>
+              <p class="mb-1"><strong>Example — Linux web prod:</strong></p>
+<pre class="bg-light p-2 mb-2" style="font-size: 0.78rem;">[
+  {"field":"os_family","operator":"equals","value":"linux"},
+  {"field":"hostname","operator":"regex","value":"^web-prod-"},
+  {"field":"ip","operator":"in_cidr","value":"10.10.0.0/16"}
+]</pre>
+              <p class="mb-1"><strong>Example — Hosts with Docker:</strong></p>
+<pre class="bg-light p-2 mb-0" style="font-size: 0.78rem;">[
+  {"field":"has_runtime","operator":"equals","value":"docker"}
+]</pre>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+// Client-side JSON parse hint — server still does the authoritative check.
+(function () {
+  const ta = document.getElementById('conditions');
+  const fb = document.getElementById('cond-feedback');
+  function check() {
+    const raw = ta.value.trim();
+    if (!raw) { fb.innerHTML = ''; return; }
+    try {
+      const v = JSON.parse(raw);
+      if (!Array.isArray(v)) {
+        fb.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> JSON must be an array of conditions.</span>';
+      } else if (v.length === 0) {
+        fb.innerHTML = '<span class="text-warning"><i class="fas fa-exclamation-triangle"></i> Array must contain at least one condition.</span>';
+      } else {
+        fb.innerHTML = '<span class="text-success"><i class="fas fa-check"></i> Valid JSON (' + v.length + ' condition' + (v.length === 1 ? '' : 's') + '). Server validates field / operator semantics on save.</span>';
+      }
+    } catch (e) {
+      fb.innerHTML = '<span class="text-danger"><i class="fas fa-times"></i> ' + e.message + '</span>';
+    }
+  }
+  ta.addEventListener('input', check);
+  check();
+})();
+</script>
+{% endblock %}

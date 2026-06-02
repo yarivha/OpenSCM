@@ -7,6 +7,16 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Admin UI for auto-groups — `/system_groups/auto/{add,edit,toggle}`.** Admins create and manage auto-managed groups from the unified System Groups page.
+  - **New Auto Group** button (Admin-gated, alongside the existing Editor-gated **New Group**). Both buttons live in the same card header so admins don't need to hunt for a separate menu.
+  - **Type badge** column on the groups list. Manual groups get a grey `Manual` badge; auto groups get a blue `Auto` badge with a magic-wand icon.
+  - **Edit routes by type.** Clicking Edit on a manual group goes to the existing membership editor; clicking Edit on an auto group goes to the rule editor. The legacy `/system_groups/edit/{id}` handler also auto-redirects to the rule editor if it's invoked against an auto group (defence in depth — any stale link still lands in the right place).
+  - **Rule editor** is a focused JSON-textarea form with live client-side parse validation, plus authoritative server-side validation on save (regex compiles, CIDR parses, operator is valid for the field's type, rule is non-empty). Field / operator / example reference panel renders alongside so admins don't need to flip back to the design doc. A "Currently matching" preview shows which systems are in the group right now.
+  - **Enable / disable toggle** as a one-click button — disabling drops every matching system out of the group (the rule evaluates to "no system matches" while disabled) but preserves the rule definition for later re-enable. The toggle runs the full-tenant sweep so the effect is immediate.
+  - **Save triggers a full-tenant sweep** — `apply_auto_groups_for_tenant` runs against every system right after the rule is committed, so existing systems land in (or out of) the new auto group on the next page load. Acceptable in v1 per the design doc's resolved Q3.
+
+- **Audit events for auto-group lifecycle.** Every state-changing admin action on auto-groups now lands a row in `audit_log`: `auto_group_create`, `auto_group_update`, `auto_group_enable`, `auto_group_disable`, `auto_group_delete`. The matching `group_delete` event for manual groups was added in passing — both share the existing delete path, distinguished by `target_type` (`group` vs `auto_group`). Details column carries name + `systems_reassigned=N` so auditors can see how much each change moved.
+
 - **Heartbeat hook calls `apply_auto_groups` on every successful agent check-in** (`client.rs` `/send` handler, right after `ingest_containers`). The reconciler is best-effort: any error is logged at `warn` and the heartbeat continues — the user-visible systems UPDATE + container ingest are never rolled back over a rule-eval glitch. The next heartbeat retries the eval. In the steady-state (no rules, or no membership changes) the call is one tiny indexed SELECT against `auto_group_rules` plus one against `systems_in_groups`, both empty/small — negligible. Membership churn flips `systems.compliance_dirty = 1` so the existing scheduler picks up the recalc on its next tick; no synchronous compliance work on the hot path.
 
 - **Auto-group rule evaluator (`scmserver::auto_groups`).** New module that the heartbeat hook and rule editor call into.
