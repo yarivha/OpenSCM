@@ -209,14 +209,25 @@ pub struct SystemSnapshot {
     pub containers_exists: bool,
     pub runtimes:          Vec<String>,      // distinct runtimes on this host
     pub container_images:  Vec<String>,      // distinct images on this host
+    /// Stored fingerprint from the DB (systems.auto_group_fp) — the hash this
+    /// system was last evaluated against.  None until first evaluation.
+    pub auto_group_fp:     Option<String>,
 }
 
 impl SystemSnapshot {
-    /// Compact summary of the rule-relevant fields, used by the heartbeat
-    /// handler to decide whether anything changed between the old and new
-    /// snapshot.  Returning a tuple keeps the comparison trivially derivable.
+    /// Compact summary of the rule-relevant fields.  Returning a tuple keeps
+    /// the comparison trivially derivable and feeds fingerprint_hash().
+    ///
+    /// NOTE: every field a rule can target (see the `Field` enum) must appear
+    /// here, or a change to that field would not invalidate the fingerprint
+    /// and the heartbeat short-circuit would wrongly skip re-evaluation.
+    /// `uptime_secs` is deliberately EXCLUDED — it changes on every heartbeat,
+    /// so including it would defeat the short-circuit entirely.  A rule on
+    /// `uptime_secs` therefore relies on the once-per-tick recalc cadence
+    /// rather than instant reconciliation; acceptable given uptime crosses
+    /// any threshold exactly once (it's monotonic between reboots).
     pub fn rule_relevant_fingerprint(&self) -> (
-        Option<&str>, Option<&str>, Option<&str>, Option<&str>, Option<&str>,
+        Option<&str>, Option<&str>, Option<&str>, Option<&str>, Option<&str>, Option<&str>,
         Option<i64>, Option<i64>, bool, Vec<&str>, Vec<&str>,
     ) {
         (
@@ -225,12 +236,26 @@ impl SystemSnapshot {
             self.os.as_deref(),
             self.arch.as_deref(),
             self.ver.as_deref(),
+            self.status.as_deref(),
             self.mem_total_mb,
             self.disk_total_gb,
             self.containers_exists,
             self.runtimes.iter().map(String::as_str).collect(),
             self.container_images.iter().map(String::as_str).collect(),
         )
+    }
+
+    /// Stable SHA-256 (hex) of the rule-relevant fields.  Deterministic for
+    /// the same field values (the Vecs are sorted at load time, and `{:?}`
+    /// formatting of the tuple is order-stable).  Stored in
+    /// systems.auto_group_fp and compared on each heartbeat to decide whether
+    /// rule re-evaluation can be skipped.
+    pub fn fingerprint_hash(&self) -> String {
+        use sha2::{Sha256, Digest};
+        let canon = format!("{:?}", self.rule_relevant_fingerprint());
+        let mut h = Sha256::new();
+        h.update(canon.as_bytes());
+        format!("{:x}", h.finalize())
     }
 }
 
@@ -292,7 +317,7 @@ pub async fn load_system_snapshot(
 ) -> Result<Option<SystemSnapshot>, sqlx::Error> {
     let Some(row) = sqlx::query(
         "SELECT id, name, ip, os, arch, ver, status,
-                mem_total_mb, disk_total_gb, uptime_secs
+                mem_total_mb, disk_total_gb, uptime_secs, auto_group_fp
          FROM systems
          WHERE id = ? AND tenant_id = ?"
     )
@@ -343,6 +368,7 @@ pub async fn load_system_snapshot(
         containers_exists: !container_rows.is_empty(),
         runtimes,
         container_images,
+        auto_group_fp:     row.try_get("auto_group_fp").ok().flatten(),
     }))
 }
 
@@ -646,19 +672,85 @@ pub async fn apply_auto_groups(
     tenant_id: &str,
     system_id: i64,
 ) -> Result<bool, sqlx::Error> {
-    // 1. Load snapshot + rules.  If the system row vanished, do nothing.
+    // Heartbeat path: load the tenant's enabled rules, then reconcile with
+    // the fingerprint short-circuit enabled (skip when nothing changed).
+    let rules = load_enabled_rules(tx, tenant_id).await?;
+    apply_auto_groups_with_rules(tx, tenant_id, system_id, &rules, true).await
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public — apply_auto_groups_with_rules
+// Core reconciliation for one system against an already-parsed rule slice.
+//
+//   • Heartbeat path passes `check_fingerprint = true` — when the system's
+//     rule-relevant fields are byte-identical to the last evaluation
+//     (systems.auto_group_fp), rule evaluation + the membership query are
+//     skipped entirely.
+//   • The full-tenant sweep passes `check_fingerprint = false` — the RULES
+//     changed, so every system must be re-evaluated regardless of whether
+//     its own fields moved.  The sweep also parses the rules ONCE and reuses
+//     the slice across all systems (no per-system regex recompilation).
+//
+// Returns true iff a membership row was inserted or deleted (caller uses
+// this for audit counting; compliance_dirty is set internally when true).
+// The fingerprint is re-stamped whenever it drifts, on both paths.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn apply_auto_groups_with_rules(
+    tx: &mut Transaction<'_, Sqlite>,
+    tenant_id: &str,
+    system_id: i64,
+    rules: &[Rule],
+    check_fingerprint: bool,
+) -> Result<bool, sqlx::Error> {
+    // ── P1: rules-first short-circuit ───────────────────────────────────────
+    // The overwhelmingly common case is "tenant has no auto rules at all".
+    // When there are no enabled rules, the only reason to do any work is to
+    // clean up stale auto memberships left behind (e.g. a rule was disabled
+    // out-of-band, or a prior disable-sweep failed partway).  A single
+    // indexed EXISTS check lets us bail BEFORE loading the system snapshot
+    // (which scans the containers table) for the no-rules / no-membership
+    // case — keeping the heartbeat hot path nearly free for installs that
+    // don't use auto-groups.
+    if rules.is_empty() {
+        let has_stale_auto: Option<i64> = sqlx::query_scalar(
+            "SELECT 1
+             FROM systems_in_groups sig
+             JOIN system_groups sg ON sg.id = sig.group_id
+             WHERE sig.system_id = ? AND sig.tenant_id = ? AND sg.auto_managed = 1
+             LIMIT 1"
+        )
+        .bind(system_id)
+        .bind(tenant_id)
+        .fetch_optional(&mut **tx)
+        .await?;
+        if has_stale_auto.is_none() {
+            return Ok(false);  // nothing to do — snapshot never loaded
+        }
+        // else fall through: empty target set will remove the stale rows.
+    }
+
+    // Load snapshot (incl. the stored fingerprint).  Bail if the row vanished.
     let Some(snapshot) = load_system_snapshot(tx, tenant_id, system_id).await? else {
         return Ok(false);
     };
-    let rules = load_enabled_rules(tx, tenant_id).await?;
 
-    // 2. Evaluate rules → target group set.
+    // ── P3: fingerprint short-circuit (heartbeat path only) ─────────────────
+    // If the rule-relevant fields are unchanged since the last evaluation,
+    // neither the target set nor the membership can have changed, so skip the
+    // membership query, rule eval, and writes.  The sweep passes
+    // check_fingerprint=false to force re-eval after a rule change.
+    let new_fp = snapshot.fingerprint_hash();
+    if check_fingerprint && snapshot.auto_group_fp.as_deref() == Some(new_fp.as_str()) {
+        return Ok(false);
+    }
+
+    // Evaluate rules → target group set.
     let target_groups: HashSet<i64> = rules.iter()
         .filter(|r| eval_rule(r, &snapshot))
         .map(|r| r.group_id)
         .collect();
 
-    // 3. Current auto-group membership (auto_managed=1 only).
+    // Current auto-group membership (auto_managed=1 only).
     let current_rows = sqlx::query(
         "SELECT sig.group_id
          FROM systems_in_groups sig
@@ -674,50 +766,55 @@ pub async fn apply_auto_groups(
         .filter_map(|r| r.try_get::<i64, _>("group_id").ok())
         .collect();
 
-    // 4. Diff.
     let to_add: Vec<i64>    = target_groups.difference(&current_auto).copied().collect();
     let to_remove: Vec<i64> = current_auto.difference(&target_groups).copied().collect();
 
-    if to_add.is_empty() && to_remove.is_empty() {
-        return Ok(false);
-    }
+    let membership_changed = !(to_add.is_empty() && to_remove.is_empty());
 
-    // 5. Apply additions.
+    // Apply additions.
     for gid in &to_add {
         sqlx::query(
             "INSERT OR IGNORE INTO systems_in_groups (tenant_id, system_id, group_id)
              VALUES (?, ?, ?)"
         )
-        .bind(tenant_id)
-        .bind(system_id)
-        .bind(gid)
-        .execute(&mut **tx)
-        .await?;
+        .bind(tenant_id).bind(system_id).bind(gid)
+        .execute(&mut **tx).await?;
     }
 
-    // 6. Apply removals (only from auto groups — the JOIN above already
-    // filtered, so any gid in current_auto is by definition auto).
+    // Apply removals (the JOIN above already restricted current_auto to
+    // auto-managed groups, so every gid here is safe to delete).
     for gid in &to_remove {
         sqlx::query(
             "DELETE FROM systems_in_groups
              WHERE tenant_id = ? AND system_id = ? AND group_id = ?"
         )
-        .bind(tenant_id)
-        .bind(system_id)
-        .bind(gid)
-        .execute(&mut **tx)
-        .await?;
+        .bind(tenant_id).bind(system_id).bind(gid)
+        .execute(&mut **tx).await?;
     }
 
-    // 7. Mark the system's compliance as needing a recalc on the next tick.
+    // Re-stamp the fingerprint whenever it drifted (both paths).  This is what
+    // lets the NEXT heartbeat with identical fields hit the P3 short-circuit.
+    // Done even when membership didn't change (a field moved but didn't cross
+    // any rule boundary) so we don't re-evaluate that same unchanged state
+    // again next tick.
+    if snapshot.auto_group_fp.as_deref() != Some(new_fp.as_str()) {
+        sqlx::query(
+            "UPDATE systems SET auto_group_fp = ? WHERE id = ? AND tenant_id = ?"
+        )
+        .bind(&new_fp).bind(system_id).bind(tenant_id)
+        .execute(&mut **tx).await?;
+    }
+
+    if !membership_changed {
+        return Ok(false);
+    }
+
+    // Membership changed → mark compliance dirty for the next scheduler tick.
     sqlx::query(
-        "UPDATE systems SET compliance_dirty = 1
-         WHERE id = ? AND tenant_id = ?"
+        "UPDATE systems SET compliance_dirty = 1 WHERE id = ? AND tenant_id = ?"
     )
-    .bind(system_id)
-    .bind(tenant_id)
-    .execute(&mut **tx)
-    .await?;
+    .bind(system_id).bind(tenant_id)
+    .execute(&mut **tx).await?;
 
     Ok(true)
 }
@@ -725,13 +822,45 @@ pub async fn apply_auto_groups(
 // ─────────────────────────────────────────────────────────────────────────────
 // Public — apply_auto_groups_for_tenant
 // Full sweep — re-evaluate every system in the tenant.  Used by the rule
-// editor on create / edit / disable.  Returns the count of systems whose
+// editor on create / edit / toggle.  Returns the count of systems whose
 // membership changed (for the audit trail).
+//
+// P2: the enabled rules are loaded and parsed exactly ONCE here (one JSON
+// parse + regex compile pass), then reused across every system via
+// apply_auto_groups_with_rules.  Previously each system re-ran
+// load_enabled_rules → parse_conditions → regex compile, making the sweep
+// O(N×R) in regex compilation; it's now O(R) compile + O(N) eval.
+//
+// check_fingerprint = false: the rules just changed, so every system must be
+// re-evaluated regardless of whether its own fields drifted.  Each call also
+// re-stamps the fingerprint, so subsequent heartbeats can short-circuit.
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn apply_auto_groups_for_tenant(
     pool: &SqlitePool,
     tenant_id: &str,
 ) -> Result<usize, sqlx::Error> {
+    // Parse the rule set once, up front, in its own short transaction.
+    let rules = {
+        let mut tx = pool.begin().await?;
+        let r = load_enabled_rules(&mut tx, tenant_id).await?;
+        tx.commit().await?;
+        r
+    };
+
+    // Invalidate every fingerprint in the tenant BEFORE sweeping.  The rules
+    // just changed, so all stored fingerprints (which encode "last evaluated
+    // against the OLD rule set") are stale.  Nulling them guarantees that any
+    // system the inline sweep errors on (rare DB hiccup → that one tx rolls
+    // back) will still be re-evaluated on its NEXT heartbeat — the P3
+    // short-circuit can't fire against a NULL fingerprint.  Successfully-swept
+    // systems get their fingerprint re-stamped immediately by the loop below.
+    // Restores the pre-P3 self-healing property without giving up the
+    // steady-state skip.
+    sqlx::query("UPDATE systems SET auto_group_fp = NULL WHERE tenant_id = ?")
+        .bind(tenant_id)
+        .execute(pool)
+        .await?;
+
     let ids: Vec<i64> = sqlx::query_scalar(
         "SELECT id FROM systems WHERE tenant_id = ?"
     )
@@ -742,7 +871,7 @@ pub async fn apply_auto_groups_for_tenant(
     let mut changed = 0usize;
     for sid in ids {
         let mut tx = pool.begin().await?;
-        match apply_auto_groups(&mut tx, tenant_id, sid).await {
+        match apply_auto_groups_with_rules(&mut tx, tenant_id, sid, &rules, false).await {
             Ok(true)  => { tx.commit().await?; changed += 1; }
             Ok(false) => { tx.commit().await?; }
             Err(e)    => { warn!("apply_auto_groups failed for system {}: {}", sid, e);
@@ -940,6 +1069,7 @@ mod tests {
             containers_exists: true,
             runtimes:         vec!["docker".into()],
             container_images: vec!["nginx:1.25".into(), "redis:7".into()],
+            auto_group_fp:    None,
         }
     }
 
@@ -1012,6 +1142,66 @@ mod tests {
         let mut s = snap();
         s.mem_total_mb = None;
         assert!(!eval_condition(&cond("mem_total_mb", "ge", json!(1)), &s));
+    }
+
+    // ─── fingerprint (P3 short-circuit) ─────────────────────────────────────
+
+    #[test]
+    fn fingerprint_is_stable_and_ignores_stored_fp() {
+        // Same field values → same hash, regardless of the stored auto_group_fp
+        // (the stored value must NOT feed into the hash, or comparison is moot).
+        let a = snap();
+        let mut b = snap();
+        b.auto_group_fp = Some("whatever-old-hash".into());
+        assert_eq!(a.fingerprint_hash(), b.fingerprint_hash());
+    }
+
+    #[test]
+    fn fingerprint_changes_on_each_rule_relevant_field() {
+        let base = snap().fingerprint_hash();
+
+        let mut s = snap(); s.hostname = Some("db-01".into());
+        assert_ne!(base, s.fingerprint_hash(), "hostname must affect fp");
+
+        let mut s = snap(); s.ip = Some("10.0.0.1".into());
+        assert_ne!(base, s.fingerprint_hash(), "ip must affect fp");
+
+        let mut s = snap(); s.os = Some("Debian 12".into());
+        assert_ne!(base, s.fingerprint_hash(), "os must affect fp");
+
+        let mut s = snap(); s.arch = Some("aarch64".into());
+        assert_ne!(base, s.fingerprint_hash(), "arch must affect fp");
+
+        let mut s = snap(); s.ver = Some("0.5.3".into());
+        assert_ne!(base, s.fingerprint_hash(), "ver must affect fp");
+
+        let mut s = snap(); s.status = Some("pending".into());
+        assert_ne!(base, s.fingerprint_hash(), "status must affect fp");
+
+        let mut s = snap(); s.mem_total_mb = Some(16_000);
+        assert_ne!(base, s.fingerprint_hash(), "mem_total_mb must affect fp");
+
+        let mut s = snap(); s.disk_total_gb = Some(1000);
+        assert_ne!(base, s.fingerprint_hash(), "disk_total_gb must affect fp");
+
+        let mut s = snap(); s.containers_exists = false;
+        assert_ne!(base, s.fingerprint_hash(), "containers_exists must affect fp");
+
+        let mut s = snap(); s.runtimes = vec!["podman".into()];
+        assert_ne!(base, s.fingerprint_hash(), "runtimes must affect fp");
+
+        let mut s = snap(); s.container_images = vec!["nginx:1.26".into()];
+        assert_ne!(base, s.fingerprint_hash(), "container_images must affect fp");
+    }
+
+    #[test]
+    fn fingerprint_ignores_uptime() {
+        // uptime_secs is deliberately excluded — it changes every heartbeat and
+        // would defeat the short-circuit if it fed the hash.
+        let base = snap().fingerprint_hash();
+        let mut s = snap();
+        s.uptime_secs = Some(999_999);
+        assert_eq!(base, s.fingerprint_hash(), "uptime_secs must NOT affect fp");
     }
 
     #[test]

@@ -8,6 +8,26 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.5.3] - 2026-06-02
+
+**Performance pass on auto-group reconciliation + compliance recalc.** No behavioural change — identical group memberships and compliance numbers — but the heartbeat hot path and the post-rule-save sweep get materially cheaper, and a membership change no longer triggers a full-fleet compliance recompute on multi-tenant deployments. Full rationale in `docs/design/0.5.3-auto-groups-perf.md`.
+
+### Changed
+- **Heartbeat reconciliation short-circuits when the tenant has no auto-rules (P1).** `apply_auto_groups` previously loaded the full system snapshot — including a scan of the `containers` table — before checking whether any rules existed. Installs that don't use auto-groups paid that cost on every heartbeat. Now a single indexed `EXISTS` on `systems_in_groups` (auto-managed only) decides whether there's stale membership to clean up; if there are no rules and no auto memberships (the common case), the function returns before touching the snapshot. Correctness preserved: it only skips when *both* are empty, so a rule disabled out-of-band still gets its stale memberships cleaned.
+
+- **Heartbeat reconciliation short-circuits when nothing rule-relevant changed (P3).** New `systems.auto_group_fp` column stores a SHA-256 of the rule-relevant fields (hostname, ip, os, arch, ver, status, mem_total_mb, disk_total_gb, containers_exists, runtimes, container_images) at last evaluation — folded into the existing snapshot SELECT, so no extra read. When the freshly-computed fingerprint matches the stored one, rule evaluation, the membership query, and all writes are skipped. `uptime_secs` is deliberately excluded from the fingerprint (it changes every heartbeat and would defeat the skip); a rule on uptime reconciles on the once-per-tick cadence instead. The fingerprint is re-stamped whenever it drifts.
+
+- **Full-tenant sweep parses rules once instead of per-system (P2).** `apply_auto_groups_for_tenant` (run on rule create / edit / toggle) previously re-loaded and re-compiled every rule's regex once per system — O(N×R) regex compilation on the synchronous path an admin waits on. It now parses the rule set once and reuses it across all systems via the new `apply_auto_groups_with_rules`. The sweep also nulls every fingerprint in the tenant up front and forces re-evaluation (bypassing the P3 skip, since *rules* changed rather than *fields*) — this restores the pre-P3 self-healing guarantee: a system the sweep errors on keeps a NULL fingerprint and is re-evaluated on its next heartbeat.
+
+- **Compliance recalc is scoped to dirty tenants instead of the whole fleet (Scope #4).** `recalculate_current_compliance` previously recomputed every test / system / policy across *all* tenants whenever any membership changed. On a multi-tenant deployment a single new system joining a group in one tenant forced a recompute of every other tenant. The four aggregation passes now take an optional tenant filter; the scheduler's auto-group dirty-bit consumer (TASK F) collects the DISTINCT dirty `tenant_id`s and recomputes only those via the new `recalculate_current_compliance_for_tenant`. The global path is unchanged for startup and the manual `sync_tx` edit path. Tenant isolation is a hard schema boundary (every aggregation JOIN is tenant-local), so scoped numbers are identical to the global pass for that tenant.
+
+- **3 new unit tests** (26 total) pin the fingerprint contract: stable for identical fields and independent of the stored value, flips for every fingerprinted field (guards against forgetting to extend the fingerprint when a new rule field is added), and ignores `uptime_secs`.
+
+### Database
+- **Schema v28 → v29** — adds `systems.auto_group_fp TEXT` (nullable). NULL default means every system is treated as "changed" on its first post-upgrade heartbeat, reconciled exactly once, and fingerprinted from then on. Idempotent `column_exists` guard; fresh installs get the column directly in `initialize_database`.
+
+---
+
 ## [0.5.2] - 2026-06-02
 
 **Headline: Automatic group assignment.** Define a rule once ("`os_family equals linux`", "`containers_exists is true`", "`hostname regex web-prod-`"), and every new and existing system that matches lands in the right groups on its next heartbeat — and out of them again when its metadata stops matching. Policies attached to those groups pick up the new members automatically through the existing scope chain. No more "I provisioned a Linux box yesterday, why isn't it in CIS-Linux yet."

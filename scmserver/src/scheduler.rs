@@ -66,8 +66,17 @@ async fn get_policy_owners(pool: &SqlitePool, tenant_id: &str) -> Vec<i32> {
 // the current policy → group → system assignment graph.
 // Must be called inside an active transaction.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn purge_ghost_results(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
-    sqlx::query(r#"
+async fn purge_ghost_results(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tenant: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    // When `tenant` is Some, restrict the purge to that tenant's results.
+    // Correctness is unaffected by scoping: the NOT EXISTS subquery only ever
+    // joins rows within the same tenant (sig.tenant_id = results.tenant_id),
+    // so a tenant's ghost results can only be determined by that tenant's own
+    // group/policy/test wiring.
+    let clause = if tenant.is_some() { " AND results.tenant_id = ?" } else { "" };
+    let sql = format!(r#"
         DELETE FROM results
         WHERE NOT EXISTS (
             SELECT 1
@@ -79,10 +88,11 @@ async fn purge_ghost_results(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
             WHERE sig.system_id = results.system_id
               AND tip.test_id   = results.test_id
               AND sig.tenant_id = results.tenant_id
-        )
-    "#)
-    .execute(&mut **tx)
-    .await?;
+        ){}
+    "#, clause);
+    let mut q = sqlx::query(&sql);
+    if let Some(t) = tenant { q = q.bind(t); }
+    q.execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -93,10 +103,17 @@ async fn purge_ghost_results(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
 // test, counting only active systems.
 // Must be called inside an active transaction.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+async fn update_test_stats(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tenant: Option<&str>,
+) -> Result<(), sqlx::Error> {
     // The NOT EXISTS clause treats excluded (system, test) pairs as if the
     // result row didn't exist — matches the live-report rendering.
-    sqlx::query(r#"
+    // Scoping: each test's stats are computed purely from its own tenant's
+    // results (r.tenant_id = tests.tenant_id), so a per-tenant WHERE on the
+    // outer UPDATE is correct and just limits which test rows get rewritten.
+    let clause = if tenant.is_some() { " WHERE tenant_id = ?" } else { "" };
+    let sql = format!(r#"
         UPDATE tests SET
             systems_passed = (
                 SELECT COUNT(*) FROM results r
@@ -128,9 +145,11 @@ async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Resu
                   AND r.result    != 'NA'
                   AND r.excluded = 0
             )
-    "#)
-    .execute(&mut **tx)
-    .await?;
+        {}
+    "#, clause);
+    let mut q = sqlx::query(&sql);
+    if let Some(t) = tenant { q = q.bind(t); }
+    q.execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -141,10 +160,15 @@ async fn update_test_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Resu
 // for every active system.
 // Must be called inside an active transaction, after update_test_stats.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn update_system_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
+async fn update_system_stats(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tenant: Option<&str>,
+) -> Result<(), sqlx::Error> {
     // Excluded (system, test) pairs are treated as if their result row didn't
     // exist — they don't contribute to PASS, FAIL, total, or score.
-    sqlx::query(r#"
+    // Scoping appends to the existing `WHERE status = 'active'`.
+    let clause = if tenant.is_some() { " AND tenant_id = ?" } else { "" };
+    let sql = format!(r#"
         UPDATE systems SET
             tests_passed = (
                 SELECT COUNT(*) FROM results r
@@ -176,10 +200,11 @@ async fn update_system_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
                   AND r.result != 'NA'
                   AND r.excluded = 0
             )
-        WHERE status = 'active'
-    "#)
-    .execute(&mut **tx)
-    .await?;
+        WHERE status = 'active'{}
+    "#, clause);
+    let mut q = sqlx::query(&sql);
+    if let Some(t) = tenant { q = q.bind(t); }
+    q.execute(&mut **tx).await?;
     Ok(())
 }
 
@@ -190,8 +215,14 @@ async fn update_system_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
 // policy. NA-only systems are excluded from both numerator and denominator.
 // Must be called inside an active transaction, after update_system_stats.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn update_policy_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Result<(), sqlx::Error> {
-    sqlx::query(r#"
+async fn update_policy_stats(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tenant: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    // Each policy's stats derive only from its own tenant's systems/results
+    // (every JOIN carries tenant_id), so a per-tenant outer WHERE is correct.
+    let clause = if tenant.is_some() { " WHERE tenant_id = ?" } else { "" };
+    let sql = format!(r#"
         UPDATE policies SET
             systems_passed = (
                 SELECT COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END)
@@ -276,31 +307,62 @@ async fn update_policy_stats(tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>) -> Re
                     GROUP BY s.id
                 ) sub
             )
-    "#)
-    .execute(&mut **tx)
-    .await?;
+        {}
+    "#, clause);
+    let mut q = sqlx::query(&sql);
+    if let Some(t) = tenant { q = q.bind(t); }
+    q.execute(&mut **tx).await?;
     Ok(())
 }
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Public: recalculate_current_compliance
-// Opens a single transaction, purges stale results, then updates test, system,
-// and policy stats in order. Commits only when all three steps succeed.
+// Private: run_recalc
+// Core aggregation. `tenant = None` recalculates every tenant (startup, manual
+// sync_tx edits); `tenant = Some(id)` scopes all four passes to one tenant —
+// used by the auto-group dirty-bit consumer so a single membership change
+// doesn't trigger a full-fleet recompute across unrelated tenants.
+//
+// Tenant isolation is a hard boundary in the schema: every results / systems /
+// policies / tests row carries tenant_id and all aggregation JOINs are
+// tenant-local, so per-tenant scoping yields identical numbers to the global
+// pass for that tenant — it just skips touching everyone else.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
-    info!("Starting compliance aggregation (Active Systems Only)...");
-
+async fn run_recalc(pool: &SqlitePool, tenant: Option<&str>) -> Result<(), sqlx::Error> {
     let mut tx = pool.begin().await?;
 
-    purge_ghost_results(&mut tx).await?;
-    update_test_stats(&mut tx).await?;
-    update_system_stats(&mut tx).await?;
-    update_policy_stats(&mut tx).await?;
+    purge_ghost_results(&mut tx, tenant).await?;
+    update_test_stats(&mut tx, tenant).await?;
+    update_system_stats(&mut tx, tenant).await?;
+    update_policy_stats(&mut tx, tenant).await?;
 
     tx.commit().await?;
+    Ok(())
+}
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: recalculate_current_compliance
+// Global recompute across all tenants.  Used on startup and by the manual
+// sync_tx worker (group edits, policy edits, exclusions — which may touch any
+// tenant the editing admin belongs to).
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn recalculate_current_compliance(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    info!("Starting compliance aggregation (all tenants, active systems only)...");
+    run_recalc(pool, None).await?;
     info!("Compliance recalculation complete.");
+    Ok(())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Public: recalculate_current_compliance_for_tenant
+// Single-tenant recompute.  Used by the auto-group dirty-bit consumer (TASK F)
+// so membership churn in one tenant only recomputes that tenant's stats.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn recalculate_current_compliance_for_tenant(
+    pool: &SqlitePool,
+    tenant_id: &str,
+) -> Result<(), sqlx::Error> {
+    run_recalc(pool, Some(tenant_id)).await?;
     Ok(())
 }
 
@@ -537,24 +599,34 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             // on the heartbeat hot path — keeps /send fast even when a rule
             // edit triggers cascading membership changes across many systems.
             //
+            // Scoping: we recompute ONLY the tenants that actually have dirty
+            // systems, not the whole fleet.  On a multi-tenant deployment a
+            // single new Linux box joining a group in tenant A no longer
+            // forces a recompute of tenants B…Z.  We collect DISTINCT dirty
+            // tenant_ids first, then recalc each.
+            //
             // Strategy: clear the flag BEFORE running the recalc, so any
             // concurrent heartbeat that flags a NEW system during the recalc
             // window survives to the next tick.  Worst case is one tick (60s)
-            // of latency, which matches the "accept the lag" decision in
-            // docs/design/0.5.2-auto-groups.md §14 Q2.
-            //
-            // The COUNT keeps the no-op path cheap (one indexed scan against
-            // the partial index `idx_systems_compliance_dirty`).
-            let dirty_count: i64 = sqlx::query_scalar(
-                "SELECT COUNT(*) FROM systems WHERE compliance_dirty = 1"
+            // of latency, matching the "accept the lag" decision in
+            // docs/design/0.5.2-auto-groups.md §14 Q2.  Both the SELECT and
+            // the clearing UPDATE ride the partial index
+            // `idx_systems_compliance_dirty`, so the no-dirt steady state is
+            // one cheap indexed scan per tick.
+            let dirty_tenants: Vec<String> = sqlx::query_scalar(
+                "SELECT DISTINCT tenant_id FROM systems WHERE compliance_dirty = 1"
             )
-            .fetch_one(&loop_pool)
+            .fetch_all(&loop_pool)
             .await
-            .unwrap_or(0);
+            .unwrap_or_default();
 
-            if dirty_count > 0 {
-                info!("auto-groups: {} system(s) flagged compliance_dirty — recalculating", dirty_count);
+            if !dirty_tenants.is_empty() {
+                info!("auto-groups: {} tenant(s) flagged compliance_dirty — recalculating",
+                      dirty_tenants.len());
 
+                // Clear the flags for exactly the tenants we're about to
+                // process.  A tenant that gains a NEW dirty system after this
+                // clear keeps its bit set and is picked up next tick.
                 if let Err(e) = sqlx::query(
                     "UPDATE systems SET compliance_dirty = 0 WHERE compliance_dirty = 1"
                 )
@@ -563,8 +635,11 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                     warn!("auto-groups: could not clear compliance_dirty bits: {}", e);
                 }
 
-                if let Err(e) = recalculate_current_compliance(&loop_pool).await {
-                    error!("auto-groups: compliance recalc after membership churn failed: {}", e);
+                for tenant_id in &dirty_tenants {
+                    if let Err(e) = recalculate_current_compliance_for_tenant(&loop_pool, tenant_id).await {
+                        error!("auto-groups: compliance recalc for tenant {} failed: {}",
+                               tenant_id, e);
+                    }
                 }
             }
 

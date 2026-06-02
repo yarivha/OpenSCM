@@ -150,6 +150,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             tests_failed INTEGER DEFAULT 0,
             total_tests INTEGER DEFAULT 0,
             compliance_dirty INTEGER NOT NULL DEFAULT 0,
+            auto_group_fp TEXT,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
         )",
     )
@@ -2102,6 +2103,34 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v27 → v28 complete.");
+    }
+
+    // v28 → v29: auto-group reconciliation fingerprint.
+    //
+    //   • systems.auto_group_fp — SHA-256 (hex) of the rule-relevant fields
+    //     of the system at the time apply_auto_groups last evaluated it.
+    //     The heartbeat path compares the freshly-computed fingerprint
+    //     against this column and skips rule evaluation + the membership
+    //     query entirely when nothing rule-relevant changed since the last
+    //     heartbeat.  NULL until first evaluation; the full-tenant sweep
+    //     (rule create/edit/toggle) always re-evaluates and re-stamps it.
+    //
+    // Back-compat: NULL default means every system is treated as "changed"
+    // on its first post-upgrade heartbeat, so memberships are reconciled
+    // exactly once and the fingerprint is populated from then on.
+    if version < 29 {
+        info!("Running schema migration v28 → v29 (auto-group fingerprint)...");
+
+        if !column_exists(pool, "systems", "auto_group_fp").await {
+            sqlx::query(
+                "ALTER TABLE systems ADD COLUMN auto_group_fp TEXT"
+            ).execute(pool).await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 29")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v28 → v29 complete.");
     }
 
     Ok(())
