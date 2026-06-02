@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Changed
+- **Enum-typed auto-group fields now accept `contains` / `not_contains`.** `os_family`, `arch`, `status`, and `has_runtime` previously only allowed exact-match operators (`equals` / `not_equals` / `in` / `not_in`); they now also accept substring matching. Useful for rules like `os_family contains "bsd"` (matches both `freebsd` and `openbsd` without enumerating each), `status contains "pend"`, or `has_runtime contains "dock"` (matches both `docker` and a hypothetical `docker-ce`). The eval path was already substring-aware via `match_string` — only `Field::accepts()` (server) and the JS operator catalog (UI) needed loosening. One new unit test (`enum_fields_accept_contains`) locks in the new validator + eval behaviour. 21/21 tests pass.
+
 - **Auto-group rule editor is now fully click-driven (matches the test-builder pattern).** The JSON textarea is gone — admins build rules with three dropdowns + one value input per row, "Add Condition" / trash-can buttons, up to 8 condition rows. No JSON syntax to learn, no curly braces to escape.
   - **Field dropdown** is grouped by category (Identity / Platform / Telemetry / Containers) with a friendly label per field. The picker mirrors the `Field` enum in `auto_groups.rs` exactly.
   - **Operator dropdown** is field-aware: picking a field instantly repopulates the operator list with only the operators that field's type accepts. Mirrors `Field::accepts()` in the evaluator — the two are explicitly documented as paired.

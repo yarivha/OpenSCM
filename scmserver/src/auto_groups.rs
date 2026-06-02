@@ -123,13 +123,21 @@ impl Field {
             Ip => matches!(op, Equals | NotEquals | Contains | NotContains
                               | StartsWith | EndsWith | Regex | InCidr),
 
-            // Enum-style strings — equality and membership only.
+            // Enum-style strings — equality, membership, plus substring
+            // matching. Contains / NotContains widens these from a strict
+            // exact-match set to "partial token" matching, useful for cases
+            // like `os_family contains "bsd"` or `status contains "pend"`
+            // where the admin doesn't want to enumerate every variant.
             OsFamily | Arch | Status =>
-                matches!(op, Equals | NotEquals | In | NotIn),
+                matches!(op, Equals | NotEquals | Contains | NotContains | In | NotIn),
 
             // has_runtime is evaluated against the set of runtimes present
-            // on this host (docker / podman / …); membership-style only.
-            HasRuntime => matches!(op, Equals | NotEquals | In | NotIn),
+            // on this host (docker / podman / …). match_string runs against
+            // each runtime individually, so Contains here means "ANY runtime
+            // string contains the value" — useful for `contains "docker"`
+            // matching both `docker` and a hypothetical `docker-ce`.
+            HasRuntime =>
+                matches!(op, Equals | NotEquals | Contains | NotContains | In | NotIn),
 
             // Numeric fields — comparison operators.
             MemTotalMb | DiskTotalGb | UptimeSecs =>
@@ -974,6 +982,24 @@ mod tests {
         assert!(parse_conditions(
             &json!([{"field":"hostname","operator":"regex","value":"["}]).to_string()
         ).is_err());
+    }
+
+    #[test]
+    fn enum_fields_accept_contains() {
+        // os_family / arch / status / has_runtime previously only accepted
+        // equals / not_equals / in / not_in. Verify Contains / NotContains
+        // are now accepted by the validator and actually match at eval time.
+        let s = snap();
+        assert!(eval_condition(
+            &cond("os_family", "contains", json!("inu")), &s));
+        assert!(eval_condition(
+            &cond("arch",      "not_contains", json!("arm")), &s));
+        assert!(eval_condition(
+            &cond("has_runtime","contains", json!("dock")), &s));
+        // Validator round-trip.
+        validate_conditions_json(
+            &json!([{"field":"status","operator":"contains","value":"act"}]).to_string()
+        ).unwrap();
     }
 
     #[test]
