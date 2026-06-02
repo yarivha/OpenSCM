@@ -6,6 +6,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.5.2] - 2026-06-02
+
+**Headline: Automatic group assignment.** Define a rule once ("`os_family equals linux`", "`containers_exists is true`", "`hostname regex web-prod-`"), and every new and existing system that matches lands in the right groups on its next heartbeat — and out of them again when its metadata stops matching. Policies attached to those groups pick up the new members automatically through the existing scope chain. No more "I provisioned a Linux box yesterday, why isn't it in CIS-Linux yet."
+
 ### Changed
 - **Policy editor's group picker visually marks auto-managed groups.** The group duallistbox on `/policies/add` and `/policies/edit/{id}` already included auto groups (no `auto_managed` filter), but they rendered as plain names — admins couldn't tell at a glance which entries would update automatically vs which they had to maintain. Each auto-group entry now appears as `✨ <name> (auto)` with `data-auto="1"` on the `<option>`. Order: manual groups first (alphabetical), then auto groups (alphabetical). A help line below the picker spells out that auto and manual groups can be mixed freely in a single policy — useful for "linux fleet (auto) + special-handling list (manual)" combinations.
 
