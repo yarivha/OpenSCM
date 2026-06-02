@@ -7,6 +7,8 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Added
+- **Heartbeat hook calls `apply_auto_groups` on every successful agent check-in** (`client.rs` `/send` handler, right after `ingest_containers`). The reconciler is best-effort: any error is logged at `warn` and the heartbeat continues — the user-visible systems UPDATE + container ingest are never rolled back over a rule-eval glitch. The next heartbeat retries the eval. In the steady-state (no rules, or no membership changes) the call is one tiny indexed SELECT against `auto_group_rules` plus one against `systems_in_groups`, both empty/small — negligible. Membership churn flips `systems.compliance_dirty = 1` so the existing scheduler picks up the recalc on its next tick; no synchronous compliance work on the hot path.
+
 - **Auto-group rule evaluator (`scmserver::auto_groups`).** New module that the heartbeat hook and rule editor call into.
   - `Field` / `Operator` enums cover the parameter catalog from the design doc (hostname, ip, os, os_family, arch, platform, ver, status, mem_total_mb, disk_total_gb, uptime_secs, containers_exists, has_runtime, any_container_image — plus the obvious operators per type). `Field::accepts(op)` rejects nonsense pairings like `mem_total_mb contains "x"` at validation time, so admins can't save unevaluatable rules.
   - `SystemSnapshot` is loaded fresh from `systems` + `containers` on every call (cheap — one SELECT per side). `os_family` and `platform` are derived in-Rust from the raw `os` string, so the schema doesn't gain extra denormalised columns. Container fields (`containers_exists`, `runtimes`, `container_images`) are built from the per-host `containers` rows already collected for 0.5.0.

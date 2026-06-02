@@ -460,6 +460,31 @@ pub async fn send(
                     }
                 }
 
+                // Automatic group assignment — reconcile this system's
+                // auto-group membership against the tenant's enabled rules.
+                // Called on every heartbeat; the evaluator no-ops cheaply when
+                // there are no enabled rules (one short SELECT against an
+                // empty / tiny auto_group_rules) or when nothing changed.
+                // Membership churn flips systems.compliance_dirty = 1 so the
+                // existing scheduler picks up the recalc on its next tick —
+                // no synchronous compliance work on the heartbeat hot path.
+                // See docs/design/0.5.2-auto-groups.md.
+                match crate::auto_groups::apply_auto_groups(&mut tx, tenant_id, id).await {
+                    Ok(true)  => {
+                        debug!("auto-groups: membership changed for system {}", id);
+                    }
+                    Ok(false) => { /* no change — common path */ }
+                    Err(e) => {
+                        // Don't fail the heartbeat — auto-group reconciliation
+                        // is best-effort. Log and continue; the next heartbeat
+                        // will retry. The systems UPDATE + container ingest
+                        // above are the user-visible operations and must not
+                        // be rolled back over a rule-eval glitch.
+                        warn!("auto-groups: apply_auto_groups failed for system {}: {}",
+                              id, e);
+                    }
+                }
+
                 // Check whether an admin has queued an UPGRADE for this system — that
                 // shows up as a row in the commands table with command_type='UPGRADE'.
                 // The matching agent_packages row gives us the URL / SHA256 / version
