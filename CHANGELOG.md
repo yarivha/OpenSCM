@@ -8,6 +8,13 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.6.1] - 2026-06-02
+
+### Fixed
+- **Stopped containers are now removed from the inventory.** The Linux agent enumerated containers with `docker ps -a` / `podman ps -a`, where `-a` includes **stopped / exited** containers. A stopped container therefore kept appearing in every heartbeat report, so its `last_seen` never went stale and the server's straggler-prune (which deletes any container missing from the latest report) never removed it — it lingered in the Systems-list container view indefinitely until `docker rm`. The agent now runs plain `ps` (running + paused only), so stopping a container drops it from the next report and the existing server-side prune clears it on the following heartbeat. **Agent-side fix — redeploy / auto-upgrade agents to pick it up;** no server change. Per-container compliance evaluation is unaffected (it only ever assessed live containers).
+
+---
+
 ## [0.6.0] - 2026-06-02
 
 **Golden enrollment tokens — auto-approve enrolling systems without the UI.** An admin mints a token, drops it in the agent config, and every system that enrolls with it comes up `active` instead of `pending` — no manual Approve click. Combined with automatic groups (0.5.2), a freshly-provisioned box goes from install → approved → grouped → scanned with zero human steps. Full design in `docs/design/0.6.0-enrollment-tokens.md`.

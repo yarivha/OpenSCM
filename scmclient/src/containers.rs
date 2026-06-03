@@ -95,11 +95,16 @@ fn detect(runtime: &str) -> bool {
 
 #[cfg(target_os = "linux")]
 fn enumerate_runtime(runtime: &str) -> Vec<DiscoveredContainer> {
-    // Both engines accept `ps -a --format '{{json .}}'` and emit NDJSON
-    // (one container per line). For Podman this is compatible-mode output;
-    // for Docker it's native.
+    // `ps` (NOT `ps -a`) lists only RUNNING containers (running + paused).
+    // We deliberately exclude stopped/exited/created containers: inventory
+    // tracks the live set, and dropping a container from the report is how the
+    // server prunes it (ingest_containers straggler-delete). Using `-a` here
+    // kept exited containers in the report forever, so their last_seen never
+    // went stale and they were never removed from the inventory after being
+    // stopped. Both Docker and Podman emit NDJSON (one container per line);
+    // for Podman this is compatibility-mode output, for Docker it's native.
     let out = match Command::new(runtime)
-        .args(["ps", "-a", "--format", "{{json .}}"])
+        .args(["ps", "--format", "{{json .}}"])
         .output()
     {
         Ok(o) if o.status.success() => o,
