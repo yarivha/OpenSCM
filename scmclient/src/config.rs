@@ -55,6 +55,8 @@ const CURRENT_REGISTRY_KEYS: &[&str] = &[
     "Heartbeat",
     "LogLevel",
     "CmdEnabled",
+    "PsEnabled",
+    "EnrollmentToken",
 ];
 
 // ============================================================
@@ -72,6 +74,11 @@ pub struct ServerConfig {
     pub url: String,
     #[serde(alias = "tenant_id")]   // v0.2.2 and older used tenant_id
     pub organization: String,
+    /// Optional golden enrollment token. When set, sent at first registration
+    /// so the server auto-approves this system instead of leaving it pending.
+    /// Approval bypass only — see docs/design/0.6.0-enrollment-tokens.md.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub enrollment_token: Option<String>,
 }
 
 #[derive(Debug, Deserialize, Clone, Serialize, Default)]
@@ -93,6 +100,7 @@ impl Default for Config {
             server: ServerConfig {
                 url:          "http://localhost:8000".to_string(),
                 organization: "default".to_string(),
+                enrollment_token: None,
             },
             client: ClientConfig {
                 heartbeat:   Some("300".to_string()),
@@ -149,6 +157,7 @@ impl Config {
 
                 key.set_value("ServerURL",    &self.server.url)?;
                 key.set_value("Organization", &self.server.organization)?;
+                if let Some(tok) = &self.server.enrollment_token { key.set_value("EnrollmentToken", tok)?; }
 
                 if let Some(hb)  = &self.client.heartbeat   { key.set_value("Heartbeat",  hb)?; }
                 if let Some(ll)  = &self.client.loglevel     { key.set_value("LogLevel",   ll)?; }
@@ -229,8 +238,13 @@ fn load_from_registry() -> Result<Config, Box<dyn Error>> {
         return Err("ServerURL is required but empty in registry".into());
     }
 
+    let enrollment_token = {
+        let t = read_val("EnrollmentToken", "");
+        if t.is_empty() { None } else { Some(t) }
+    };
+
     let (config, changed) = Config {
-        server: ServerConfig { url, organization },
+        server: ServerConfig { url, organization, enrollment_token },
         client: ClientConfig {
             heartbeat:   Some(read_val("Heartbeat",  "300")),
             loglevel:    Some(read_val("LogLevel",   "info")),

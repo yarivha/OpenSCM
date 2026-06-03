@@ -20,6 +20,7 @@ pub mod systems;
 pub mod groups;
 pub mod auto_groups;
 pub mod auto_groups_admin;
+pub mod enrollment;
 pub mod tests;
 pub mod policies;
 pub mod reports;
@@ -295,6 +296,10 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/systems/delete/{id}", get(systems::systems_delete))
         .route("/systems/edit/{id}", get(systems::systems_edit).post(systems::systems_edit_save))
         .route("/systems/pending", get(systems::systems_pending))
+        .route("/systems/tokens", get(enrollment::tokens_page))
+        .route("/systems/tokens/create", post(enrollment::tokens_create))
+        .route("/systems/tokens/toggle/{id}", post(enrollment::tokens_toggle))
+        .route("/systems/tokens/delete/{id}", get(enrollment::tokens_delete))
         .route("/systems/approve/{id}", get(systems::systems_approve))
         .route("/systems/bulk/approve", post(systems::systems_bulk_approve))
         .route("/systems/bulk/delete", post(systems::systems_bulk_delete))

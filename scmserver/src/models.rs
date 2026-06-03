@@ -312,6 +312,11 @@ pub struct UnsignedPayload {
     pub arch: String,
     pub timestamp: String,
     pub public_key: Option<String>,
+    /// Golden enrollment token, sent only at first registration (id = 0). When
+    /// valid, the server brings the system up `active` instead of `pending`.
+    /// Approval bypass only — see docs/design/0.6.0-enrollment-tokens.md.
+    #[serde(default)]
+    pub enrollment_token: Option<String>,
     // Telemetry — all optional; absent from old clients defaults to None.
     #[serde(default)]
     pub cpu_usage:    Option<f32>,

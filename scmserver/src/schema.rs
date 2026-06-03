@@ -211,6 +211,33 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Enrollment Tokens Table — "golden tokens" that auto-approve enrolling
+    // systems (status active instead of pending). Approval bypass only, not an
+    // auth bypass: the ed25519 handshake still happens. Secret is stored as a
+    // SHA-256 hash; token_prefix is a non-secret display id. See
+    // docs/design/0.6.0-enrollment-tokens.md.
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS enrollment_tokens (
+            id           INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
+            name         TEXT NOT NULL,
+            token_hash   TEXT NOT NULL,
+            token_prefix TEXT,
+            enabled      INTEGER NOT NULL DEFAULT 1,
+            expires_at   DATETIME,
+            max_uses     INTEGER,
+            use_count    INTEGER NOT NULL DEFAULT 0,
+            created_by   TEXT,
+            created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+            last_used_at DATETIME,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+    sqlx::query("CREATE INDEX IF NOT EXISTS idx_enrollment_tokens_lookup ON enrollment_tokens (tenant_id, enabled)")
+        .execute(pool).await?;
+
     // Tests Table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS tests (
@@ -2170,6 +2197,47 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v29 → v30 complete.");
+    }
+
+    // v30 → v31: golden enrollment tokens.
+    //
+    //   • enrollment_tokens — admin-minted tokens that auto-approve enrolling
+    //     systems (status active instead of pending). Approval bypass only,
+    //     not auth bypass. Secret stored as SHA-256 hash. See
+    //     docs/design/0.6.0-enrollment-tokens.md.
+    //
+    // New table only — fully back-compat (no tokens exist until an admin
+    // mints one, so enrollment behaviour is unchanged until then).
+    if version < 31 {
+        info!("Running schema migration v30 → v31 (enrollment tokens)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS enrollment_tokens (
+                id           INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id    VARCHAR(191) NOT NULL DEFAULT 'default',
+                name         TEXT NOT NULL,
+                token_hash   TEXT NOT NULL,
+                token_prefix TEXT,
+                enabled      INTEGER NOT NULL DEFAULT 1,
+                expires_at   DATETIME,
+                max_uses     INTEGER,
+                use_count    INTEGER NOT NULL DEFAULT 0,
+                created_by   TEXT,
+                created_at   DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_used_at DATETIME,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            )"
+        ).execute(pool).await?;
+
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_enrollment_tokens_lookup
+                ON enrollment_tokens (tenant_id, enabled)"
+        ).execute(pool).await?;
+
+        sqlx::query("UPDATE schema_info SET version = 31")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v30 → v31 complete.");
     }
 
     Ok(())

@@ -224,6 +224,11 @@ pub async fn send(
             }
         }
 
+        // Golden enrollment token (optional, registration only). Computed once
+        // here so both the re-registration and new-registration paths can use
+        // it. Empty string is treated as absent.
+        let token_opt = payload.enrollment_token.as_deref().filter(|s| !s.is_empty());
+
         // If this public key already exists (e.g. client lost its stored ID),
         // return the existing system rather than creating a duplicate row.
         if let Some(ref pub_key) = payload.public_key {
@@ -235,7 +240,39 @@ pub async fn send(
             {
                 Ok(Some(row)) => {
                     let existing_id: i64 = row.get("id");
-                    let existing_status: String = row.try_get("status").unwrap_or_else(|_| "pending".into());
+                    let mut existing_status: String = row.try_get("status").unwrap_or_else(|_| "pending".into());
+
+                    // Promote an already-pending system to active if it now
+                    // presents a valid token (covers "enrolled before minting
+                    // the token, then added it"). Runs in its own short tx so
+                    // the token use is consumed atomically with the status flip.
+                    if existing_status == "pending" {
+                        if let Some(tok) = token_opt {
+                            if let Ok(mut tx) = pool.begin().await {
+                                match crate::enrollment::validate_and_consume_token(&mut tx, tenant_id, tok).await {
+                                    Ok(true) => {
+                                        if sqlx::query("UPDATE systems SET status = 'active' WHERE id = ? AND tenant_id = ?")
+                                            .bind(existing_id).bind(tenant_id)
+                                            .execute(&mut *tx).await.is_ok()
+                                            && tx.commit().await.is_ok()
+                                        {
+                                            existing_status = "active".into();
+                                            info!("Agent '{}' (ID {}) auto-approved via enrollment token on re-registration.",
+                                                  payload.hostname, existing_id);
+                                            crate::audit::record(
+                                                &pool, tenant_id, None, Some(payload.ip.as_str()),
+                                                "enrollment.token_approve",
+                                                Some("system"), Some(&existing_id.to_string()),
+                                                Some(&format!("host={:?} auto-approved on re-registration", payload.hostname)),
+                                            ).await;
+                                        }
+                                    }
+                                    _ => { let _ = tx.rollback().await; }
+                                }
+                            }
+                        }
+                    }
+
                     debug!(
                         "Agent '{}' re-registration: returning existing system ID {} (status: {})",
                         payload.hostname, existing_id, existing_status
@@ -278,12 +315,23 @@ pub async fn send(
             payload.hostname, tenant_id
         );
 
-        // Use a transaction so INSERT and last_insert_rowid() run on the same connection.
-        let reg_result: Result<i64, sqlx::Error> = async {
+        // `token_opt` was computed above (shared with the re-registration
+        // path). When a valid token is presented the system comes up `active`
+        // instead of `pending` — approval bypass only, the ed25519 handshake
+        // above still ran. See docs/design/0.6.0-enrollment-tokens.md.
+
+        // Use a transaction so token-consume, INSERT, and last_insert_rowid()
+        // run atomically on the same connection.
+        let reg_result: Result<(i64, bool), sqlx::Error> = async {
             let mut tx = pool.begin().await?;
+            let auto_approved = match token_opt {
+                Some(tok) => crate::enrollment::validate_and_consume_token(&mut tx, tenant_id, tok).await?,
+                None      => false,
+            };
+            let status = if auto_approved { "active" } else { "pending" };
             sqlx::query(
                 "INSERT INTO systems (tenant_id, key, name, ver, os, ip, arch, status)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, 'pending')",
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(tenant_id)
             .bind(&payload.public_key)
@@ -292,23 +340,48 @@ pub async fn send(
             .bind(&payload.os)
             .bind(&payload.ip)
             .bind(&payload.arch)
+            .bind(status)
             .execute(&mut *tx)
             .await?;
             let id: i64 = sqlx::query_scalar("SELECT last_insert_rowid()")
                 .fetch_one(&mut *tx)
                 .await?;
             tx.commit().await?;
-            Ok(id)
+            Ok((id, auto_approved))
         }.await;
 
         match reg_result {
-            Ok(new_id) => {
+            Ok((new_id, auto_approved)) => {
+                let status_str = if auto_approved { "active" } else { "pending" };
                 info!(
-                    "Agent '{}' registered with ID {} (pending approval).",
-                    payload.hostname, new_id
+                    "Agent '{}' registered with ID {} ({}).",
+                    payload.hostname, new_id,
+                    if auto_approved { "auto-approved via enrollment token" } else { "pending approval" }
                 );
+
+                // Audit the token outcome. A presented-but-invalid token is
+                // logged (lenient — the system still enrolled as pending) so a
+                // bad/expired token attempt is visible.
+                if auto_approved {
+                    crate::audit::record(
+                        &pool, tenant_id, None, Some(payload.ip.as_str()),
+                        "enrollment.token_approve",
+                        Some("system"), Some(&new_id.to_string()),
+                        Some(&format!("host={:?} auto-approved at enrollment", payload.hostname)),
+                    ).await;
+                } else if token_opt.is_some() {
+                    warn!("Agent '{}' presented an invalid/expired enrollment token — enrolled as pending.",
+                          payload.hostname);
+                    crate::audit::record(
+                        &pool, tenant_id, None, Some(payload.ip.as_str()),
+                        "enrollment.token_rejected",
+                        Some("system"), Some(&new_id.to_string()),
+                        Some(&format!("host={:?} invalid/expired token", payload.hostname)),
+                    ).await;
+                }
+
                 response_data = serde_json::json!({
-                    "status": "pending",
+                    "status": status_str,
                     "id": new_id,
                     "tenant_id": tenant_id,
                     "command": "REGISTER"

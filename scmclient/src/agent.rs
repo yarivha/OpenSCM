@@ -510,6 +510,12 @@ async fn post_heartbeat(
         arch:         sys.arch.clone(),
         timestamp:    chrono::Utc::now().timestamp().to_string(),
         public_key:   if needs_handshake { Some(identity.public_base64.clone()) } else { None },
+        // Send the enrollment token only at registration (alongside the public
+        // key handshake) — never on routine heartbeats, so the secret isn't
+        // repeatedly transmitted once the system has an ID.
+        enrollment_token: if needs_handshake {
+            config.server.enrollment_token.clone()
+        } else { None },
         cpu_usage:    sys.cpu_usage,
         mem_used_mb:  sys.mem_used_mb,
         mem_total_mb: sys.mem_total_mb,

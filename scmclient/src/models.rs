@@ -17,6 +17,11 @@ pub struct UnsignedPayload {
     pub arch: String,
     pub timestamp: String,
     pub public_key: Option<String>,
+    /// Golden enrollment token — sent only at first registration (id = 0).
+    /// Omitted entirely otherwise so heartbeats never carry the secret and old
+    /// servers see no new field. See docs/design/0.6.0-enrollment-tokens.md.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub enrollment_token: Option<String>,
     // Telemetry — optional so old servers ignore unknown fields gracefully.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cpu_usage:    Option<f32>,

@@ -8,6 +8,29 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.6.0] - 2026-06-02
+
+**Golden enrollment tokens — auto-approve enrolling systems without the UI.** An admin mints a token, drops it in the agent config, and every system that enrolls with it comes up `active` instead of `pending` — no manual Approve click. Combined with automatic groups (0.5.2), a freshly-provisioned box goes from install → approved → grouped → scanned with zero human steps. Full design in `docs/design/0.6.0-enrollment-tokens.md`.
+
+### Added
+- **Enrollment-token management on the Systems page** (`/systems/tokens`, Admin-gated, linked from the Systems header). Create a named token with an optional **expiry** and optional **max-uses**; the raw secret is shown **once** in a copy box and never again. List shows each token's display prefix, status (Active / Disabled / Expired / Used up), expiry, `use_count / max_uses`, and last-used time. Enable/disable toggle and delete. Every create/enable/disable/delete is audited.
+- **Agent config field `[server] enrollment_token`** (TOML) / `EnrollmentToken` (Windows registry). Sent **only at first registration**, never on routine heartbeats, so the secret isn't repeatedly transmitted once the system has an ID.
+- **Auto-approval at registration.** When a valid token is presented, the server brings the system up `active` and records the token use (`use_count++`, `last_used_at`) atomically inside the registration transaction. A system that enrolled *before* a token was minted is promoted from `pending` to `active` if it re-registers presenting a now-valid token.
+
+### Security
+- **Approval bypass, not auth bypass.** The token only sets the new system's initial status — it does **not** weaken agent authentication. The ed25519 keypair handshake and per-request signature verification are unchanged. A leaked token can only auto-approve a system an attacker could already enroll as pending; it can't impersonate an existing system or forge results. Exposure is bounded by expiry, max-uses, and revocation.
+- **Secrets hashed at rest.** Only `SHA-256(token)` is stored; a DB leak yields hashes, not usable tokens. A non-secret display prefix (`oscm_` + 7 hex) is stored for identification.
+- **Lenient invalid handling.** A typo'd, expired, or disabled token never blocks enrollment — the system simply lands `pending` for manual approval, and the bad attempt is audited as `enrollment.token_rejected` (warn). No 403, no lost system.
+- **Approval-only.** A token does not assign groups; placement is left to automatic groups, which sort the now-active system on its first heartbeat.
+
+### Database
+- **Schema v30 → v31** — adds the `enrollment_tokens` table (`token_hash`, `token_prefix`, `enabled`, `expires_at`, `max_uses`, `use_count`, `created_by`, `last_used_at`) + lookup index. New table only; enrollment behaviour is unchanged until an admin mints a token. Fresh installs get it in `initialize_database`.
+
+### Fixed
+- **Windows agent: `PsEnabled` and the new `EnrollmentToken` registry values are no longer pruned as stale.** `EnrollmentToken` was added to the registry-key allowlist (`PsEnabled` was already written/read but missing from the allowlist — a latent bug that would delete the PowerShell-enabled setting on every config load; corrected in passing).
+
+---
+
 ## [0.5.4] - 2026-06-02
 
 **Two database performance fixes surfaced by sqlx slow-statement logging on a production SaaS instance.** Neither was a regression — both are pre-existing costs that grew with data volume — but both are cheaply fixable. Schema v30 (index-only).
