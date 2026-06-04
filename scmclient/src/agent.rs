@@ -266,7 +266,7 @@ async fn process_compliance_tests(
             // Enumerate containers ONCE and iterate. Each container produces
             // a separate result row identified by its runtime_id (which the
             // server resolves to containers.id at result-receive time).
-            let containers = crate::containers::enumerate();
+            let containers = crate::containers::enumerate().unwrap_or_default();
             debug!(
                 "Test ID {} dispatch: per-container — discovered {} container(s)",
                 test_id, containers.len()
@@ -495,10 +495,14 @@ async fn post_heartbeat(
     let needs_handshake = identity.current_id == "0" || !identity.server_pub_path.exists();
 
     // Container discovery — Linux only, soft-fails on missing runtime / no
-    // permission. We send None (omitted in the serialized payload) when the
-    // list is empty so old servers don't see any new field at all.
-    let discovered = crate::containers::enumerate();
-    let containers = if discovered.is_empty() { None } else { Some(discovered) };
+    // enumerate() already returns the correct Option semantics:
+    //   None      → no runtime / daemon unreachable: omitted from the payload,
+    //               server leaves existing rows alone (old servers see nothing).
+    //   Some([])  → runtime present, zero running containers: server prunes all
+    //               of this host's rows (THIS is what removes a stopped
+    //               container's last entry).
+    //   Some([…]) → current running set: server upserts + prunes stragglers.
+    let containers = crate::containers::enumerate();
 
     let unsigned = UnsignedPayload {
         id:           identity.current_id.clone(),

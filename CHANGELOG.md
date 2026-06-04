@@ -8,6 +8,19 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.6.2] - 2026-06-02
+
+### Fixed
+- **Inventory now clears when the *last* running container stops (follow-up to 0.6.1).** 0.6.1 switched the agent to enumerate running containers only, which exposed a latent signalling bug: the agent collapsed "no containers found" to `None` (`if discovered.is_empty() { None } else { Some(...) }`), and the server treats `None` as *"agent sent no container info — leave existing rows alone."* So once the last container stopped, the agent reported `None`, the server skipped the prune, and the old rows lingered (the exact symptom: `docker ps` empty but the Systems view still showed containers). The agent now sends the correct three-way signal, computed in `containers::enumerate()` which returns `Option<Vec>`:
+  - `Some([])` — a container runtime **is** present but has **zero running containers** → the server prunes all of the host's rows. **This is the case that was broken.**
+  - `Some([…])` — the current running set → upsert + prune stragglers.
+  - `None` — no runtime installed, non-Linux, **or the runtime's `ps` failed** (daemon down / no permission) → the server leaves rows untouched, so a transient daemon outage never wipes a host's inventory.
+  - The daemon-down distinction is new: `enumerate_runtime` now returns `None` on command failure (vs an empty list on success), so "runtime broken" is never mistaken for "zero containers."
+
+  **Agent-side fix — redeploy / auto-upgrade agents to 0.6.2.** Lingering rows clear on the first heartbeat after the agent is upgraded. No server change.
+
+---
+
 ## [0.6.1] - 2026-06-02
 
 ### Fixed

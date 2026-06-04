@@ -195,7 +195,7 @@ fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> Vec<Test
 
     if is_per_container {
         // Mirror the agent path: enumerate locally, one outcome per container.
-        let containers = crate::containers::enumerate();
+        let containers = crate::containers::enumerate().unwrap_or_default();
         if containers.is_empty() {
             return vec![host_outcome(t, "NA".into())];
         }

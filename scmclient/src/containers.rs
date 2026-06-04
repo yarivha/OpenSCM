@@ -59,21 +59,48 @@ pub struct DiscoveredContainer {
 // Public entry point
 // ============================================================
 
-/// Enumerate containers across every detected runtime. Returns an empty Vec
-/// when no runtime is installed or on non-Linux.
-pub fn enumerate() -> Vec<DiscoveredContainer> {
+/// Enumerate running containers across every detected runtime.
+///
+/// Returns:
+///   • `None`         — no signal: non-Linux, no runtime installed, or every
+///                      installed runtime's `ps` failed (daemon down / no
+///                      permission). The server leaves existing inventory rows
+///                      untouched, so a transient daemon outage never wipes the
+///                      inventory.
+///   • `Some(vec)`    — authoritative current set from at least one runtime
+///                      whose `ps` succeeded. May be EMPTY, which means "this
+///                      host has a working runtime with zero running
+///                      containers" → the server prunes all of the host's rows.
+///
+/// This distinction is what makes "stop the last container → it disappears from
+/// inventory" work: empty-but-known (Some([])) must be sent, not None.
+pub fn enumerate() -> Option<Vec<DiscoveredContainer>> {
     #[cfg(not(target_os = "linux"))]
     {
-        return Vec::new();
+        None
     }
 
     #[cfg(target_os = "linux")]
     {
+        let mut any_ok = false;
         let mut out = Vec::new();
-        if detect("docker") { out.extend(enumerate_runtime("docker")); }
-        if detect("podman") { out.extend(enumerate_runtime("podman")); }
-        debug!("Discovered {} container(s)", out.len());
-        out
+        for runtime in ["docker", "podman"] {
+            if detect(runtime) {
+                // ps succeeded (even with zero rows) → authoritative; a failed
+                // ps (daemon down) yields None and is skipped so we don't
+                // falsely report "no containers".
+                if let Some(found) = enumerate_runtime(runtime) {
+                    any_ok = true;
+                    out.extend(found);
+                }
+            }
+        }
+        if any_ok {
+            debug!("Discovered {} running container(s)", out.len());
+            Some(out)
+        } else {
+            None
+        }
     }
 }
 
@@ -94,7 +121,12 @@ fn detect(runtime: &str) -> bool {
 }
 
 #[cfg(target_os = "linux")]
-fn enumerate_runtime(runtime: &str) -> Vec<DiscoveredContainer> {
+// Returns None when the `ps` command itself fails (daemon unreachable, no
+// permission, spawn error) — the caller must NOT treat that as "zero
+// containers", or a transient daemon outage would wipe the inventory. Returns
+// Some(vec) (possibly empty) when `ps` succeeded: that's an authoritative
+// "these are the running containers right now".
+fn enumerate_runtime(runtime: &str) -> Option<Vec<DiscoveredContainer>> {
     // `ps` (NOT `ps -a`) lists only RUNNING containers (running + paused).
     // We deliberately exclude stopped/exited/created containers: inventory
     // tracks the live set, and dropping a container from the report is how the
@@ -111,11 +143,11 @@ fn enumerate_runtime(runtime: &str) -> Vec<DiscoveredContainer> {
         Ok(o) => {
             debug!("{} ps failed (rc={:?}): {}", runtime, o.status.code(),
                 String::from_utf8_lossy(&o.stderr).trim());
-            return Vec::new();
+            return None;
         }
         Err(e) => {
             debug!("{} ps spawn failed: {}", runtime, e);
-            return Vec::new();
+            return None;
         }
     };
 
@@ -168,7 +200,7 @@ fn enumerate_runtime(runtime: &str) -> Vec<DiscoveredContainer> {
         containers.push(c);
     }
 
-    containers
+    Some(containers)
 }
 
 /// Pulls the detailed metadata via `<runtime> inspect <id>`. Soft-fails —
