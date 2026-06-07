@@ -395,6 +395,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             excluded_by  TEXT,
             excluded_at  DATETIME,
             container_id INTEGER NOT NULL DEFAULT 0,
+            evidence     TEXT,
             PRIMARY KEY (tenant_id, system_id, test_id, container_id),
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE,
             FOREIGN KEY (system_id) REFERENCES systems (id) ON DELETE CASCADE,
@@ -2238,6 +2239,30 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v30 → v31 complete.");
+    }
+
+    // v31 → v32: per-result evidence.
+    //
+    //   • results.evidence — JSON array of per-condition outcomes (which
+    //     conditions matched / failed + a generic, content-free note)
+    //     explaining a test verdict. Written by the result handler from the
+    //     agent's payload; NULL for results from pre-0.6.4 agents. See the
+    //     0.6.4 evidence feature.
+    //
+    // New nullable column only — back-compat (old agents simply don't send
+    // evidence, so the column stays NULL and reports show no detail panel).
+    if version < 32 {
+        info!("Running schema migration v31 → v32 (result evidence)...");
+
+        if !column_exists(pool, "results", "evidence").await {
+            sqlx::query("ALTER TABLE results ADD COLUMN evidence TEXT")
+                .execute(pool).await?;
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 32")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v31 → v32 complete.");
     }
 
     Ok(())

@@ -101,5 +101,10 @@ pub struct ComplianceResult {
     /// resolves to containers.id via (host_system_id, runtime_id).
     #[serde(skip_serializing_if = "Option::is_none")]
     pub container_runtime_id: Option<String>,
+    /// Per-condition evidence (JSON array of ConditionOutcome) explaining the
+    /// verdict — which conditions matched/failed and a generic, content-free
+    /// note. Omitted when absent so old servers ignore the field.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
 }
 

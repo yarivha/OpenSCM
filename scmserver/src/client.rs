@@ -947,10 +947,10 @@ pub async fn receive_result(
     // container_id is part of the results PK (schema v26): 0 for host results,
     // the resolved containers.id for per-container results.
     if let Err(e) = sqlx::query(
-        "INSERT INTO results (tenant_id, system_id, test_id, container_id, result, last_updated)
-     VALUES (?, ?, ?, ?, ?, ?)
+        "INSERT INTO results (tenant_id, system_id, test_id, container_id, result, last_updated, evidence)
+     VALUES (?, ?, ?, ?, ?, ?, ?)
      ON CONFLICT(tenant_id, system_id, test_id, container_id)
-     DO UPDATE SET result = excluded.result, last_updated = excluded.last_updated"
+     DO UPDATE SET result = excluded.result, last_updated = excluded.last_updated, evidence = excluded.evidence"
     )
     .bind(tenant_id)
     .bind(payload.client_id)
@@ -958,6 +958,7 @@ pub async fn receive_result(
     .bind(container_id)
     .bind(normalized_result)
     .bind(&now)
+    .bind(&payload.evidence)
     .execute(&pool)
     .await
     {

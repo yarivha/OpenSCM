@@ -10,6 +10,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [0.6.4] - 2026-06-02
 
+### Added
+- **Test result evidence — "why did this client fail this test?"** A result is no longer just `PASS`/`FAIL`/`NA`: the agent now ships a per-condition breakdown showing exactly which condition(s) failed and what was expected. The system report (and policy report) gain a **"why?"** toggle on failed and NA rows that expands a per-condition table — element / parameter / sub-element, the expected operator+value, the per-condition verdict (failing ones highlighted), and a short note. **NA is explained too** — applicability misses show up as `applicability` rows ("applicability condition not met"). Full design in `docs/design/0.6.4-evidence.md`.
+  - **Privacy: match-only, never raw content.** Evidence carries only the admin-authored test spec (element, parameter, operator, expected value), the verdict, and a generic note — e.g. `"expected to contains 'PermitRootLogin no' — not satisfied"`. It never includes host-observed content (file bytes, command output, hashes), so secrets can't leak into the DB or a report.
+  - **Built in the caller**, not the evaluator: assembled from the per-condition results the agent already collects, so the ~30 evaluator arms are untouched and verdict logic is unchanged. New `compliance::build_evidence` + `ConditionOutcome`.
+  - **Schema v31 → v32** — `results.evidence TEXT` (nullable). Fully back-compat: pre-0.6.4 agents omit evidence, old servers ignore the field, old result rows just show no "why?" toggle. Agent-side capture requires agents on 0.6.4.
+
 ### Changed
 - **SaaS platform settings moved to their own "SaaS" tab.** The `notify_new_tenant` toggle introduced in 0.6.3 lived in a card at the bottom of the Email tab; it now has a dedicated **SaaS** tab in Settings (between Email and Danger Zone), gated on `is_saas and is_superuser` so it appears only in the SaaS edition for superusers and renders nothing in Community Edition. Same setting, same storage (`notify_new_tenant` under the `default` tenant) — purely a UI relocation, so existing values are unaffected. Gives the SaaS-only settings a clear home to grow into.
 

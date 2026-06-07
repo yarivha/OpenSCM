@@ -243,8 +243,22 @@
                   {% else %}
                     <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>
                   {% endif %}
+                  {# "Why?" — show the per-condition breakdown for failed / NA rows that have evidence #}
+                  {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
+                    <button type="button" class="btn btn-link btn-xs p-0 ml-2 evidence-toggle"
+                            data-evidence="{{ res.evidence }}" title="Show why">
+                      <i class="fas fa-question-circle"></i> why?
+                    </button>
+                  {% endif %}
                 </td>
               </tr>
+              {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
+              <tr class="evidence-detail" style="display:none;">
+                <td colspan="2" class="bg-light px-4 py-2">
+                  <div class="evidence-content text-xs"></div>
+                </td>
+              </tr>
+              {% endif %}
               {% endfor %}
             </tbody>
           </table>
@@ -428,5 +442,61 @@
       );
     }
   });
+</script>
+
+<script>
+  // Evidence "why?" — lazily render the per-condition breakdown for a failed
+  // or NA result. Evidence is a JSON array of condition outcomes stored on the
+  // toggle button's data-evidence attribute; it contains only the test spec +
+  // pass/fail/na + a generic note (no host content).
+  (function () {
+    function esc(s) {
+      s = (s == null ? '' : String(s));
+      return s.replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
+    }
+    function renderEvidence(json) {
+      var rows;
+      try { rows = JSON.parse(json); } catch (e) { rows = null; }
+      if (!Array.isArray(rows) || rows.length === 0) {
+        return '<span class="text-muted">No detail available (result predates evidence capture).</span>';
+      }
+      var html = '<table class="table table-sm mb-0">'
+        + '<thead><tr class="text-uppercase text-muted">'
+        + '<th>Check</th><th>Expected</th><th>Result</th><th>Note</th></tr></thead><tbody>';
+      rows.forEach(function (o) {
+        var badge = o.result === 'PASS' ? '<span class="text-success">PASS</span>'
+                  : o.result === 'FAIL' ? '<span class="text-danger font-weight-bold">FAIL</span>'
+                  : '<span class="text-secondary">NA</span>';
+        var check = esc(o.element)
+                  + (o.input ? ' <code>' + esc(o.input) + '</code>' : '')
+                  + (o.selement ? ' / ' + esc(o.selement) : '');
+        if (o.phase === 'applicability') {
+          check = '<span class="badge badge-light border mr-1">applicability</span>' + check;
+        }
+        var expected = (esc(o.operator) + ' ' + esc(o.expected)).trim();
+        html += '<tr class="' + (o.result === 'FAIL' ? 'table-danger' : '') + '">'
+          + '<td>' + check + '</td>'
+          + '<td>' + (expected ? '<code>' + expected + '</code>' : '<span class="text-muted">—</span>') + '</td>'
+          + '<td>' + badge + '</td>'
+          + '<td>' + esc(o.note) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      return html;
+    }
+    document.querySelectorAll('.evidence-toggle').forEach(function (btn) {
+      btn.addEventListener('click', function (e) {
+        e.stopPropagation();
+        var mainRow = btn.closest('tr');
+        var detail  = mainRow ? mainRow.nextElementSibling : null;
+        if (!detail || !detail.classList.contains('evidence-detail')) return;
+        var content = detail.querySelector('.evidence-content');
+        if (content && !content.dataset.rendered) {
+          content.innerHTML = renderEvidence(btn.getAttribute('data-evidence'));
+          content.dataset.rendered = '1';
+        }
+        detail.style.display = (detail.style.display === 'none' || !detail.style.display) ? 'table-row' : 'none';
+      });
+    });
+  })();
 </script>
 {% endblock %}

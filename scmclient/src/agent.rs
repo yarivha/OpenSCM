@@ -102,6 +102,7 @@ async fn send_result(
     test_id: i64,
     result: &str,
     container_runtime_id: Option<String>,
+    evidence: Option<String>,
     signing_key: &SigningKey,
     http_client: &reqwest::Client,
     result_url: &str,
@@ -112,6 +113,7 @@ async fn send_result(
         test_id,
         result: result.to_string(),
         container_runtime_id,
+        evidence,
     };
 
     let signature = match sign_payload(&payload, signing_key) {
@@ -219,7 +221,10 @@ async fn process_compliance_tests(
 
                 if !is_applicable {
                     debug!("Test ID {} is not applicable — sending NA.", test_id);
-                    send_result(client_id_int, organization, test_id, "NA", None, signing_key, http_client, result_url).await;
+                    // Evidence: which applicability condition(s) gated it out.
+                    let app_refs: Vec<&crate::models::TestCondition> = app_conditions.iter().collect();
+                    let evidence = crate::compliance::build_evidence("applicability", &app_refs, &app_results);
+                    send_result(client_id_int, organization, test_id, "NA", None, evidence, signing_key, http_client, result_url).await;
                     debug!("Completed evaluation of test ID {}", test_id);
                     continue;
                 }
@@ -273,7 +278,7 @@ async fn process_compliance_tests(
             );
             if containers.is_empty() {
                 debug!("Test ID {} is per-container but host has zero containers — sending NA.", test_id);
-                send_result(client_id_int, organization, test_id, "NA", None, signing_key, http_client, result_url).await;
+                send_result(client_id_int, organization, test_id, "NA", None, None, signing_key, http_client, result_url).await;
             } else {
                 for container in &containers {
                     debug!(
@@ -294,8 +299,9 @@ async fn process_compliance_tests(
                     }).collect();
                     let verdict = crate::compliance::combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
                     debug!("Test ID {} container '{}' final verdict: {}", test_id, container.name, verdict);
+                    let evidence = crate::compliance::build_evidence("condition", &conds, &results);
                     send_result(client_id_int, organization, test_id, &verdict,
-                                Some(container.runtime_id.clone()),
+                                Some(container.runtime_id.clone()), evidence,
                                 signing_key, http_client, result_url).await;
                 }
             }
@@ -315,7 +321,8 @@ async fn process_compliance_tests(
             }).collect();
             let verdict = crate::compliance::combine_verdict(&results, test.filter.as_deref().unwrap_or("all"));
             debug!("Test ID {} final verdict: {}", test_id, verdict);
-            send_result(client_id_int, organization, test_id, &verdict, None, signing_key, http_client, result_url).await;
+            let evidence = crate::compliance::build_evidence("condition", &conds, &results);
+            send_result(client_id_int, organization, test_id, &verdict, None, evidence, signing_key, http_client, result_url).await;
         }
         debug!("Completed evaluation of test ID {}", test_id);
     }

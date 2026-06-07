@@ -1042,7 +1042,8 @@ pub async fn policies_report(
             t.id   as test_id,
             t.name as test_name,
             r.result as status,
-            r.excluded as is_excluded
+            r.excluded as is_excluded,
+            r.evidence as evidence
         FROM results r
         JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
         JOIN tests t ON r.test_id = t.id AND r.tenant_id = t.tenant_id
@@ -1081,6 +1082,7 @@ pub async fn policies_report(
             is_excludable: true, // live report → right-click menu enabled
             system_id,
             test_id,
+            evidence: row.try_get("evidence").ok().flatten(),
         });
     }
 
@@ -1207,7 +1209,8 @@ async fn fetch_live_policy_report_data(
             t.id   as test_id,
             t.name as test_name,
             r.result as status,
-            r.excluded as is_excluded
+            r.excluded as is_excluded,
+            r.evidence as evidence
         FROM results r
         JOIN systems s ON r.system_id = s.id
         JOIN tests t ON r.test_id = t.id
@@ -1237,6 +1240,7 @@ async fn fetch_live_policy_report_data(
             is_excludable: false,
             system_id,
             test_id,
+            evidence: row.try_get("evidence").ok().flatten(),
         });
     }
 

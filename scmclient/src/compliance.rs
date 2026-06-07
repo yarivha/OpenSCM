@@ -880,6 +880,81 @@ pub fn combine_verdict(results: &[EvalResult], filter: &str) -> String {
     }
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Evidence — "why did this test (not) pass?"
+//
+// One ConditionOutcome per evaluated condition. PRIVACY: this carries ONLY the
+// admin-authored test spec (element / parameter / sub-element / operator /
+// expected value) plus the per-condition verdict and a GENERIC note. It never
+// includes host-observed content (file bytes, command output, etc.) — see the
+// 0.6.4 evidence design. The note explains the outcome in match-only terms.
+// ─────────────────────────────────────────────────────────────────────────────
+#[derive(serde::Serialize)]
+pub struct ConditionOutcome {
+    pub phase:    String,   // "condition" | "applicability"
+    pub element:  String,
+    pub input:    String,
+    pub selement: String,
+    pub operator: String,
+    pub expected: String,
+    pub result:   String,   // "PASS" | "FAIL" | "NA"
+    pub note:     String,
+}
+
+fn result_str(r: &EvalResult) -> &'static str {
+    match r { EvalResult::Pass => "PASS", EvalResult::Fail => "FAIL", EvalResult::Na => "NA" }
+}
+
+/// Generic, content-free explanation for one condition outcome. Uses only the
+/// operator + admin-authored expected value — never anything observed on the
+/// host.
+fn condition_note(phase: &str, operator: &str, expected: &str, r: &EvalResult) -> String {
+    match r {
+        EvalResult::Pass => "matched".to_string(),
+        EvalResult::Fail => {
+            let op = if operator.trim().is_empty() { "match" } else { operator.trim() };
+            if expected.trim().is_empty() {
+                format!("did not satisfy '{}'", op)
+            } else {
+                format!("expected to {} '{}' — not satisfied", op, expected.trim())
+            }
+        }
+        EvalResult::Na => {
+            if phase == "applicability" {
+                "applicability condition not met".to_string()
+            } else {
+                "not applicable / not evaluable on this system".to_string()
+            }
+        }
+    }
+}
+
+/// Build the evidence JSON for a set of conditions paired 1:1 with their
+/// EvalResults. Returns None for an empty set (so the field is omitted).
+/// `phase` is "condition" for the test body or "applicability" for the gate.
+pub fn build_evidence(
+    phase: &str,
+    conds: &[&crate::models::TestCondition],
+    results: &[EvalResult],
+) -> Option<String> {
+    if conds.is_empty() || conds.len() != results.len() { return None; }
+    let outcomes: Vec<ConditionOutcome> = conds.iter().zip(results.iter()).map(|(c, r)| {
+        let operator = c.condition.as_deref().unwrap_or("");
+        let expected = c.sinput.as_deref().unwrap_or("");
+        ConditionOutcome {
+            phase:    phase.to_string(),
+            element:  c.element.clone(),
+            input:    c.input.clone(),
+            selement: c.selement.clone(),
+            operator: operator.to_string(),
+            expected: expected.to_string(),
+            result:   result_str(r).to_string(),
+            note:     condition_note(phase, operator, expected, r),
+        }
+    }).collect();
+    serde_json::to_string(&outcomes).ok()
+}
+
 pub fn evaluate(
     element: &str,
     input: &str,

@@ -400,6 +400,10 @@ pub struct ComplianceResult {
     /// (host_system_id, runtime_id) and binds it on the result row.
     #[serde(default)]
     pub container_runtime_id: Option<String>,
+    /// Per-condition evidence (JSON array) explaining the verdict. None from
+    /// pre-0.6.4 agents — stored as NULL, reports just show no detail panel.
+    #[serde(default)]
+    pub evidence: Option<String>,
 }
 
 
@@ -587,6 +591,11 @@ pub struct IndividualResult {
     pub system_id: Option<i64>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub test_id: Option<i64>,
+    /// Per-condition evidence JSON (which conditions matched/failed + a generic
+    /// note) explaining the verdict. None for pre-0.6.4 results / not-scanned.
+    /// Parsed and rendered by the report template's "why" panel.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub evidence: Option<String>,
 }
 
 

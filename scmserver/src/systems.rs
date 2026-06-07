@@ -978,7 +978,8 @@ pub async fn fetch_system_report_data(
             t.id          AS test_id,
             t.name        AS test_name,
             COALESCE(r.result, 'NOT_SCANNED') AS status,
-            COALESCE(r.excluded, 0) AS is_excluded
+            COALESCE(r.excluded, 0) AS is_excluded,
+            r.evidence AS evidence
         FROM systems_in_groups sig
         JOIN systems_in_policy sip
             ON sig.group_id = sip.group_id AND sig.tenant_id = sip.tenant_id
@@ -1036,6 +1037,7 @@ pub async fn fetch_system_report_data(
                 _ => {}
             }
         }
+        let evidence: Option<String> = row.try_get("evidence").ok().flatten();
         entry.results.push(IndividualResult {
             test_name,
             status,
@@ -1044,6 +1046,7 @@ pub async fn fetch_system_report_data(
             is_excludable: false,
             system_id: Some(system_id as i64),
             test_id,
+            evidence,
         });
     }
 
