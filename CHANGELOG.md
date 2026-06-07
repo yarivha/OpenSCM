@@ -8,6 +8,13 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.6.3] - 2026-06-02
+
+### Added
+- **SaaS Platform settings section (SaaS edition only).** The Settings → Email tab now shows a "SaaS Platform" card in SaaS mode (superuser-only, gated on `is_saas`), with a toggle: **Email superusers when a new tenant self-registers**. Stored as the global `notify_new_tenant` setting under the `default` tenant, persisted by the existing `settings_save` flow (routed to `default` like the SMTP keys). The section renders nothing in Community Edition. Defaults to enabled, preserving the behaviour shipped to SaaS in 0.4.3. The actual notification email is sent by the SaaS binary; this is just the shared settings UI + storage that drives it.
+
+---
+
 ## [0.6.2] - 2026-06-02
 
 ### Fixed

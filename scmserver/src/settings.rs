@@ -43,6 +43,10 @@ pub struct Settings {
     pub smtp_from:     String,
     pub smtp_tls:      String,
     pub app_url:       String,
+    // SaaS-only platform setting (global, stored under the 'default' tenant).
+    // "1" = email superusers when a new tenant self-registers, "0" = off.
+    // Defaults to "1" to preserve the behaviour shipped in SaaS 0.4.3.
+    pub notify_new_tenant: String,
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -77,10 +81,10 @@ pub async fn settings(
         map.insert(key, value);
     }
 
-    // SMTP settings are global — always read from the default tenant
+    // SMTP settings + SaaS platform settings are global — read from default tenant
     let smtp_rows = sqlx::query(
         "SELECT skey, value FROM settings WHERE tenant_id = 'default'
-         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url')",
+         AND skey IN ('smtp_host','smtp_port','smtp_username','smtp_password','smtp_from','smtp_tls','app_url','notify_new_tenant')",
     )
     .fetch_all(&*pool)
     .await
@@ -115,6 +119,7 @@ pub async fn settings(
         smtp_from:     map.get("smtp_from").cloned().unwrap_or_default(),
         smtp_tls:      map.get("smtp_tls").cloned().unwrap_or_else(|| "starttls".to_string()),
         app_url:       map.get("app_url").cloned().unwrap_or_default(),
+        notify_new_tenant: map.get("notify_new_tenant").cloned().unwrap_or_else(|| "1".to_string()),
     };
 
     // Active signing key fingerprint and creation date for the Danger Zone card.
@@ -265,16 +270,26 @@ pub async fn settings_save(
         if !smtp_password.is_empty() {
             updates.push(("smtp_password", smtp_password));
         }
+
+        // SaaS-only platform toggle (superuser, global). Checkbox: present in
+        // the form only when checked, so absence means "off". Gated on
+        // is_saas_mode() so the key never appears in CE deployments.
+        if crate::handlers::is_saas_mode() {
+            let notify = if form_data.contains_key("notify_new_tenant") { "1" } else { "0" };
+            updates.push(("notify_new_tenant", notify.to_string()));
+        }
     }
 
-    const SMTP_KEYS: &[&str] = &[
+    // Keys stored globally under the 'default' tenant rather than per-tenant.
+    const GLOBAL_KEYS: &[&str] = &[
         "smtp_host", "smtp_port", "smtp_username", "smtp_password",
         "smtp_from", "smtp_tls", "app_url",
+        "notify_new_tenant",
     ];
 
     for (key, value) in updates {
-        // SMTP settings are global — always stored under the default tenant
-        let tenant = if SMTP_KEYS.contains(&key) { "default" } else { &auth.tenant_id };
+        // SMTP + SaaS platform settings are global — stored under default tenant
+        let tenant = if GLOBAL_KEYS.contains(&key) { "default" } else { &auth.tenant_id };
         if let Err(e) = sqlx::query(
             "INSERT INTO settings (tenant_id, skey, value)
      VALUES (?, ?, ?)

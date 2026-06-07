@@ -408,6 +408,32 @@
                 </div>
               </div>
             </div>
+
+            {# SaaS-only platform settings — rendered only in SaaS mode #}
+            {% if is_saas %}
+            <div class="card card-outline card-info">
+              <div class="card-header">
+                <h3 class="card-title"><i class="fas fa-cloud mr-1"></i> SaaS Platform</h3>
+              </div>
+              <div class="card-body">
+                <div class="form-group mb-0">
+                  <div class="custom-control custom-switch">
+                    <input type="checkbox" class="custom-control-input" id="notify_new_tenant"
+                           name="notify_new_tenant" value="1"
+                           {% if settings.notify_new_tenant == "1" %}checked{% endif %}>
+                    <label class="custom-control-label" for="notify_new_tenant">
+                      Email superusers when a new tenant self-registers
+                    </label>
+                  </div>
+                  <small class="form-text text-muted">
+                    When a new organization signs up through the public registration page,
+                    every superuser with an email address is notified. Requires SMTP to be
+                    configured above.
+                  </small>
+                </div>
+              </div>
+            </div>
+            {% endif %}
           </div>
           {% endif %}
 
