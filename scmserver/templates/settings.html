@@ -56,6 +56,13 @@
             </a>
           </li>
           {% endif %}
+          {% if is_saas and is_superuser %}
+          <li class="nav-item">
+            <a class="nav-link" id="saas-tab" data-toggle="tab" href="#saas" role="tab">
+              <i class="fas fa-cloud mr-1"></i> SaaS
+            </a>
+          </li>
+          {% endif %}
           {% if is_admin %}
           <li class="nav-item">
             <a class="nav-link text-danger" id="danger-tab" data-toggle="tab" href="#danger" role="tab">
@@ -408,12 +415,15 @@
                 </div>
               </div>
             </div>
+          </div>
+          {% endif %}
 
-            {# SaaS-only platform settings — rendered only in SaaS mode #}
-            {% if is_saas %}
-            <div class="card card-outline card-info">
+          <!-- SaaS Tab (SaaS edition, superuser only) -->
+          {% if is_saas and is_superuser %}
+          <div class="tab-pane fade" id="saas" role="tabpanel">
+            <div class="card card-outline card-info mb-0">
               <div class="card-header">
-                <h3 class="card-title"><i class="fas fa-cloud mr-1"></i> SaaS Platform</h3>
+                <h3 class="card-title"><i class="fas fa-cloud mr-1"></i> Platform Settings</h3>
               </div>
               <div class="card-body">
                 <div class="form-group mb-0">
@@ -428,12 +438,11 @@
                   <small class="form-text text-muted">
                     When a new organization signs up through the public registration page,
                     every superuser with an email address is notified. Requires SMTP to be
-                    configured above.
+                    configured on the <strong>Email</strong> tab.
                   </small>
                 </div>
               </div>
             </div>
-            {% endif %}
           </div>
           {% endif %}
 

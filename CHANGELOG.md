@@ -8,6 +8,13 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.6.4] - 2026-06-02
+
+### Changed
+- **SaaS platform settings moved to their own "SaaS" tab.** The `notify_new_tenant` toggle introduced in 0.6.3 lived in a card at the bottom of the Email tab; it now has a dedicated **SaaS** tab in Settings (between Email and Danger Zone), gated on `is_saas and is_superuser` so it appears only in the SaaS edition for superusers and renders nothing in Community Edition. Same setting, same storage (`notify_new_tenant` under the `default` tenant) — purely a UI relocation, so existing values are unaffected. Gives the SaaS-only settings a clear home to grow into.
+
+---
+
 ## [0.6.3] - 2026-06-02
 
 ### Added
