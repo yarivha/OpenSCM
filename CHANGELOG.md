@@ -8,7 +8,7 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
-## [0.6.4] - 2026-06-02
+## [0.6.4] - 2026-06-07
 
 ### Added
 - **Test result evidence — "why did this client fail this test?"** A result is no longer just `PASS`/`FAIL`/`NA`: the agent now ships a per-condition breakdown showing exactly which condition(s) failed and what was expected. Both the system report and the policy report gain a **"why?"** toggle on failed and NA rows that expands a per-condition table — element / parameter / sub-element, the expected operator+value, the per-condition verdict (failing ones highlighted), and a short note. **NA is explained too** — applicability misses show up as `applicability` rows ("applicability condition not met"). Full design in `docs/design/0.6.4-evidence.md`.
