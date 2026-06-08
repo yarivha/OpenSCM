@@ -97,23 +97,35 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     .unwrap_or(60);
 
     
+    // Dual-mode compliance (0.6.5): read the tenant's policy/system modes and
+    // pick the matching stored column, so the dashboard tables + trend switch
+    // instantly (no recompute) and the trend re-renders the whole history in
+    // the chosen mode (no jump). score_test / score_system / score_policy are
+    // both kept current by every recalc; the active mode just selects which.
+    let pol_mode = crate::policies::read_compliance_mode(&pool, &auth.tenant_id, "policy_compliance_mode").await;
+    let sys_mode = crate::policies::read_compliance_mode(&pool, &auth.tenant_id, "system_compliance_mode").await;
+    let pol_col  = if pol_mode == "system" { "score_system" } else { "score_test" };
+    let sys_col  = if sys_mode == "policy" { "score_policy" } else { "score_test" };
+    let pol_hist = if pol_mode == "system" { "policies_score_system" } else { "policies_score_test" };
+    let sys_hist = if sys_mode == "policy" { "systems_score_policy"  } else { "systems_score_test" };
+
     // 2. Get Critical Policy Failures
-    let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(
+    let top_failed_policies = sqlx::query_as::<_, PolicyFailRow>(&format!(
         r#"
-        SELECT 
+        SELECT
             id as policy_id,
-	    name as policy_name, 
+	    name as policy_name,
             version as policy_version,
-            compliance_score as compliance,
+            {pol_col} as compliance,
             systems_passed as systems_passed,
             systems_failed as systems_failed
-        FROM policies 
-        WHERE tenant_id = ? 
-        AND compliance_score >= 0
-        ORDER BY compliance_score ASC 
+        FROM policies
+        WHERE tenant_id = ?
+        AND {pol_col} >= 0
+        ORDER BY {pol_col} ASC
         LIMIT 5
         "#
-    )
+    ))
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
     .await
@@ -123,13 +135,13 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     })?;
 
     // 3. Get Highest Risk Assets
-    let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(
-        "SELECT id as system_id, name as system_name, os, compliance_score as compliance,
+    let top_failed_systems = sqlx::query_as::<_, SystemFailRow>(&format!(
+        "SELECT id as system_id, name as system_name, os, {sys_col} as compliance,
         tests_passed, tests_failed,
         MAX(0, total_tests - tests_passed - tests_failed) as tests_na
         FROM systems WHERE status='active' AND tenant_id = ?
-        AND compliance_score >= 0 ORDER BY compliance_score ASC LIMIT 5"
-    )
+        AND {sys_col} >= 0 ORDER BY {sys_col} ASC LIMIT 5"
+    ))
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
     .await.map_err(|e| { error!("{}", e); StatusCode::INTERNAL_SERVER_ERROR })?;
@@ -153,8 +165,8 @@ pub async fn dashboard(auth: AuthSession, Query(params): Query<DashboardParams>,
     };
     let history_query = format!(
         "SELECT {date_col} as check_date, \
-                AVG(systems_score) as systems_score, \
-                AVG(policies_score) as policies_score \
+                AVG({sys_hist}) as systems_score, \
+                AVG({pol_hist}) as policies_score \
          FROM compliance_history WHERE tenant_id = ? \
          GROUP BY 1 ORDER BY {order_col} DESC LIMIT {limit}"
     );

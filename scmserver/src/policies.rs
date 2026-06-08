@@ -69,48 +69,27 @@ pub async fn policies(
     .await
     .unwrap_or(60);
 
-    let rows = match sqlx::query(r#"
+    // Dual-mode (0.6.5): read the per-tenant policy compliance mode and show
+    // the matching stored score (score_test / score_system). Both are kept
+    // current by every recalc, so switching the toggle is instant and the list
+    // stays consistent with the dashboard + reports. (Previously the list
+    // hardcoded per-system, ignoring the toggle.)
+    let pol_mode = read_compliance_mode(&pool, &auth.tenant_id, "policy_compliance_mode").await;
+    let pol_col  = if pol_mode == "system" { "p.score_system" } else { "p.score_test" };
+    let rows = match sqlx::query(&format!(r#"
         SELECT
             p.id AS policy_id,
             p.name AS policy_name,
             p.version AS policy_version,
             p.description AS policy_description,
             p.author AS author,
-            CAST(
-                COALESCE(
-                    ROUND(
-                        SUM(CASE WHEN system_status = 'passed' THEN 1 ELSE 0 END) * 100.0
-                        / NULLIF(
-                            SUM(CASE WHEN system_status IN ('passed', 'failed') THEN 1 ELSE 0 END),
-                            0
-                        ),
-                        2
-                    ),
-                    -1.0
-                ) AS REAL
-            ) AS compliance,
+            {pol_col} AS compliance,
             (SELECT COUNT(*) FROM tests_in_policy WHERE policy_id = p.id) as test_count,
             (SELECT COUNT(*) FROM systems_in_policy WHERE policy_id = p.id) as system_count
         FROM policies p
-        LEFT JOIN (
-            SELECT
-                tip.policy_id,
-                r.system_id,
-                CASE
-                    WHEN SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) > 0
-                        THEN 'failed'
-                    WHEN SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) = 0
-                        THEN 'na' 
-                    ELSE 'passed'
-                END AS system_status
-            FROM tests_in_policy tip
-            JOIN results r ON r.test_id = tip.test_id
-            GROUP BY tip.policy_id, r.system_id
-        ) AS system_results ON p.id = system_results.policy_id
         WHERE p.tenant_id = ?
-        GROUP BY p.id, p.name, p.version, p.description, p.author
         ORDER BY p.id ASC
-    "#)
+    "#))
     .bind(&auth.tenant_id)
     .fetch_all(&*pool)
     .await

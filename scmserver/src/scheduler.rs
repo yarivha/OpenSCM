@@ -178,6 +178,32 @@ async fn update_system_stats(
     // (binary), else per-test. Default 'test'.
     let mode = "COALESCE((SELECT value FROM settings \
                 WHERE tenant_id = systems.tenant_id AND skey = 'system_compliance_mode'), 'test')";
+
+    // Per-test score: % of the system's own tests that passed.
+    let test_expr = "SELECT CASE WHEN COUNT(*) = 0 THEN -1.0 \
+        ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 END \
+        FROM results r WHERE r.system_id = systems.id AND r.tenant_id = systems.tenant_id \
+          AND r.result != 'NA' AND r.excluded = 0";
+
+    // Per-policy score: % of the system's assigned policies it fully passes
+    // (no FAIL, ≥1 PASS) among applicable policies (≥1 PASS/FAIL).
+    let policy_expr = "SELECT CASE WHEN COUNT(*) = 0 THEN -1.0 \
+        ELSE CAST(SUM(CASE WHEN p_fail = 0 AND p_pass > 0 THEN 1 ELSE 0 END) AS REAL) * 100 / COUNT(*) END \
+        FROM ( \
+            SELECT sip.policy_id, \
+                SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS p_pass, \
+                SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) AS p_fail \
+            FROM systems_in_groups sig \
+            JOIN systems_in_policy sip ON sip.group_id = sig.group_id AND sip.tenant_id = sig.tenant_id \
+            JOIN tests_in_policy tip ON tip.policy_id = sip.policy_id AND tip.tenant_id = sip.tenant_id \
+            LEFT JOIN results r ON r.system_id = systems.id AND r.test_id = tip.test_id \
+                AND r.tenant_id = systems.tenant_id AND r.excluded = 0 \
+            WHERE sig.system_id = systems.id AND sig.tenant_id = systems.tenant_id \
+            GROUP BY sip.policy_id \
+            HAVING SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) > 0 \
+                OR SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) > 0 \
+        ) per_policy";
+
     let sql = format!(r#"
         UPDATE systems SET
             tests_passed = (
@@ -200,45 +226,13 @@ async fn update_system_stats(
                   AND r.tenant_id = systems.tenant_id
                   AND r.excluded = 0
             ),
+            score_test   = ({test_expr}),
+            score_policy = ({policy_expr}),
             compliance_score = (
-                CASE WHEN {mode} = 'policy' THEN (
-                    -- % of assigned policies the system fully passes.
-                    SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
-                                ELSE CAST(SUM(CASE WHEN p_fail = 0 AND p_pass > 0 THEN 1 ELSE 0 END) AS REAL)
-                                     * 100 / COUNT(*) END
-                    FROM (
-                        SELECT sip.policy_id,
-                            SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS p_pass,
-                            SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) AS p_fail
-                        FROM systems_in_groups sig
-                        JOIN systems_in_policy sip ON sip.group_id = sig.group_id
-                            AND sip.tenant_id = sig.tenant_id
-                        JOIN tests_in_policy tip ON tip.policy_id = sip.policy_id
-                            AND tip.tenant_id = sip.tenant_id
-                        LEFT JOIN results r ON r.system_id = systems.id
-                            AND r.test_id = tip.test_id
-                            AND r.tenant_id = systems.tenant_id
-                            AND r.excluded = 0
-                        WHERE sig.system_id = systems.id
-                          AND sig.tenant_id = systems.tenant_id
-                        GROUP BY sip.policy_id
-                        HAVING SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) > 0
-                            OR SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) > 0
-                    ) per_policy
-                ) ELSE (
-                    -- % of the system's tests that passed.
-                    SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
-                                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL)
-                                      / COUNT(*)) * 100 END
-                    FROM results r
-                    WHERE r.system_id = systems.id
-                      AND r.tenant_id = systems.tenant_id
-                      AND r.result != 'NA'
-                      AND r.excluded = 0
-                ) END
+                CASE WHEN {mode} = 'policy' THEN ({policy_expr}) ELSE ({test_expr}) END
             )
         WHERE status = 'active'{clause}
-    "#, mode = mode, clause = clause);
+    "#, mode = mode, test_expr = test_expr, policy_expr = policy_expr, clause = clause);
     let mut q = sqlx::query(&sql);
     if let Some(t) = tenant { q = q.bind(t); }
     q.execute(&mut **tx).await?;
@@ -312,6 +306,17 @@ async fn update_policy_stats(
                 SELECT CASE WHEN {mode} = 'system'
                     THEN COUNT(CASE WHEN fails > 0 THEN 1 END)
                     ELSE COALESCE(SUM(fails), 0) END
+                FROM ({ps}) sub
+            ),
+            score_test = (
+                SELECT CASE WHEN COALESCE(SUM(passes),0) + COALESCE(SUM(fails),0) = 0 THEN -1.0
+                            ELSE CAST(SUM(passes) AS REAL) * 100 / (SUM(passes) + SUM(fails)) END
+                FROM ({ps}) sub
+            ),
+            score_system = (
+                SELECT CASE WHEN COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) = 0 THEN -1.0
+                            ELSE CAST(COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END) AS REAL) * 100
+                                 / COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) END
                 FROM ({ps}) sub
             ),
             compliance_score = (
@@ -403,43 +408,51 @@ pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Er
 
     for tenant_id in tenants {
 
-        // Average only scanned active systems (exclude -1.0)
+        // Snapshot BOTH modes (0.6.5): the active score plus the per-test and
+        // per-(policy|system) variants, so the trend re-renders in whichever
+        // mode the tenant later picks — no jump. AVG ignores NULLs, so each
+        // CASE averages only that column's scanned rows.
         let sys_stats = sqlx::query(
-            "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total
-             FROM systems
-             WHERE tenant_id = ?
-             AND status = 'active'
-             AND compliance_score >= 0",
+            "SELECT AVG(CASE WHEN compliance_score >= 0 THEN compliance_score END) as avg_score,
+                    AVG(CASE WHEN score_test   >= 0 THEN score_test   END) as avg_test,
+                    AVG(CASE WHEN score_policy >= 0 THEN score_policy END) as avg_policy,
+                    COUNT(CASE WHEN compliance_score >= 0 THEN 1 END) as total
+             FROM systems WHERE tenant_id = ? AND status = 'active'",
         )
         .bind(&tenant_id)
         .fetch_one(pool)
         .await?;
 
-        // Average only scanned policies (exclude -1.0)
         let pol_stats = sqlx::query(
-            "SELECT AVG(compliance_score) as avg_score, COUNT(*) as total
-             FROM policies
-             WHERE tenant_id = ?
-             AND compliance_score >= 0",
+            "SELECT AVG(CASE WHEN compliance_score >= 0 THEN compliance_score END) as avg_score,
+                    AVG(CASE WHEN score_test   >= 0 THEN score_test   END) as avg_test,
+                    AVG(CASE WHEN score_system >= 0 THEN score_system END) as avg_system,
+                    COUNT(CASE WHEN compliance_score >= 0 THEN 1 END) as total
+             FROM policies WHERE tenant_id = ?",
         )
         .bind(&tenant_id)
         .fetch_one(pool)
         .await?;
 
-        let systems_score  = sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-        let systems_score = (systems_score * 100.0).round() / 100.0;
-        let policies_score = pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0);
-        let policies_score = (policies_score * 100.0).round() / 100.0;
+        let round2 = |v: f64| (v * 100.0).round() / 100.0;
+        let systems_score         = round2(sys_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0));
+        let systems_score_test    = round2(sys_stats.try_get::<f64, _>("avg_test").unwrap_or(0.0));
+        let systems_score_policy  = round2(sys_stats.try_get::<f64, _>("avg_policy").unwrap_or(0.0));
+        let policies_score        = round2(pol_stats.try_get::<f64, _>("avg_score").unwrap_or(0.0));
+        let policies_score_test   = round2(pol_stats.try_get::<f64, _>("avg_test").unwrap_or(0.0));
+        let policies_score_system = round2(pol_stats.try_get::<f64, _>("avg_system").unwrap_or(0.0));
         // COUNT(*) returns i64 in SQLite — use i64 to avoid overflow
         let total_systems  = sys_stats.try_get::<i64, _>("total").unwrap_or(0);
         let total_policies = pol_stats.try_get::<i64, _>("total").unwrap_or(0);
 
         sqlx::query(r#"
             INSERT INTO compliance_history (
-                tenant_id, systems_score, policies_score, total_systems,
-                total_policies, failed_systems, failed_policies
+                tenant_id, systems_score, policies_score,
+                systems_score_test, systems_score_policy,
+                policies_score_test, policies_score_system,
+                total_systems, total_policies, failed_systems, failed_policies
             )
-            VALUES (?, ?, ?, ?, ?,
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?,
                 (SELECT COUNT(*) FROM systems
                  WHERE compliance_score < 100
                  AND compliance_score >= 0
@@ -454,6 +467,10 @@ pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Er
         .bind(&tenant_id)
         .bind(systems_score)
         .bind(policies_score)
+        .bind(systems_score_test)
+        .bind(systems_score_policy)
+        .bind(policies_score_test)
+        .bind(policies_score_system)
         .bind(total_systems)
         .bind(total_policies)
         .bind(&tenant_id)

@@ -8,6 +8,17 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.6.6] - 2026-06-08
+
+### Changed
+- **Compliance toggles now switch instantly, and the trend chart no longer jumps when you switch.** Building on the two compliance toggles from 0.6.5: every recalc now computes *and stores* **both** the per-test and per-(system|policy) score for every policy (`policies.score_test` / `score_system`), system (`systems.score_test` / `score_policy`), and history snapshot (`compliance_history.{systems,policies}_score_{test,system|policy}`).
+  - **Instant table switch.** The dashboard top-5, policy list, and (live) policy/system reports read the stored column matching the current mode — so flipping a toggle and refreshing shows the new numbers **immediately, with no recompute** (previously the dashboard/list waited for the ~minute background recalc).
+  - **No artificial jump in the trend.** Because both scores are recorded in every hourly snapshot, the compliance trend chart re-draws the **entire history** in whichever mode you pick, instead of showing a step at the moment you changed the setting. (Caveat: history snapshots recorded *before* upgrading to 0.6.6 only carry the score for the mode that was active then; points recorded after the upgrade carry both.)
+  - **Fixed:** the policy list previously computed per-system compliance inline, ignoring the toggle entirely — it now honours the setting like every other surface.
+  - **Schema v32 → v33** — adds the dual-score columns to `policies`, `systems`, and `compliance_history` (nullable, populated on the first recalc after upgrade).
+
+---
+
 ## [0.6.5] - 2026-06-07
 
 ### Added

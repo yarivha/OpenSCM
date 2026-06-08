@@ -146,6 +146,8 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             created_date DATETIME DEFAULT CURRENT_TIMESTAMP,
             last_seen DATETIME DEFAULT CURRENT_TIMESTAMP,
             compliance_score REAL DEFAULT -1.0,
+            score_test REAL DEFAULT -1.0,
+            score_policy REAL DEFAULT -1.0,
             tests_passed INTEGER DEFAULT 0,
             tests_failed INTEGER DEFAULT 0,
             total_tests INTEGER DEFAULT 0,
@@ -292,6 +294,8 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             author TEXT,
             external_id TEXT,
             compliance_score REAL DEFAULT -1.0,
+            score_test REAL DEFAULT -1.0,
+            score_system REAL DEFAULT -1.0,
             systems_passed INTEGER DEFAULT 0,
             systems_failed INTEGER DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
@@ -543,6 +547,10 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             check_date DATE DEFAULT CURRENT_TIMESTAMP,
             systems_score REAL DEFAULT 0.0,
             policies_score REAL DEFAULT 0.0,
+            systems_score_test REAL DEFAULT 0.0,
+            systems_score_policy REAL DEFAULT 0.0,
+            policies_score_test REAL DEFAULT 0.0,
+            policies_score_system REAL DEFAULT 0.0,
             total_systems INTEGER,
             failed_systems INTEGER,
             total_policies INTEGER,
@@ -2263,6 +2271,44 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v31 → v32 complete.");
+    }
+
+    // v32 → v33: dual-mode compliance scores.
+    //
+    // Both the per-test and per-(system|policy) score are now stored for every
+    // policy, system, and history snapshot, so the Per-test / Per-system /
+    // Per-policy toggles switch instantly AND the trend chart re-renders the
+    // WHOLE history in the chosen mode (no artificial jump at the switch).
+    //   • policies.score_test / score_system
+    //   • systems.score_test  / score_policy
+    //   • compliance_history.{systems,policies}_score_{test,system|policy}
+    // All nullable-safe with -1.0 / 0.0 defaults; populated on the next recalc.
+    if version < 33 {
+        info!("Running schema migration v32 → v33 (dual-mode compliance scores)...");
+
+        for (table, col) in &[
+            ("policies", "score_test"),    ("policies", "score_system"),
+            ("systems",  "score_test"),    ("systems",  "score_policy"),
+        ] {
+            if !column_exists(pool, table, col).await {
+                sqlx::query(&format!("ALTER TABLE {} ADD COLUMN {} REAL DEFAULT -1.0", table, col))
+                    .execute(pool).await?;
+            }
+        }
+        for col in &[
+            "systems_score_test", "systems_score_policy",
+            "policies_score_test", "policies_score_system",
+        ] {
+            if !column_exists(pool, "compliance_history", col).await {
+                sqlx::query(&format!("ALTER TABLE compliance_history ADD COLUMN {} REAL DEFAULT 0.0", col))
+                    .execute(pool).await?;
+            }
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 33")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v32 → v33 complete.");
     }
 
     Ok(())
