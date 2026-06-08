@@ -969,6 +969,17 @@ pub fn evaluate(
     let selement_l  = selement.trim().to_lowercase();
     let sinput_trim = sinput.trim();
 
+    // Inside a container, only CMD (via `<runtime> exec`) and the per-container
+    // metadata elements (IMAGE, PRIVILEGED, …) have meaning. Anything else
+    // (FILE, PACKAGE, SERVICE, USER, …) has no container semantics in this
+    // version → return NA rather than silently evaluating against the host.
+    if container.is_some()
+        && element_l != "cmd"
+        && !is_per_container_element(element)
+    {
+        return EvalResult::Na;
+    }
+
     match element_l.as_str() {
 
         // =========================================================
@@ -1654,12 +1665,25 @@ pub fn evaluate(
                 );
                 return EvalResult::Na;
             }
+            // Run on the host, or INSIDE the container when a container context is
+            // present (target_type container/both): `<runtime> exec <id> sh -c …`.
+            // No-shell images (scratch/distroless) make exec fail → the command
+            // errors and the test FAILs with a clear log (design §6).
+            let run = |inp: &str| -> std::io::Result<std::process::Output> {
+                if let Some(c) = container {
+                    Command::new(&c.runtime)
+                        .args(["exec", &c.runtime_id, "sh", "-c", inp])
+                        .output()
+                } else {
+                    #[cfg(unix)]
+                    { Command::new("sh").args(["-c", inp]).output() }
+                    #[cfg(windows)]
+                    { Command::new("cmd").args(["/C", inp]).output() }
+                }
+            };
             match selement_l.as_str() {
                 "output" => {
-                    #[cfg(unix)]
-                    let output = Command::new("sh").args(["-c", input]).output();
-                    #[cfg(windows)]
-                    let output = Command::new("cmd").args(["/C", input]).output();
+                    let output = run(input);
 
                     match output {
                         Ok(o) => {
@@ -1686,10 +1710,7 @@ pub fn evaluate(
                     }
                 }
                 "exit code" => {
-                    #[cfg(unix)]
-                    let output = Command::new("sh").args(["-c", input]).output();
-                    #[cfg(windows)]
-                    let output = Command::new("cmd").args(["/C", input]).output();
+                    let output = run(input);
 
                     match output {
                         Ok(o) => {

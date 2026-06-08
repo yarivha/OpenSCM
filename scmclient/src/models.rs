@@ -67,6 +67,9 @@ pub struct Test {
     pub severity: Option<String>,
     pub filter: Option<String>,
     pub app_filter: Option<String>,
+    /// "host" (default), "container", or "both" — where this test runs.
+    #[serde(default)]
+    pub target_type: Option<String>,
     pub conditions: Vec<TestCondition>,
     pub applicability: Option<Vec<TestCondition>>,
 }

@@ -264,21 +264,31 @@ async fn process_compliance_tests(
             );
         }
 
+        // Dispatch targets. Metadata elements (IMAGE, PRIVILEGED, …) are always
+        // per-container. Otherwise the test's `target_type` decides: "host"
+        // (default) runs on the host, "container" inside each container (CMD via
+        // `<rt> exec`), "both" does both. See compliance::is_per_container_element.
         let is_per_container = conds.iter()
             .any(|c| crate::compliance::is_per_container_element(&c.element));
+        let target = test.target_type.as_deref().unwrap_or("host");
+        let run_container = is_per_container || target == "container" || target == "both";
+        let run_host      = !is_per_container && (target == "host" || target == "both");
+        debug!("Test ID {} dispatch: per_container={} run_container={} run_host={} (target_type={})",
+            test_id, is_per_container, run_container, run_host, target);
 
-        if is_per_container {
-            // Enumerate containers ONCE and iterate. Each container produces
-            // a separate result row identified by its runtime_id (which the
-            // server resolves to containers.id at result-receive time).
+        if run_container {
+            // Enumerate containers ONCE and iterate. Each container produces a
+            // separate result row identified by its runtime_id (the server
+            // resolves it to containers.id at result-receive time).
             let containers = crate::containers::enumerate().unwrap_or_default();
-            debug!(
-                "Test ID {} dispatch: per-container — discovered {} container(s)",
-                test_id, containers.len()
-            );
+            debug!("Test ID {} dispatch: container scope — {} container(s)", test_id, containers.len());
             if containers.is_empty() {
-                debug!("Test ID {} is per-container but host has zero containers — sending NA.", test_id);
-                send_result(client_id_int, organization, test_id, "NA", None, None, signing_key, http_client, result_url).await;
+                // Container-only test with no containers → NA. If the test also
+                // runs on the host ("both"), the host branch below covers it.
+                if !run_host {
+                    debug!("Test ID {} container-scope but host has zero containers — sending NA.", test_id);
+                    send_result(client_id_int, organization, test_id, "NA", None, None, signing_key, http_client, result_url).await;
+                }
             } else {
                 for container in &containers {
                     debug!(
@@ -305,7 +315,9 @@ async fn process_compliance_tests(
                                 signing_key, http_client, result_url).await;
                 }
             }
-        } else {
+        }
+
+        if run_host {
             // Host-scope test — single result, no container context.
             debug!("Test ID {} dispatch: host-scope", test_id);
             let results: Vec<EvalResult> = conds.iter().enumerate().map(|(i, c)| {

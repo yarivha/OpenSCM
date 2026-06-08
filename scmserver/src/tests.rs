@@ -77,7 +77,7 @@ async fn fetch_lookup_tables(
 // ─────────────────────────────────────────────────────────────────────────────
 fn extract_test_metadata(
     form_data: &HashMap<String, Vec<String>>,
-) -> Result<(String, String, String, String, String, String, String), String> {
+) -> Result<(String, String, String, String, String, String, String, String), String> {
     let name = form_data
         .get("name")
         .and_then(|v| v.first())
@@ -89,6 +89,14 @@ fn extract_test_metadata(
         form_data.get(key).and_then(|v| v.first()).map(|s| s.to_string()).unwrap_or_default()
     };
 
+    // Where the test runs. Validate against the known set; anything else
+    // (incl. empty / older forms) defaults to "host" — the prior behaviour.
+    let target_type = match get("target_type").as_str() {
+        "container" => "container".to_string(),
+        "both"      => "both".to_string(),
+        _           => "host".to_string(),
+    };
+
     Ok((
         name,
         get("description"),
@@ -97,6 +105,7 @@ fn extract_test_metadata(
         get("remediation"),
         get("filter"),
         get("app_filter"),
+        target_type,
     ))
 }
 
@@ -189,7 +198,7 @@ pub async fn tests(
     }
 
     let tests_result = sqlx::query_as::<_, Test>(
-        "SELECT id, name, description, severity, rational, remediation, filter, app_filter
+        "SELECT id, name, description, severity, rational, remediation, filter, app_filter, target_type
          FROM tests WHERE tenant_id = ? ORDER BY name",
     )
     .bind(&auth.tenant_id)
@@ -319,7 +328,7 @@ pub async fn tests_add_save(
 
     let form_data = parse_form_data(&raw_string);
 
-    let (name, description, severity, rational, remediation, filter, app_filter) =
+    let (name, description, severity, rational, remediation, filter, app_filter, target_type) =
         match extract_test_metadata(&form_data) {
             Ok(fields) => fields,
             Err(msg) => {
@@ -335,12 +344,12 @@ pub async fn tests_add_save(
     // Insert test (with auto-generated external_id for stable cross-system identity).
     let external_id = crate::schema::generate_external_id();
     let result = sqlx::query(
-        "INSERT INTO tests (tenant_id, name, description, severity, rational, remediation, filter, app_filter, external_id)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+        "INSERT INTO tests (tenant_id, name, description, severity, rational, remediation, filter, app_filter, target_type, external_id)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
     )
     .bind(&auth.tenant_id)
     .bind(&name).bind(&description).bind(&severity)
-    .bind(&rational).bind(&remediation).bind(&filter).bind(&app_filter)
+    .bind(&rational).bind(&remediation).bind(&filter).bind(&app_filter).bind(&target_type)
     .bind(&external_id)
     .execute(&mut *tx)
     .await;
@@ -470,7 +479,7 @@ pub async fn tests_edit(
     }
 
     let test = match sqlx::query_as::<_, Test>(
-        "SELECT id, name, description, severity, rational, remediation, filter, app_filter
+        "SELECT id, name, description, severity, rational, remediation, filter, app_filter, target_type
          FROM tests WHERE id = ? AND tenant_id = ?",
     )
     .bind(id).bind(&auth.tenant_id)
@@ -570,7 +579,7 @@ pub async fn tests_edit_save(
 
     let form_data = parse_form_data(&raw_string);
 
-    let (name, description, severity, rational, remediation, filter, app_filter) =
+    let (name, description, severity, rational, remediation, filter, app_filter, target_type) =
         match extract_test_metadata(&form_data) {
             Ok(fields) => fields,
             Err(msg) => {
@@ -585,11 +594,11 @@ pub async fn tests_edit_save(
 
     // Update test metadata
     if let Err(e) = sqlx::query(
-        "UPDATE tests SET name=?, description=?, severity=?, rational=?, remediation=?, filter=?, app_filter=?
+        "UPDATE tests SET name=?, description=?, severity=?, rational=?, remediation=?, filter=?, app_filter=?, target_type=?
          WHERE id=? AND tenant_id=?",
     )
     .bind(&name).bind(&description).bind(&severity)
-    .bind(&rational).bind(&remediation).bind(&filter).bind(&app_filter)
+    .bind(&rational).bind(&remediation).bind(&filter).bind(&app_filter).bind(&target_type)
     .bind(id).bind(&auth.tenant_id)
     .execute(&mut *tx).await
     {

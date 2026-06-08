@@ -115,6 +115,10 @@ pub struct Test {
     pub severity: Option<String>,
     pub filter: Option<String>,
     pub app_filter: Option<String>,
+    /// Where this test runs: "host" (default), "container", or "both". Drives
+    /// the agent's per-container fan-out for non-metadata elements (e.g. CMD).
+    #[serde(default)]
+    pub target_type: Option<String>,
 }
 
 
@@ -155,6 +159,7 @@ pub struct TestPayload {
     pub severity: Option<String>,
     pub filter: Option<String>,
     pub app_filter: Option<String>,
+    pub target_type: Option<String>,
     pub conditions: Vec<TestCondition>,
     pub applicability: Option<Vec<TestCondition>>,
 }
@@ -170,6 +175,7 @@ impl From<TestWithConditions> for TestPayload {
             severity:    twc.test.severity,
             filter:      twc.test.filter,
             app_filter:  twc.test.app_filter,
+            target_type: twc.test.target_type,
             conditions:  twc.conditions,
             applicability: twc.applicability,
         }
