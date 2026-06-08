@@ -2389,6 +2389,25 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v34 → v35 complete.");
     }
 
+    // v35 → v36: backfill the tests.target_type column.
+    //
+    // target_type ("host" | "container" | "both") shipped in the fresh-install
+    // `tests` CREATE but was never added via ALTER, so databases whose `tests`
+    // table predates it lack the column. 0.7.0 began selecting it (test list +
+    // the agent's `SELECT t.*`), which fails on those older DBs. Add it if
+    // missing; existing rows default to NULL, treated as "host".
+    if version < 36 {
+        info!("Running schema migration v35 → v36 (tests.target_type)...");
+        if !column_exists(pool, "tests", "target_type").await {
+            sqlx::query("ALTER TABLE tests ADD COLUMN target_type TEXT")
+                .execute(pool).await?;
+        }
+        sqlx::query("UPDATE schema_info SET version = 36")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v35 → v36 complete.");
+    }
+
     Ok(())
 }
 

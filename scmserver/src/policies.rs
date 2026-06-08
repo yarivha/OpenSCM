@@ -1754,7 +1754,7 @@ pub async fn policies_export(
     // Fetch all tests linked to this policy.
     let test_rows = match sqlx::query(
         "SELECT t.id, t.name, t.description, t.rational, t.remediation,
-                t.severity, t.filter, t.app_filter, t.external_id
+                t.severity, t.filter, t.app_filter, t.target_type, t.external_id
          FROM tests t
          JOIN tests_in_policy tip ON t.id = tip.test_id
          WHERE tip.policy_id = ? AND tip.tenant_id = ?
@@ -1817,6 +1817,7 @@ pub async fn policies_export(
             severity:    t.try_get::<Option<String>, _>("severity").unwrap_or(None),
             filter:      t.try_get::<Option<String>, _>("filter").unwrap_or(None),
             app_filter:  t.try_get::<Option<String>, _>("app_filter").unwrap_or(None),
+            target_type: t.try_get::<Option<String>, _>("target_type").unwrap_or(None),
             conditions,
             applicability,
         });
@@ -1998,14 +1999,22 @@ pub async fn apply_policy_import(
                 .unwrap_or(None)
         } else { None };
 
+        // Normalize target_type to the known set; anything else (incl. older
+        // exports that lack the field) maps to "host".
+        let target_type = match test.target_type.as_deref() {
+            Some("container") => "container",
+            Some("both")      => "both",
+            _                 => "host",
+        };
+
         let test_id: i64 = if let Some(tid) = existing_test_id {
             sqlx::query(
                 "UPDATE tests SET name = ?, description = ?, rational = ?, remediation = ?,
-                                  severity = ?, filter = ?, app_filter = ?
+                                  severity = ?, filter = ?, app_filter = ?, target_type = ?
                  WHERE id = ? AND tenant_id = ?",
             )
             .bind(&test.name).bind(&test.description).bind(&test.rational).bind(&test.remediation)
-            .bind(&test.severity).bind(&test.filter).bind(&test.app_filter)
+            .bind(&test.severity).bind(&test.filter).bind(&test.app_filter).bind(target_type)
             .bind(tid).bind(tenant_id)
             .execute(&mut *tx).await
             .map_err(|e| format!("Test update failed: {}", e))?;
@@ -2019,11 +2028,11 @@ pub async fn apply_policy_import(
             let new_xid = test.external_id.clone()
                 .unwrap_or_else(crate::schema::generate_external_id);
             sqlx::query(
-                "INSERT INTO tests (tenant_id, name, description, rational, remediation, severity, filter, app_filter, external_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tests (tenant_id, name, description, rational, remediation, severity, filter, app_filter, target_type, external_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(tenant_id).bind(&test.name).bind(&test.description).bind(&test.rational)
-            .bind(&test.remediation).bind(&test.severity).bind(&test.filter).bind(&test.app_filter)
+            .bind(&test.remediation).bind(&test.severity).bind(&test.filter).bind(&test.app_filter).bind(target_type)
             .bind(&new_xid)
             .execute(&mut *tx).await
             .map_err(|e| format!("Test insert failed: {}", e))?;
@@ -2162,5 +2171,34 @@ mod tests {
         let u = vec![(1usize, 4usize)];
         assert!((compliance_pct(false, &u) - 20.0).abs() < 1e-9); // per test: 1/5
         assert_eq!(compliance_pct(true, &u), 0.0);                // binary: 0 of 1
+    }
+
+    // Pure-container-policy headline fallback: mean of scored containers only.
+    fn mk_container(score: f64) -> crate::models::ContainerReportGroup {
+        crate::models::ContainerReportGroup {
+            container_id: 1, name: "c".into(), runtime: "docker".into(), image: None,
+            compliance_score: score, pass_count: 0, fail_count: 0, na_count: 0, results: vec![],
+        }
+    }
+    fn mk_system(containers: Vec<crate::models::ContainerReportGroup>) -> crate::models::SystemReport {
+        crate::models::SystemReport {
+            system_name: "h".into(), results: vec![], is_passed: false,
+            pass_count: 0, fail_count: 0, na_count: 0, excluded_count: 0, containers,
+        }
+    }
+
+    #[test]
+    fn container_axis_avg_no_containers_is_none() {
+        assert_eq!(super::container_axis_avg(&[mk_system(vec![])]), None);
+    }
+
+    #[test]
+    fn container_axis_avg_ignores_unscanned_and_means_the_rest() {
+        // 80 and 100 are scored; -1.0 (Not Scanned) is excluded → mean 90.
+        let systems = vec![
+            mk_system(vec![mk_container(80.0), mk_container(-1.0)]),
+            mk_system(vec![mk_container(100.0)]),
+        ];
+        assert_eq!(super::container_axis_avg(&systems), Some(90.0));
     }
 }

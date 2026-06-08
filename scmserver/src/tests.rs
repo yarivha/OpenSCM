@@ -212,6 +212,9 @@ pub async fn tests(
             let mut context = Context::new();
             context.insert("error_message", "Failed to load tests.");
             context.insert("tests", &Vec::<TestWithConditions>::new());
+            // tests.html also iterates `policies`; insert an empty list so the
+            // error page renders instead of failing with "variable not found".
+            context.insert("policies", &Vec::<(i64, String)>::new());
             return render_template(&tera, Some(&pool), "tests.html", context, Some(auth))
                 .await.into_response();
         }
