@@ -399,6 +399,7 @@
         </div>
       </div>
       <div class="modal-footer">
+        <a href="#" id="cm-detail-link" class="btn btn-info"><i class="fas fa-external-link-alt mr-1"></i>Full Detail &amp; Test Results</a>
         <button type="button" class="btn btn-secondary" data-dismiss="modal">Close</button>
       </div>
     </div>
@@ -697,6 +698,13 @@
 
       let caps = '—'; try { caps = (JSON.parse(c.capabilities_add || '[]') || []).join(', ') || '(defaults)'; } catch (_) {}
       $('#cm-caps').text(caps);
+
+      // Link to the full container detail page (config + per-container results).
+      if (c.id && c.host_system_id) {
+        $('#cm-detail-link').attr('href', '/systems/' + c.host_system_id + '/containers/' + c.id).show();
+      } else {
+        $('#cm-detail-link').hide();
+      }
 
       $('#containerDetailsModal').modal('show');
     });

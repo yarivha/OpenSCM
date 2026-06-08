@@ -1,0 +1,175 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="content-wrapper">
+  <section class="content-header">
+    <div class="container-fluid">
+      <div class="row mb-2">
+        <div class="col-sm-6">
+          <h1 class="m-0"><i class="fab fa-docker mr-2 text-info"></i>{{ container.name }}</h1>
+        </div>
+        <div class="col-sm-6">
+          <ol class="breadcrumb float-sm-right">
+            <li class="breadcrumb-item"><a href="/">Home</a></li>
+            <li class="breadcrumb-item"><a href="/systems">Systems</a></li>
+            <li class="breadcrumb-item"><a href="/systems/report/{{ container.host_system_id }}">{{ container.host_name }}</a></li>
+            <li class="breadcrumb-item active">Container</li>
+          </ol>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <section class="content">
+    <div class="container-fluid">
+
+      {# Identity + compliance summary #}
+      <div class="row">
+        <div class="col-md-8">
+          <div class="card card-outline card-info shadow-sm">
+            <div class="card-header"><h3 class="card-title font-weight-bold"><i class="fas fa-id-card mr-2"></i>Identity</h3></div>
+            <div class="card-body p-0">
+              <table class="table table-sm mb-0">
+                <tbody class="text-sm">
+                  <tr><th style="width: 180px; padding-left: 16px;">Name</th><td>{{ container.name }}</td></tr>
+                  <tr><th style="padding-left: 16px;">Runtime</th><td>{{ container.runtime }}</td></tr>
+                  <tr><th style="padding-left: 16px;">Runtime ID</th><td><code>{{ container.runtime_id }}</code></td></tr>
+                  <tr><th style="padding-left: 16px;">Image</th><td>{{ container.image | default(value="—") }}</td></tr>
+                  <tr><th style="padding-left: 16px;">Image Digest</th><td><code class="text-xs">{{ container.image_digest | default(value="—") }}</code></td></tr>
+                  <tr><th style="padding-left: 16px;">Status</th><td>{{ container.status | default(value="—") }}</td></tr>
+                  <tr><th style="padding-left: 16px;">IP</th><td>{{ container.ip | default(value="—") }}</td></tr>
+                  <tr><th style="padding-left: 16px;">Host</th><td><a href="/systems/report/{{ container.host_system_id }}">{{ container.host_name }}</a></td></tr>
+                  <tr><th style="padding-left: 16px;">First Seen</th><td>{{ container.first_seen | default(value="—") }}</td></tr>
+                  <tr><th style="padding-left: 16px;">Last Seen</th><td>{{ container.last_seen | default(value="—") }}</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+        </div>
+        <div class="col-md-4">
+          <div class="card card-outline {% if container.fail_count > 0 %}card-danger{% elif container.pass_count > 0 %}card-success{% else %}card-secondary{% endif %} shadow-sm">
+            <div class="card-body text-center">
+              <h6 class="text-uppercase text-muted">Container Compliance</h6>
+              {% if container.compliance_score >= 0 %}
+              <h1 class="display-4 font-weight-bold {% if container.fail_count > 0 %}text-danger{% else %}text-success{% endif %}">{{ container.compliance_score }}%</h1>
+              {% else %}
+              <h1 class="display-4 font-weight-bold text-muted">—</h1>
+              <p class="text-muted">Not Scanned</p>
+              {% endif %}
+              <div class="mt-2">
+                <span class="badge badge-success-soft text-success mr-1"><i class="fas fa-check-circle mr-1"></i>{{ container.pass_count }} Pass</span>
+                <span class="badge badge-danger-soft text-danger mr-1"><i class="fas fa-times-circle mr-1"></i>{{ container.fail_count }} Fail</span>
+                <span class="badge badge-light text-secondary"><i class="fas fa-minus-circle mr-1"></i>{{ container.na_count }} NA</span>
+              </div>
+              <small class="text-muted d-block mt-2">Scored on a separate axis from the host.</small>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {# Configuration metadata #}
+      <div class="card card-outline card-secondary shadow-sm">
+        <div class="card-header"><h3 class="card-title font-weight-bold"><i class="fas fa-cogs mr-2"></i>Configuration</h3></div>
+        <div class="card-body p-0">
+          <table class="table table-sm mb-0">
+            <tbody class="text-sm">
+              <tr><th style="width: 180px; padding-left: 16px;">Privileged</th>
+                <td>{% if container.is_privileged == 1 %}<span class="badge badge-danger-soft text-danger">true</span>{% elif container.is_privileged == 0 %}<span class="badge badge-success-soft text-success">false</span>{% else %}—{% endif %}</td></tr>
+              <tr><th style="padding-left: 16px;">Run User</th><td>{{ container.run_user | default(value="—") }}</td></tr>
+              <tr><th style="padding-left: 16px;">Network Mode</th><td>{{ container.network_mode | default(value="—") }}</td></tr>
+              <tr><th style="padding-left: 16px;">Exposed Ports</th><td><code class="text-xs">{{ container.exposed_ports | default(value="—") }}</code></td></tr>
+              <tr><th style="padding-left: 16px;">Mounts</th><td><code class="text-xs">{{ container.mounts | default(value="—") }}</code></td></tr>
+              <tr><th style="padding-left: 16px;">Read-Only FS</th>
+                <td>{% if container.read_only_fs == 1 %}<span class="badge badge-success-soft text-success">true</span>{% elif container.read_only_fs == 0 %}<span class="badge badge-secondary">false</span>{% else %}—{% endif %}</td></tr>
+              <tr><th style="padding-left: 16px;">Restart Policy</th><td>{{ container.restart_policy | default(value="—") }}</td></tr>
+              <tr><th style="padding-left: 16px;">Health Check</th>
+                <td>{% if container.health_check == 1 %}<span class="badge badge-success-soft text-success">defined</span>{% elif container.health_check == 0 %}<span class="badge badge-secondary">none</span>{% else %}—{% endif %}</td></tr>
+            </tbody>
+          </table>
+        </div>
+      </div>
+
+      {# Recent test results #}
+      <div class="card card-outline card-dark shadow-sm">
+        <div class="card-header"><h3 class="card-title font-weight-bold"><i class="fas fa-clipboard-check mr-2"></i>Test Results ({{ results | length }})</h3></div>
+        <div class="card-body p-0">
+          {% if results | length == 0 %}
+          <p class="text-muted text-center p-4 mb-0">No container test results yet. Assign a container-targeted test or policy and run a scan.</p>
+          {% else %}
+          <table class="table table-valign-middle mb-0">
+            <thead><tr class="text-xs text-muted text-uppercase"><th style="padding-left: 20px;">Test</th><th class="text-center" style="width: 160px;">Status</th></tr></thead>
+            <tbody>
+              {% for res in results %}
+              <tr>
+                <td style="padding-left: 20px;">{{ res.test_name }}</td>
+                <td class="text-center">
+                  {% if res.is_excluded %}<span class="badge badge-secondary"><i class="fas fa-ban mr-1"></i>EXCLUDED</span>
+                  {% elif res.status == "PASS" %}<span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
+                  {% elif res.status == "NA" %}<span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>
+                  {% else %}<span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>{% endif %}
+                  {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
+                  <button type="button" class="btn btn-link btn-xs p-0 ml-2 evidence-toggle" data-evidence="{{ res.evidence }}" title="Show why"><i class="fas fa-question-circle"></i> why?</button>
+                  {% endif %}
+                </td>
+              </tr>
+              {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
+              <tr class="evidence-detail" style="display:none;"><td colspan="2" class="bg-light px-4 py-2"><div class="evidence-content text-xs"></div></td></tr>
+              {% endif %}
+              {% endfor %}
+            </tbody>
+          </table>
+          {% endif %}
+        </div>
+      </div>
+
+      <div class="row pb-4">
+        <div class="col-12 text-right">
+          <hr>
+          <a class="btn btn-secondary btn-sm" href="/systems"><i class="fas fa-arrow-left mr-1"></i> Back to Systems</a>
+        </div>
+      </div>
+
+    </div>
+  </section>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+  // Evidence "why?" toggle — decode the per-condition breakdown stored on the
+  // button's data-evidence attribute and reveal it in the sibling detail row.
+  function renderContainerEvidence(json) {
+    try {
+      var data = JSON.parse(json);
+      if (!data || !data.conditions || !data.conditions.length) {
+        return '<span class="text-muted">' + (data && data.note ? data.note : 'No detail available.') + '</span>';
+      }
+      var html = '<table class="table table-sm mb-0"><tbody>';
+      data.conditions.forEach(function (c) {
+        var ok = c.passed ? '<span class="text-success"><i class="fas fa-check"></i></span>'
+                          : '<span class="text-danger"><i class="fas fa-times"></i></span>';
+        html += '<tr><td style="width:24px;">' + ok + '</td><td>' + (c.note || (c.element + ' ' + c.selement)) + '</td></tr>';
+      });
+      html += '</tbody></table>';
+      if (data.note) html += '<div class="text-muted mt-1">' + data.note + '</div>';
+      return html;
+    } catch (e) {
+      return '<span class="text-muted">Could not parse evidence.</span>';
+    }
+  }
+  document.querySelectorAll('.evidence-toggle').forEach(function (btn) {
+    btn.addEventListener('click', function () {
+      var row = btn.closest('tr');
+      var detail = row.nextElementSibling;
+      if (!detail || !detail.classList.contains('evidence-detail')) return;
+      var content = detail.querySelector('.evidence-content');
+      if (detail.style.display === 'none' || !detail.style.display) {
+        content.innerHTML = renderContainerEvidence(btn.getAttribute('data-evidence'));
+        detail.style.display = '';
+      } else {
+        detail.style.display = 'none';
+      }
+    });
+  });
+</script>
+{% endblock %}

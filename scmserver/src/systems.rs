@@ -270,9 +270,9 @@ pub async fn systems(
     } else {
         let placeholders = std::iter::repeat("?").take(host_ids.len()).collect::<Vec<_>>().join(",");
         let sql = format!(
-            "SELECT host_system_id, runtime, runtime_id, name, image, image_digest, status, ip,
+            "SELECT id, host_system_id, runtime, runtime_id, name, image, image_digest, status, ip,
                     is_privileged, run_user, network_mode, exposed_ports, mounts, capabilities_add,
-                    read_only_fs, restart_policy, health_check, first_seen, last_seen
+                    read_only_fs, restart_policy, health_check, compliance_score, first_seen, last_seen
              FROM containers
              WHERE tenant_id = ? AND host_system_id IN ({})
              ORDER BY host_system_id, name",
@@ -285,6 +285,9 @@ pub async fn systems(
         for row in rows {
             let host_id: i32 = row.try_get("host_system_id").unwrap_or(0);
             map.entry(host_id).or_default().push(serde_json::json!({
+                "id":               row.try_get::<i64, _>("id").ok(),
+                "host_system_id":   host_id,
+                "compliance_score": row.try_get::<Option<f64>, _>("compliance_score").ok().flatten(),
                 "runtime":          row.try_get::<String, _>("runtime").ok(),
                 "runtime_id":       row.try_get::<String, _>("runtime_id").ok(),
                 "name":             row.try_get::<String, _>("name").ok(),
@@ -1187,6 +1190,102 @@ pub async fn system_report(
         context.insert("error_message", &msg);
     }
     render_template(&tera, Some(&pool), "systems_report.html", context, Some(auth))
+        .await
+        .into_response()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// GET /systems/{id}/containers/{cid}
+// Container detail panel: identity, configuration metadata, and recent
+// per-container test results (the container's own compliance axis).
+// Role: Viewer
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn container_detail(
+    auth: AuthSession,
+    Path((system_id, container_id)): Path<(i64, i64)>,
+    pool: Extension<SqlitePool>,
+    tera: Extension<Arc<Tera>>,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Viewer) {
+        return redir;
+    }
+
+    // Container row scoped to tenant + host so one tenant can't read another's.
+    let row = match sqlx::query(r#"
+        SELECT c.*, s.name AS host_name
+        FROM containers c
+        JOIN systems s ON c.host_system_id = s.id AND c.tenant_id = s.tenant_id
+        WHERE c.id = ? AND c.host_system_id = ? AND c.tenant_id = ?
+    "#)
+    .bind(container_id).bind(system_id).bind(&auth.tenant_id)
+    .fetch_optional(&*pool).await
+    {
+        Ok(Some(r)) => r,
+        Ok(None) => return Redirect::to("/systems?error_message=Container+not+found").into_response(),
+        Err(e) => {
+            error!(error = ?e, container_id, "Failed to fetch container detail");
+            return axum::http::StatusCode::INTERNAL_SERVER_ERROR.into_response();
+        }
+    };
+
+    // Recent per-container results joined to test names.
+    let result_rows = sqlx::query(r#"
+        SELECT t.id AS test_id, t.name AS test_name, r.result AS status,
+               r.excluded AS is_excluded, r.evidence AS evidence
+        FROM results r
+        JOIN tests t ON r.test_id = t.id AND r.tenant_id = t.tenant_id
+        WHERE r.container_id = ? AND r.tenant_id = ?
+        ORDER BY t.name
+    "#)
+    .bind(container_id).bind(&auth.tenant_id)
+    .fetch_all(&*pool).await.unwrap_or_default();
+
+    let results: Vec<IndividualResult> = result_rows.iter().map(|rr| IndividualResult {
+        test_name: rr.get("test_name"),
+        status: normalize_status(&rr.get::<String, _>("status")).to_string(),
+        is_excluded: rr.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0,
+        is_excludable: false,
+        system_id: Some(system_id),
+        test_id: rr.try_get("test_id").ok(),
+        evidence: rr.try_get("evidence").ok().flatten(),
+    }).collect();
+
+    let pass = results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
+    let fail = results.iter().filter(|r| !r.is_excluded && r.status == "FAIL").count();
+    let na   = results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
+
+    let opt_i = |k: &str| row.try_get::<i64, _>(k).ok();
+    let container = serde_json::json!({
+        "id":             container_id,
+        "host_system_id": system_id,
+        "host_name":      row.get::<Option<String>, _>("host_name"),
+        "name":           row.get::<Option<String>, _>("name"),
+        "runtime":        row.get::<Option<String>, _>("runtime"),
+        "runtime_id":     row.get::<Option<String>, _>("runtime_id"),
+        "image":          row.get::<Option<String>, _>("image"),
+        "image_digest":   row.get::<Option<String>, _>("image_digest"),
+        "status":         row.get::<Option<String>, _>("status"),
+        "ip":             row.get::<Option<String>, _>("ip"),
+        "is_privileged":  opt_i("is_privileged"),
+        "run_user":       row.get::<Option<String>, _>("run_user"),
+        "network_mode":   row.get::<Option<String>, _>("network_mode"),
+        "exposed_ports":  row.get::<Option<String>, _>("exposed_ports"),
+        "mounts":         row.get::<Option<String>, _>("mounts"),
+        "read_only_fs":   opt_i("read_only_fs"),
+        "restart_policy": row.get::<Option<String>, _>("restart_policy"),
+        "health_check":   opt_i("health_check"),
+        "compliance_score": row.try_get::<f64, _>("compliance_score").unwrap_or(-1.0),
+        "first_seen":     row.get::<Option<String>, _>("first_seen"),
+        "last_seen":      row.get::<Option<String>, _>("last_seen"),
+        "pass_count":     pass,
+        "fail_count":     fail,
+        "na_count":       na,
+    });
+
+    let mut context = Context::new();
+    context.insert("container", &container);
+    context.insert("results", &results);
+    render_template(&tera, Some(&pool), "container_detail.html", context, Some(auth))
         .await
         .into_response()
 }
