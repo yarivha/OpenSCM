@@ -123,6 +123,7 @@ async fn update_test_stats(
                   AND r.result     = 'PASS'
                   AND s.status     = 'active'
                   AND r.excluded = 0
+                  AND r.container_id = 0
             ),
             systems_failed = (
                 SELECT COUNT(*) FROM results r
@@ -132,6 +133,7 @@ async fn update_test_stats(
                   AND r.result     = 'FAIL'
                   AND s.status     = 'active'
                   AND r.excluded = 0
+                  AND r.container_id = 0
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
@@ -144,6 +146,7 @@ async fn update_test_stats(
                   AND s.status    = 'active'
                   AND r.result    != 'NA'
                   AND r.excluded = 0
+                  AND r.container_id = 0
             )
         {}
     "#, clause);
@@ -183,7 +186,7 @@ async fn update_system_stats(
     let test_expr = "SELECT CASE WHEN COUNT(*) = 0 THEN -1.0 \
         ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100 END \
         FROM results r WHERE r.system_id = systems.id AND r.tenant_id = systems.tenant_id \
-          AND r.result != 'NA' AND r.excluded = 0";
+          AND r.result != 'NA' AND r.excluded = 0 AND r.container_id = 0";
 
     // Per-policy score: % of the system's assigned policies it fully passes
     // (no FAIL, ≥1 PASS) among applicable policies (≥1 PASS/FAIL).
@@ -197,7 +200,7 @@ async fn update_system_stats(
             JOIN systems_in_policy sip ON sip.group_id = sig.group_id AND sip.tenant_id = sig.tenant_id \
             JOIN tests_in_policy tip ON tip.policy_id = sip.policy_id AND tip.tenant_id = sip.tenant_id \
             LEFT JOIN results r ON r.system_id = systems.id AND r.test_id = tip.test_id \
-                AND r.tenant_id = systems.tenant_id AND r.excluded = 0 \
+                AND r.tenant_id = systems.tenant_id AND r.excluded = 0 AND r.container_id = 0 \
             WHERE sig.system_id = systems.id AND sig.tenant_id = systems.tenant_id \
             GROUP BY sip.policy_id \
             HAVING SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) > 0 \
@@ -212,6 +215,7 @@ async fn update_system_stats(
                   AND r.tenant_id = systems.tenant_id
                   AND r.result    = 'PASS'
                   AND r.excluded = 0
+                  AND r.container_id = 0
             ),
             tests_failed = (
                 SELECT COUNT(*) FROM results r
@@ -219,12 +223,14 @@ async fn update_system_stats(
                   AND r.tenant_id = systems.tenant_id
                   AND r.result    = 'FAIL'
                   AND r.excluded = 0
+                  AND r.container_id = 0
             ),
             total_tests = (
                 SELECT COUNT(*) FROM results r
                 WHERE r.system_id = systems.id
                   AND r.tenant_id = systems.tenant_id
                   AND r.excluded = 0
+                  AND r.container_id = 0
             ),
             score_test   = ({test_expr}),
             score_policy = ({policy_expr}),
@@ -288,6 +294,7 @@ async fn update_policy_stats(
                 WHERE policy_id = policies.id AND tenant_id = policies.tenant_id
             )
             AND r.excluded = 0
+            AND r.container_id = 0
         WHERE sip.policy_id = policies.id
           AND sip.tenant_id = policies.tenant_id
           AND s.status = 'active'
@@ -340,6 +347,56 @@ async fn update_policy_stats(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: update_container_stats
+// Per-container compliance on its OWN axis (separate from host/system scores —
+// design §11). A container's score is the % of its own result rows that PASS
+// among non-NA, non-excluded results (results.container_id = containers.id; the
+// host axis uses container_id = 0). −1.0 ("Not Scanned") when the container has
+// no applicable results yet. tests_passed/_failed are raw PASS/FAIL tallies.
+// Must run inside the recalc transaction, after update_system_stats. Scoped to
+// one tenant when `tenant` is Some — containers carry tenant_id like every row.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn update_container_stats(
+    tx: &mut sqlx::Transaction<'_, sqlx::Sqlite>,
+    tenant: Option<&str>,
+) -> Result<(), sqlx::Error> {
+    let clause = if tenant.is_some() { " WHERE tenant_id = ?" } else { "" };
+    let sql = format!(r#"
+        UPDATE containers SET
+            tests_passed = (
+                SELECT COUNT(*) FROM results r
+                WHERE r.container_id = containers.id
+                  AND r.tenant_id    = containers.tenant_id
+                  AND r.result       = 'PASS'
+                  AND r.excluded     = 0
+            ),
+            tests_failed = (
+                SELECT COUNT(*) FROM results r
+                WHERE r.container_id = containers.id
+                  AND r.tenant_id    = containers.tenant_id
+                  AND r.result       = 'FAIL'
+                  AND r.excluded     = 0
+            ),
+            compliance_score = (
+                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
+                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+                END
+                FROM results r
+                WHERE r.container_id = containers.id
+                  AND r.tenant_id    = containers.tenant_id
+                  AND r.result      != 'NA'
+                  AND r.excluded     = 0
+            )
+        {clause}
+    "#, clause = clause);
+    let mut q = sqlx::query(&sql);
+    if let Some(t) = tenant { q = q.bind(t); }
+    q.execute(&mut **tx).await?;
+    Ok(())
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Private: run_recalc
 // Core aggregation. `tenant = None` recalculates every tenant (startup, manual
 // sync_tx edits); `tenant = Some(id)` scopes all four passes to one tenant —
@@ -357,6 +414,7 @@ async fn run_recalc(pool: &SqlitePool, tenant: Option<&str>) -> Result<(), sqlx:
     purge_ghost_results(&mut tx, tenant).await?;
     update_test_stats(&mut tx, tenant).await?;
     update_system_stats(&mut tx, tenant).await?;
+    update_container_stats(&mut tx, tenant).await?;
     update_policy_stats(&mut tx, tenant).await?;
 
     tx.commit().await?;

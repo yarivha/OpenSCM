@@ -489,6 +489,9 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             read_only_fs    INTEGER,
             restart_policy  TEXT,
             health_check    INTEGER,
+            tests_passed    INTEGER DEFAULT 0,
+            tests_failed    INTEGER DEFAULT 0,
+            compliance_score REAL DEFAULT -1.0,
             first_seen      DATETIME DEFAULT CURRENT_TIMESTAMP,
             last_seen       DATETIME DEFAULT CURRENT_TIMESTAMP,
             UNIQUE(host_system_id, runtime, name),
@@ -2350,6 +2353,33 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v33 → v34 complete.");
+    }
+
+    // v34 → v35: per-container compliance axis.
+    //
+    // Containers now carry their own compliance score, computed from results
+    // whose container_id points at the row (the host axis uses container_id = 0).
+    // Keeping container compliance on a separate axis stops per-container results
+    // from distorting host/system/policy scores (design §11). Columns are
+    // populated by update_container_stats on the next recalc after upgrade.
+    if version < 35 {
+        info!("Running schema migration v34 → v35 (per-container compliance axis)...");
+
+        for (col, decl) in &[
+            ("tests_passed",     "INTEGER DEFAULT 0"),
+            ("tests_failed",     "INTEGER DEFAULT 0"),
+            ("compliance_score", "REAL DEFAULT -1.0"),
+        ] {
+            if !column_exists(pool, "containers", col).await {
+                sqlx::query(&format!("ALTER TABLE containers ADD COLUMN {} {}", col, decl))
+                    .execute(pool).await?;
+            }
+        }
+
+        sqlx::query("UPDATE schema_info SET version = 35")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v34 → v35 complete.");
     }
 
     Ok(())
