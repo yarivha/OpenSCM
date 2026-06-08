@@ -8,6 +8,7 @@ All notable changes to OpenSCM are documented here.
 
 ### Added — Containers: finish the implementation (0.7.0, in progress)
 - **Per-container compliance is now its own axis.** Container test results no longer distort host/system/policy/test scores. Every host-axis aggregation (`update_test_stats`, `update_system_stats`, `update_policy_stats`) counts only host-level results (`results.container_id = 0`), and a new `update_container_stats` pass scores each container from its own results (`container_id = containers.id`). **Schema v34 → v35** adds `containers.tests_passed` / `tests_failed` / `compliance_score` (populated on the first recalc after upgrade).
+- **Reports now show per-container results, nested under each host.** The live policy report, live system report, and archived snapshots break out each container with its own pass/fail/score and per-test rows (including the evidence "why?" panel), instead of folding container results into the host grid or dropping them. Pure-container policies (e.g. CIS Docker) show a real headline via a new stored `policies.score_container` axis instead of "Not Scanned." The policy list honours the same fallback.
 
 ---
 

@@ -164,6 +164,7 @@ pub async fn save_policy_report_logic(
         JOIN results res ON t.id = res.test_id AND res.tenant_id = tip.tenant_id
         JOIN systems s ON res.system_id = s.id AND s.tenant_id = tip.tenant_id
         WHERE tip.policy_id = ? AND tip.tenant_id = ?
+          AND res.container_id = 0
     "#)
     .bind(id)
     .bind(tenant_id)
@@ -187,6 +188,7 @@ pub async fn save_policy_report_logic(
             fail_count: 0,
             na_count: 0,
             excluded_count: 0,
+            containers: Vec::new(),
         });
 
         entry.results.push(IndividualResult {
@@ -207,6 +209,13 @@ pub async fn save_policy_report_logic(
         entry.na_count       = entry.results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
         entry.excluded_count = entry.results.iter().filter(|r| r.is_excluded).count();
         entry.is_passed = is_system_passed(entry.pass_count, entry.fail_count);
+    }
+
+    // Freeze per-container results into the snapshot too (nested under each host).
+    let mut container_map = crate::policies::fetch_policy_container_groups(pool, tenant_id, id)
+        .await.unwrap_or_default();
+    for (name, entry) in reports_map.iter_mut() {
+        entry.containers = container_map.remove(name).unwrap_or_default();
     }
 
     let system_reports: Vec<SystemReport> = reports_map.into_values().collect();
@@ -1396,6 +1405,7 @@ pub async fn system_reports_diff(
         system_id: 0, system_name: String::new(), os: String::new(),
         arch: None, ip: None, compliance_score: -1.0, last_seen: None,
         policy_groups: vec![], total_pass: 0, total_fail: 0, total_na: 0,
+        containers: vec![],
     });
     let new_data: SystemReportData = serde_json::from_str(
         new_meta.report_data.as_deref().unwrap_or("{}"),
@@ -1403,6 +1413,7 @@ pub async fn system_reports_diff(
         system_id: 0, system_name: String::new(), os: String::new(),
         arch: None, ip: None, compliance_score: -1.0, last_seen: None,
         policy_groups: vec![], total_pass: 0, total_fail: 0, total_na: 0,
+        containers: vec![],
     });
 
     // Build per-policy index keyed by (policy_name, policy_version) so a

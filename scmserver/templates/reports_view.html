@@ -213,7 +213,48 @@
               {% endfor %}
             </tbody>
           </table>
-          
+
+          {# Per-container results frozen into this snapshot (separate axis) #}
+          {% if system.containers %}
+          <div class="px-3 pt-3">
+            <h6 class="text-xs text-uppercase text-muted font-weight-bold mb-2">
+              <i class="fas fa-cubes mr-1"></i>Containers ({{ system.containers | length }})
+            </h6>
+            {% for c in system.containers %}
+            <div class="card card-outline {% if c.fail_count > 0 %}card-danger{% elif c.pass_count > 0 %}card-success{% else %}card-secondary{% endif %} mb-2">
+              <div class="card-header py-2">
+                <h3 class="card-title text-sm font-weight-bold">
+                  <i class="fab fa-docker mr-1 text-info"></i>{{ c.name }}
+                  <span class="text-muted font-weight-normal">{{ c.runtime }}{% if c.image %} · {{ c.image }}{% endif %}</span>
+                </h3>
+                <div class="card-tools">
+                  <span class="badge badge-success-soft text-success mr-1"><i class="fas fa-check-circle mr-1"></i>{{ c.pass_count }}</span>
+                  <span class="badge badge-danger-soft text-danger mr-1"><i class="fas fa-times-circle mr-1"></i>{{ c.fail_count }}</span>
+                  {% if c.compliance_score >= 0 %}<span class="badge badge-light text-secondary">{{ c.compliance_score }}%</span>{% else %}<span class="badge badge-light text-secondary">Not Scanned</span>{% endif %}
+                </div>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm table-valign-middle mb-0">
+                  <tbody>
+                    {% for res in c.results %}
+                    <tr>
+                      <td style="padding-left: 28px;">{{ res.test_name }}</td>
+                      <td class="text-center" style="width: 150px;">
+                        {% if res.is_excluded %}<span class="badge badge-secondary"><i class="fas fa-ban mr-1"></i> EXCLUDED</span>
+                        {% elif res.status == "PASS" %}<span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i> PASS</span>
+                        {% elif res.status == "NA" %}<span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>
+                        {% else %}<span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i> FAIL</span>{% endif %}
+                      </td>
+                    </tr>
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
           <div class="p-3 verdict-box m-3">
              <div class="row align-items-center">
                <div class="col-sm-8">

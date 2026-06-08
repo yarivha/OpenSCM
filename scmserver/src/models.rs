@@ -454,6 +454,24 @@ pub struct PolicyResultGroup {
     pub excluded_count: usize,
 }
 
+// One container's worth of per-container test results, nested under its host
+// in a report. Containers are scored on their own axis (design §11), so this
+// carries its own compliance_score independent of the host's. Reuses
+// IndividualResult for the per-test rows (incl. the evidence "why?" payload).
+#[derive(Debug, Serialize, Deserialize)]
+pub struct ContainerReportGroup {
+    pub container_id: i64,
+    pub name: String,
+    pub runtime: String,
+    pub image: Option<String>,
+    pub compliance_score: f64,
+    pub pass_count: usize,
+    pub fail_count: usize,
+    #[serde(default)]
+    pub na_count: usize,
+    pub results: Vec<IndividualResult>,
+}
+
 // All data needed to render the system live-report page or a saved snapshot.
 #[derive(Debug, Serialize, Deserialize)]
 pub struct SystemReportData {
@@ -468,6 +486,11 @@ pub struct SystemReportData {
     pub total_pass: usize,
     pub total_fail: usize,
     pub total_na: usize,
+    /// Per-container test results for containers on this host (separate axis).
+    /// Empty for hosts with no containers / no container tests; default keeps
+    /// older saved snapshots deserialising cleanly.
+    #[serde(default)]
+    pub containers: Vec<ContainerReportGroup>,
 }
 
 // A row in the "critical policy failures" dashboard query result.
@@ -569,6 +592,10 @@ pub struct SystemReport {
     /// Number of EXCLUDED results — admin-suppressed findings, also treated as NA.
     #[serde(default)]
     pub excluded_count: usize,
+    /// Per-container test results for containers on this host, nested under the
+    /// system row in the policy report. Separate compliance axis (design §11).
+    #[serde(default)]
+    pub containers: Vec<ContainerReportGroup>,
 }
 
 // A single test result (test name + PASS/FAIL/NA status) inside a report.

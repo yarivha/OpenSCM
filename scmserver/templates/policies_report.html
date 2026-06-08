@@ -260,7 +260,73 @@
               {% endfor %}
             </tbody>
           </table>
-          
+
+          {# Per-container results nested under this host (separate compliance axis) #}
+          {% if system.containers %}
+          <div class="px-3 pt-3">
+            <h6 class="text-xs text-uppercase text-muted font-weight-bold mb-2">
+              <i class="fas fa-cubes mr-1"></i>Containers ({{ system.containers | length }})
+            </h6>
+            {% for c in system.containers %}
+            <div class="card card-outline {% if c.fail_count > 0 %}card-danger{% elif c.pass_count > 0 %}card-success{% else %}card-secondary{% endif %} mb-2">
+              <div class="card-header py-2">
+                <h3 class="card-title text-sm font-weight-bold">
+                  <i class="fab fa-docker mr-1 text-info"></i>{{ c.name }}
+                  <span class="text-muted font-weight-normal">{{ c.runtime }}{% if c.image %} · {{ c.image }}{% endif %}</span>
+                </h3>
+                <div class="card-tools">
+                  <span class="badge badge-success-soft text-success mr-1" title="Passed"><i class="fas fa-check-circle mr-1"></i>{{ c.pass_count }}</span>
+                  <span class="badge badge-danger-soft text-danger mr-1" title="Failed"><i class="fas fa-times-circle mr-1"></i>{{ c.fail_count }}</span>
+                  {% if c.compliance_score >= 0 %}
+                  <span class="badge badge-light text-secondary" title="Container compliance">{{ c.compliance_score }}%</span>
+                  {% else %}
+                  <span class="badge badge-light text-secondary">Not Scanned</span>
+                  {% endif %}
+                </div>
+              </div>
+              <div class="card-body p-0">
+                <table class="table table-sm table-valign-middle mb-0">
+                  <tbody>
+                    {% for res in c.results %}
+                    <tr>
+                      <td style="padding-left: 28px;">
+                        {% set meta = report.tests_metadata | filter(attribute="name", value=res.test_name) | first %}
+                        {% if meta %}
+                        <span class="test-name-link" data-toggle="modal" data-target="#testDetailModal"
+                          data-name="{{ res.test_name }}" data-description="{{ meta.description }}"
+                          data-rational="{{ meta.rational }}" data-remediation="{{ meta.remediation }}"
+                          data-status="{{ res.status }}"><i class="fas fa-info-circle text-muted mr-1 text-xs"></i>{{ res.test_name }}</span>
+                        {% else %}{{ res.test_name }}{% endif %}
+                      </td>
+                      <td class="text-center" style="width: 150px;">
+                        {% if res.is_excluded %}
+                        <span class="badge badge-secondary"><i class="fas fa-ban mr-1"></i>EXCLUDED</span>
+                        {% elif res.status == "PASS" %}
+                        <span class="badge badge-success-soft text-success"><i class="fas fa-check-circle mr-1"></i>PASS</span>
+                        {% elif res.status == "NA" %}
+                        <span class="text-secondary text-sm"><i class="fas fa-minus-circle mr-1"></i>NA</span>
+                        {% else %}
+                        <span class="badge badge-danger-soft text-danger"><i class="fas fa-times-circle mr-1"></i>FAIL</span>
+                        {% endif %}
+                        {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
+                        <button type="button" class="btn btn-link btn-xs p-0 ml-2 evidence-toggle" data-evidence="{{ res.evidence }}" title="Show why"><i class="fas fa-question-circle"></i> why?</button>
+                        {% endif %}
+                      </td>
+                    </tr>
+                    {% if res.evidence and (res.status == "FAIL" or res.status == "NA") %}
+                    <tr class="evidence-detail" style="display:none;">
+                      <td colspan="2" class="bg-light px-4 py-2"><div class="evidence-content text-xs"></div></td>
+                    </tr>
+                    {% endif %}
+                    {% endfor %}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+            {% endfor %}
+          </div>
+          {% endif %}
+
           <div class="p-3 verdict-box m-3">
              <div class="row align-items-center">
                <div class="col-sm-8">

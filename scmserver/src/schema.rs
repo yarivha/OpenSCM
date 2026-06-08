@@ -296,6 +296,7 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             compliance_score REAL DEFAULT -1.0,
             score_test REAL DEFAULT -1.0,
             score_system REAL DEFAULT -1.0,
+            score_container REAL DEFAULT -1.0,
             systems_passed INTEGER DEFAULT 0,
             systems_failed INTEGER DEFAULT 0,
             FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
@@ -2374,6 +2375,12 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
                 sqlx::query(&format!("ALTER TABLE containers ADD COLUMN {} {}", col, decl))
                     .execute(pool).await?;
             }
+        }
+        // Container-axis aggregate for a policy — the report/list headline falls
+        // back to this when the host axis is "Not Scanned" (pure-container policy).
+        if !column_exists(pool, "policies", "score_container").await {
+            sqlx::query("ALTER TABLE policies ADD COLUMN score_container REAL DEFAULT -1.0")
+                .execute(pool).await?;
         }
 
         sqlx::query("UPDATE schema_info SET version = 35")

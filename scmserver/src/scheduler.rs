@@ -326,6 +326,28 @@ async fn update_policy_stats(
                                  / COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) END
                 FROM ({ps}) sub
             ),
+            -- Container axis: mean compliance of containers that have at least one
+            -- scored result for this policy's tests on an in-scope system. Used as
+            -- the headline fallback for pure-container policies. -1.0 when none.
+            score_container = (
+                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0 ELSE AVG(c.compliance_score) END
+                FROM containers c
+                WHERE c.tenant_id = policies.tenant_id
+                  AND c.compliance_score >= 0
+                  AND EXISTS (
+                      SELECT 1 FROM results r
+                      WHERE r.container_id = c.id AND r.tenant_id = c.tenant_id
+                        AND r.excluded = 0 AND r.result != 'NA'
+                        AND r.test_id IN (
+                            SELECT test_id FROM tests_in_policy
+                            WHERE policy_id = policies.id AND tenant_id = policies.tenant_id)
+                        AND r.system_id IN (
+                            SELECT sig.system_id FROM systems_in_groups sig
+                            JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+                                AND sig.tenant_id = sip.tenant_id
+                            WHERE sip.policy_id = policies.id AND sip.tenant_id = policies.tenant_id)
+                  )
+            ),
             compliance_score = (
                 SELECT CASE WHEN {mode} = 'system'
                     THEN (CASE WHEN COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) = 0 THEN -1.0

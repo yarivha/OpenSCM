@@ -22,7 +22,7 @@ use genpdf::{fonts, elements, style, Element, Margins};
 use crate::models::{
     ErrorQuery, SystemGroup, Test, Policy, PolicySchedule,
     SystemInsidePolicy, TestInsidePolicy, PolicyCompliance,
-    ReportData, TestMeta, SystemReport, IndividualResult,
+    ReportData, TestMeta, SystemReport, IndividualResult, ContainerReportGroup,
     UserRole, AuthSession,
     PolicyExport, PolicyExportPolicy, PolicyExportTest, PolicyExportTestCondition,
     PolicyImportSummary,
@@ -76,6 +76,9 @@ pub async fn policies(
     // hardcoded per-system, ignoring the toggle.)
     let pol_mode = read_compliance_mode(&pool, &auth.tenant_id, "policy_compliance_mode").await;
     let pol_col  = if pol_mode == "system" { "p.score_system" } else { "p.score_test" };
+    // Pure-container policies have no host-axis score (-1); fall back to the
+    // stored container axis so a CIS-Docker policy shows a real number.
+    let compliance_expr = format!("COALESCE(NULLIF({pol_col}, -1.0), p.score_container)");
     let rows = match sqlx::query(&format!(r#"
         SELECT
             p.id AS policy_id,
@@ -83,7 +86,7 @@ pub async fn policies(
             p.version AS policy_version,
             p.description AS policy_description,
             p.author AS author,
-            {pol_col} AS compliance,
+            {compliance_expr} AS compliance,
             (SELECT COUNT(*) FROM tests_in_policy WHERE policy_id = p.id) as test_count,
             (SELECT COUNT(*) FROM systems_in_policy WHERE policy_id = p.id) as system_count
         FROM policies p
@@ -1055,6 +1058,7 @@ pub async fn policies_report(
         JOIN systems s ON r.system_id = s.id AND r.tenant_id = s.tenant_id
         JOIN tests t ON r.test_id = t.id AND r.tenant_id = t.tenant_id
         WHERE r.tenant_id = ?
+          AND r.container_id = 0
           AND r.test_id IN (
               SELECT test_id FROM tests_in_policy
               WHERE policy_id = ? AND tenant_id = ?
@@ -1093,6 +1097,11 @@ pub async fn policies_report(
         });
     }
 
+    // Per-container results nested under their host (separate axis). Empty for
+    // hosts with no container tests; a DB hiccup degrades to host-only rendering.
+    let mut container_map = fetch_policy_container_groups(&pool, &auth.tenant_id, id as i64)
+        .await.unwrap_or_default();
+
     // Excluded findings count as NA: removed from both numerator and denominator.
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
         let pass_count     = results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
@@ -1100,7 +1109,8 @@ pub async fn policies_report(
         let na_count       = results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
         let excluded_count = results.iter().filter(|r| r.is_excluded).count();
         let is_passed = is_system_passed(pass_count, fail_count);
-        SystemReport { system_name: name, results, is_passed, pass_count, fail_count, na_count, excluded_count }
+        let containers = container_map.remove(&name).unwrap_or_default();
+        SystemReport { system_name: name, results, is_passed, pass_count, fail_count, na_count, excluded_count, containers }
     }).collect();
 
     // All-NA systems (exempt) are not counted as failures.
@@ -1114,7 +1124,11 @@ pub async fn policies_report(
     let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
     let pmode = read_compliance_mode(&pool, &auth.tenant_id, "policy_compliance_mode").await;
     let units: Vec<(usize, usize)> = system_reports.iter().map(|s| (s.pass_count, s.fail_count)).collect();
-    let compliance_score = compliance_pct(pmode == "system", &units);
+    let host_score = compliance_pct(pmode == "system", &units);
+    // Pure-container policy: no host-axis score → show the container axis.
+    let compliance_score = if host_score < 0.0 {
+        container_axis_avg(&system_reports).unwrap_or(host_score)
+    } else { host_score };
 
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
@@ -1175,6 +1189,113 @@ fn cell<E: Element + 'static>(e: E) -> Box<dyn Element> {
 // Role: Viewer
 // ─────────────────────────────────────────────────────────────────────────────
 // ─────────────────────────────────────────────────────────────────────────────
+// Helper: assemble_container_groups
+// Folds a flat result set of per-container rows (one row per container × test)
+// into one ContainerReportGroup per container, keyed by host system name. Each
+// group carries the container's own compliance_score (separate axis) and its
+// per-test IndividualResults. Container rows are never excludable (exclusion is
+// keyed on (system,test), independent of container), so is_excludable = false.
+// Expected columns: system_name, container_id, container_name, runtime, image,
+// cscore, test_name, status, is_excluded, evidence, system_id, test_id.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn assemble_container_groups(
+    rows: Vec<sqlx::sqlite::SqliteRow>,
+) -> BTreeMap<String, Vec<ContainerReportGroup>> {
+    let mut by_sys: BTreeMap<String, BTreeMap<i64, ContainerReportGroup>> = BTreeMap::new();
+    for row in rows {
+        let system_name: String = row.get::<Option<String>, _>("system_name")
+            .unwrap_or_else(|| "Unknown System".to_string());
+        let cid: i64 = row.get("container_id");
+        let grp = by_sys.entry(system_name).or_default().entry(cid).or_insert_with(|| {
+            ContainerReportGroup {
+                container_id: cid,
+                name: row.get::<Option<String>, _>("container_name").unwrap_or_default(),
+                runtime: row.get::<Option<String>, _>("runtime").unwrap_or_default(),
+                image: row.try_get("image").ok().flatten(),
+                compliance_score: row.try_get("cscore").unwrap_or(-1.0),
+                pass_count: 0, fail_count: 0, na_count: 0,
+                results: Vec::new(),
+            }
+        });
+        grp.results.push(IndividualResult {
+            test_name: row.get("test_name"),
+            status: normalize_status(&row.get::<String, _>("status")).to_string(),
+            is_excluded: row.try_get::<i64, _>("is_excluded").unwrap_or(0) != 0,
+            is_excludable: false,
+            system_id: row.try_get("system_id").ok(),
+            test_id: row.try_get("test_id").ok(),
+            evidence: row.try_get("evidence").ok().flatten(),
+        });
+    }
+    by_sys.into_iter().map(|(sys, cmap)| {
+        let mut groups: Vec<ContainerReportGroup> = cmap.into_values().map(|mut g| {
+            g.pass_count = g.results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
+            g.fail_count = g.results.iter().filter(|r| !r.is_excluded && r.status == "FAIL").count();
+            g.na_count   = g.results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
+            g
+        }).collect();
+        groups.sort_by(|a, b| a.name.cmp(&b.name));
+        (sys, groups)
+    }).collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: container_axis_avg
+// Mean of the per-container compliance scores across all hosts in a report.
+// Used as the headline fallback when the host axis is "Not Scanned" (a policy
+// made entirely of container tests). Returns None when no container has a
+// scored result, so the caller keeps the -1.0 "Not Scanned" headline.
+// ─────────────────────────────────────────────────────────────────────────────
+fn container_axis_avg(system_reports: &[SystemReport]) -> Option<f64> {
+    let scores: Vec<f64> = system_reports.iter()
+        .flat_map(|s| s.containers.iter())
+        .map(|c| c.compliance_score)
+        .filter(|v| *v >= 0.0)
+        .collect();
+    if scores.is_empty() {
+        None
+    } else {
+        Some((scores.iter().sum::<f64>() / scores.len() as f64 * 100.0).round() / 100.0)
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: fetch_policy_container_groups
+// Per-container test results for a policy, grouped by host system name. Scoped
+// to the policy's tests and in-scope systems, container rows only (container_id
+// > 0). Used to nest containers under each host in the policy report.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) async fn fetch_policy_container_groups(
+    pool: &SqlitePool, tenant_id: &str, policy_id: i64,
+) -> Result<BTreeMap<String, Vec<ContainerReportGroup>>, sqlx::Error> {
+    let rows = sqlx::query(r#"
+        SELECT s.name AS system_name, c.id AS container_id, c.name AS container_name,
+               c.runtime AS runtime, c.image AS image, c.compliance_score AS cscore,
+               t.name AS test_name, r.result AS status, r.excluded AS is_excluded,
+               r.evidence AS evidence, r.system_id AS system_id, r.test_id AS test_id
+        FROM results r
+        JOIN systems s    ON r.system_id    = s.id AND r.tenant_id = s.tenant_id
+        JOIN tests t      ON r.test_id      = t.id AND r.tenant_id = t.tenant_id
+        JOIN containers c ON r.container_id = c.id AND r.tenant_id = c.tenant_id
+        WHERE r.tenant_id = ?
+          AND r.container_id > 0
+          AND r.test_id IN (
+              SELECT test_id FROM tests_in_policy WHERE policy_id = ? AND tenant_id = ?
+          )
+          AND r.system_id IN (
+              SELECT sig.system_id FROM systems_in_groups sig
+              JOIN systems_in_policy sip ON sig.group_id = sip.group_id
+                  AND sig.tenant_id = sip.tenant_id
+              WHERE sip.policy_id = ? AND sip.tenant_id = ?
+          )
+        ORDER BY s.name, c.name, t.name
+    "#)
+    .bind(tenant_id).bind(policy_id).bind(tenant_id).bind(policy_id).bind(tenant_id)
+    .fetch_all(pool).await?;
+    Ok(assemble_container_groups(rows))
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // Helper: fetch_live_policy_report_data
 // Builds a fresh ReportData for the given policy by querying the live tables
 // (tests + results) — shared by policies_report_download and the new
@@ -1229,6 +1350,7 @@ async fn fetch_live_policy_report_data(
         WHERE sip.policy_id = ?
           AND tip.policy_id = ?
           AND sip.tenant_id = ?
+          AND r.container_id = 0
     "#)
     .bind(id).bind(id).bind(tenant_id).fetch_all(pool).await?;
 
@@ -1253,6 +1375,9 @@ async fn fetch_live_policy_report_data(
         });
     }
 
+    let mut container_map = fetch_policy_container_groups(pool, tenant_id, id)
+        .await.unwrap_or_default();
+
     // Excluded findings count as NA in pass/fail tallies.
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
         let pass_count     = results.iter().filter(|r| !r.is_excluded && r.status == "PASS").count();
@@ -1260,7 +1385,8 @@ async fn fetch_live_policy_report_data(
         let na_count       = results.iter().filter(|r| !r.is_excluded && r.status == "NA").count();
         let excluded_count = results.iter().filter(|r| r.is_excluded).count();
         let is_passed = is_system_passed(pass_count, fail_count);
-        SystemReport { system_name: name, results, is_passed, pass_count, fail_count, na_count, excluded_count }
+        let containers = container_map.remove(&name).unwrap_or_default();
+        SystemReport { system_name: name, results, is_passed, pass_count, fail_count, na_count, excluded_count, containers }
     }).collect();
 
     let total_pass:     usize = system_reports.iter().map(|s| s.pass_count).sum();
@@ -1269,7 +1395,10 @@ async fn fetch_live_policy_report_data(
     let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
     let pmode = read_compliance_mode(pool, tenant_id, "policy_compliance_mode").await;
     let units: Vec<(usize, usize)> = system_reports.iter().map(|s| (s.pass_count, s.fail_count)).collect();
-    let compliance_score = compliance_pct(pmode == "system", &units);
+    let host_score = compliance_pct(pmode == "system", &units);
+    let compliance_score = if host_score < 0.0 {
+        container_axis_avg(&system_reports).unwrap_or(host_score)
+    } else { host_score };
 
     Ok(Some(ReportData {
         policy_id: policy_row.get("id"),

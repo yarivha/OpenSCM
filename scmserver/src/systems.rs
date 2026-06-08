@@ -991,6 +991,7 @@ pub async fn fetch_system_report_data(
             ON tip.test_id = t.id
         LEFT JOIN results r
             ON r.test_id = t.id AND r.system_id = ? AND r.tenant_id = ?
+            AND r.container_id = 0
         WHERE sig.system_id = ? AND sig.tenant_id = ?
         ORDER BY p.name, t.name
     "#)
@@ -1080,6 +1081,24 @@ pub async fn fetch_system_report_data(
                 .unwrap_or(s)
         });
 
+    // Per-container results on this host (separate axis), grouped per container.
+    // Reuses the policy report's assembler; a DB hiccup degrades to host-only.
+    let container_rows = sqlx::query(r#"
+        SELECT s.name AS system_name, c.id AS container_id, c.name AS container_name,
+               c.runtime AS runtime, c.image AS image, c.compliance_score AS cscore,
+               t.name AS test_name, r.result AS status, r.excluded AS is_excluded,
+               r.evidence AS evidence, r.system_id AS system_id, r.test_id AS test_id
+        FROM results r
+        JOIN systems s    ON r.system_id    = s.id AND r.tenant_id = s.tenant_id
+        JOIN tests t      ON r.test_id      = t.id AND r.tenant_id = t.tenant_id
+        JOIN containers c ON r.container_id = c.id AND r.tenant_id = c.tenant_id
+        WHERE r.tenant_id = ? AND r.system_id = ? AND r.container_id > 0
+        ORDER BY c.name, t.name
+    "#)
+    .bind(tenant_id).bind(system_id).fetch_all(pool).await.unwrap_or_default();
+    let containers = crate::policies::assemble_container_groups(container_rows)
+        .into_values().next().unwrap_or_default();
+
     Ok(SystemReportData {
         system_id:        sys_row.get("id"),
         system_name:      sys_row.get("name"),
@@ -1092,6 +1111,7 @@ pub async fn fetch_system_report_data(
         total_pass,
         total_fail,
         total_na,
+        containers,
     })
 }
 
