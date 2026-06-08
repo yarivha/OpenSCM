@@ -1057,6 +1057,13 @@ pub async fn fetch_system_report_data(
 
     let total_pass: usize = policy_groups.iter().map(|p| p.pass_count).sum();
     let total_fail: usize = policy_groups.iter().map(|p| p.fail_count).sum();
+
+    // Mode-aware system score, computed live so it reflects the SYSTEM
+    // compliance toggle immediately. "policy" → % of the system's policies it
+    // fully passes (one failing policy → 0%); "test" → % of its tests passed.
+    let smode = crate::policies::read_compliance_mode(pool, tenant_id, "system_compliance_mode").await;
+    let units: Vec<(usize, usize)> = policy_groups.iter().map(|p| (p.pass_count, p.fail_count)).collect();
+    let compliance_score = crate::policies::compliance_pct(smode == "policy", &units);
     // Excluded results are tallied alongside NA so the three counters add up
     // to total results without double-counting.
     let total_na: usize = policy_groups.iter()
@@ -1079,7 +1086,7 @@ pub async fn fetch_system_report_data(
         os:               sys_row.get::<Option<String>, _>("os").unwrap_or_default(),
         arch:             sys_row.get("arch"),
         ip:               sys_row.get("ip"),
-        compliance_score: sys_row.get::<f64, _>("compliance_score"),
+        compliance_score,
         last_seen,
         policy_groups,
         total_pass,

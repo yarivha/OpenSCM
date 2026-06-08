@@ -157,7 +157,13 @@ async fn update_test_stats(
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: update_system_stats
 // Recalculates tests_passed, tests_failed, total_tests, and compliance_score
-// for every active system.
+// for every active system. tests_* are always raw test tallies. The
+// compliance_score honours the tenant's `system_compliance_mode` (0.6.5):
+//   • "test"   — % of the system's tests that passed (PASS / (PASS + FAIL)).
+//   • "policy" — % of the system's assigned policies it fully passes. A system
+//                "passes" a policy iff it has no FAIL and ≥1 PASS among that
+//                policy's tests; applicable policies = those with ≥1 PASS/FAIL.
+//                So one assigned policy with any failing test → 0%.
 // Must be called inside an active transaction, after update_test_stats.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn update_system_stats(
@@ -168,6 +174,10 @@ async fn update_system_stats(
     // exist — they don't contribute to PASS, FAIL, total, or score.
     // Scoping appends to the existing `WHERE status = 'active'`.
     let clause = if tenant.is_some() { " AND tenant_id = ?" } else { "" };
+    // SYSTEM compliance mode for the system's tenant: 'policy' → per-policy
+    // (binary), else per-test. Default 'test'.
+    let mode = "COALESCE((SELECT value FROM settings \
+                WHERE tenant_id = systems.tenant_id AND skey = 'system_compliance_mode'), 'test')";
     let sql = format!(r#"
         UPDATE systems SET
             tests_passed = (
@@ -191,17 +201,44 @@ async fn update_system_stats(
                   AND r.excluded = 0
             ),
             compliance_score = (
-                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
-                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
-                END
-                FROM results r
-                WHERE r.system_id = systems.id
-                  AND r.tenant_id = systems.tenant_id
-                  AND r.result != 'NA'
-                  AND r.excluded = 0
+                CASE WHEN {mode} = 'policy' THEN (
+                    -- % of assigned policies the system fully passes.
+                    SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
+                                ELSE CAST(SUM(CASE WHEN p_fail = 0 AND p_pass > 0 THEN 1 ELSE 0 END) AS REAL)
+                                     * 100 / COUNT(*) END
+                    FROM (
+                        SELECT sip.policy_id,
+                            SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS p_pass,
+                            SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) AS p_fail
+                        FROM systems_in_groups sig
+                        JOIN systems_in_policy sip ON sip.group_id = sig.group_id
+                            AND sip.tenant_id = sig.tenant_id
+                        JOIN tests_in_policy tip ON tip.policy_id = sip.policy_id
+                            AND tip.tenant_id = sip.tenant_id
+                        LEFT JOIN results r ON r.system_id = systems.id
+                            AND r.test_id = tip.test_id
+                            AND r.tenant_id = systems.tenant_id
+                            AND r.excluded = 0
+                        WHERE sig.system_id = systems.id
+                          AND sig.tenant_id = systems.tenant_id
+                        GROUP BY sip.policy_id
+                        HAVING SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) > 0
+                            OR SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) > 0
+                    ) per_policy
+                ) ELSE (
+                    -- % of the system's tests that passed.
+                    SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
+                                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL)
+                                      / COUNT(*)) * 100 END
+                    FROM results r
+                    WHERE r.system_id = systems.id
+                      AND r.tenant_id = systems.tenant_id
+                      AND r.result != 'NA'
+                      AND r.excluded = 0
+                ) END
             )
-        WHERE status = 'active'{}
-    "#, clause);
+        WHERE status = 'active'{clause}
+    "#, mode = mode, clause = clause);
     let mut q = sqlx::query(&sql);
     if let Some(t) = tenant { q = q.bind(t); }
     q.execute(&mut **tx).await?;
@@ -211,8 +248,18 @@ async fn update_system_stats(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: update_policy_stats
-// Recalculates systems_passed, systems_failed, and compliance_score for every
-// policy. NA-only systems are excluded from both numerator and denominator.
+// MODE-AWARE compliance (0.6.5). Each policy's score honours its tenant's
+// `policy_compliance_mode` setting (Settings → Compliance):
+//   • "system" — % of systems fully compliant (no FAIL, ≥1 PASS) among scanned
+//                systems. systems_passed/_failed = compliant / failed SYSTEMS.
+//   • "test"   — % of individual test results that passed
+//                (total PASS / (PASS + FAIL)). systems_passed/_failed = total
+//                PASS / FAIL TESTS. (default)
+// Both derive from one per-system aggregation (passes/fails per system); the
+// mode is read per policy's tenant via a correlated settings lookup, so a
+// single statement handles a fleet of mixed-mode tenants. Column names retained
+// for schema stability; displayed under the generic "Pass/Fail" header.
+// NA and excluded results stay out of both numerator and denominator.
 // Must be called inside an active transaction, after update_system_stats.
 // ─────────────────────────────────────────────────────────────────────────────
 async fn update_policy_stats(
@@ -222,93 +269,64 @@ async fn update_policy_stats(
     // Each policy's stats derive only from its own tenant's systems/results
     // (every JOIN carries tenant_id), so a per-tenant outer WHERE is correct.
     let clause = if tenant.is_some() { " WHERE tenant_id = ?" } else { "" };
+
+    // POLICY compliance mode for the policy's tenant: 'system' → per-system
+    // (binary), else per-test. Default 'test'.
+    let mode = "COALESCE((SELECT value FROM settings \
+                WHERE tenant_id = policies.tenant_id AND skey = 'policy_compliance_mode'), 'test')";
+
+    // Per-system PASS/FAIL aggregation for the policy's active in-scope systems.
+    // LEFT JOIN so a scanned-but-resultless system still appears (passes=fails=0)
+    // and is correctly treated as out-of-scope by both modes.
+    let per_system = r#"
+        SELECT s.id AS sysid,
+            SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS passes,
+            SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) AS fails
+        FROM systems_in_policy sip
+        JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+            AND sip.tenant_id = sig.tenant_id
+        JOIN systems s ON sig.system_id = s.id
+            AND sig.tenant_id = s.tenant_id
+        LEFT JOIN results r ON r.system_id = s.id
+            AND r.tenant_id = s.tenant_id
+            AND r.test_id IN (
+                SELECT test_id FROM tests_in_policy
+                WHERE policy_id = policies.id AND tenant_id = policies.tenant_id
+            )
+            AND r.excluded = 0
+        WHERE sip.policy_id = policies.id
+          AND sip.tenant_id = policies.tenant_id
+          AND s.status = 'active'
+        GROUP BY s.id
+    "#;
+
     let sql = format!(r#"
         UPDATE policies SET
             systems_passed = (
-                SELECT COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END)
-                FROM (
-                    SELECT
-                        s.id as system_id,
-                        SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) as passes,
-                        SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
-                    FROM systems_in_policy sip
-                    JOIN systems_in_groups sig ON sip.group_id = sig.group_id
-                        AND sip.tenant_id = sig.tenant_id
-                    JOIN systems s ON sig.system_id = s.id
-                        AND sig.tenant_id = s.tenant_id
-                    LEFT JOIN results r ON r.system_id = s.id
-                        AND r.tenant_id = s.tenant_id
-                        AND r.test_id IN (
-                            SELECT test_id FROM tests_in_policy
-                            WHERE policy_id = policies.id
-                              AND tenant_id = policies.tenant_id
-                        )
-                        AND r.excluded = 0
-                    WHERE sip.policy_id = policies.id
-                      AND sip.tenant_id = policies.tenant_id
-                      AND s.status = 'active'
-                    GROUP BY s.id
-                ) sub
+                SELECT CASE WHEN {mode} = 'system'
+                    THEN COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END)
+                    ELSE COALESCE(SUM(passes), 0) END
+                FROM ({ps}) sub
             ),
             systems_failed = (
-                SELECT COUNT(CASE WHEN fails > 0 THEN 1 END)
-                FROM (
-                    SELECT
-                        s.id as system_id,
-                        SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
-                    FROM systems_in_policy sip
-                    JOIN systems_in_groups sig ON sip.group_id = sig.group_id
-                        AND sip.tenant_id = sig.tenant_id
-                    JOIN systems s ON sig.system_id = s.id
-                        AND sig.tenant_id = s.tenant_id
-                    LEFT JOIN results r ON r.system_id = s.id
-                        AND r.tenant_id = s.tenant_id
-                        AND r.test_id IN (
-                            SELECT test_id FROM tests_in_policy
-                            WHERE policy_id = policies.id
-                              AND tenant_id = policies.tenant_id
-                        )
-                        AND r.excluded = 0
-                    WHERE sip.policy_id = policies.id
-                      AND sip.tenant_id = policies.tenant_id
-                      AND s.status = 'active'
-                    GROUP BY s.id
-                ) sub
+                SELECT CASE WHEN {mode} = 'system'
+                    THEN COUNT(CASE WHEN fails > 0 THEN 1 END)
+                    ELSE COALESCE(SUM(fails), 0) END
+                FROM ({ps}) sub
             ),
             compliance_score = (
-                SELECT CASE
-                    WHEN COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) = 0 THEN -1.0
-                    ELSE (
-                        CAST(COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END) AS REAL) /
-                        COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END)
-                    ) * 100
+                SELECT CASE WHEN {mode} = 'system'
+                    THEN (CASE WHEN COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) = 0 THEN -1.0
+                               ELSE CAST(COUNT(CASE WHEN passes > 0 AND fails = 0 THEN 1 END) AS REAL) * 100
+                                    / COUNT(CASE WHEN passes > 0 OR fails > 0 THEN 1 END) END)
+                    ELSE (CASE WHEN COALESCE(SUM(passes),0) + COALESCE(SUM(fails),0) = 0 THEN -1.0
+                               ELSE CAST(SUM(passes) AS REAL) * 100
+                                    / (SUM(passes) + SUM(fails)) END)
                 END
-                FROM (
-                    SELECT
-                        s.id as system_id,
-                        SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) as passes,
-                        SUM(CASE WHEN r.result = 'FAIL' THEN 1 ELSE 0 END) as fails
-                    FROM systems_in_policy sip
-                    JOIN systems_in_groups sig ON sip.group_id = sig.group_id
-                        AND sip.tenant_id = sig.tenant_id
-                    JOIN systems s ON sig.system_id = s.id
-                        AND sig.tenant_id = s.tenant_id
-                    LEFT JOIN results r ON r.system_id = s.id
-                        AND r.tenant_id = s.tenant_id
-                        AND r.test_id IN (
-                            SELECT test_id FROM tests_in_policy
-                            WHERE policy_id = policies.id
-                              AND tenant_id = policies.tenant_id
-                        )
-                        AND r.excluded = 0
-                    WHERE sip.policy_id = policies.id
-                      AND sip.tenant_id = policies.tenant_id
-                      AND s.status = 'active'
-                    GROUP BY s.id
-                ) sub
+                FROM ({ps}) sub
             )
-        {}
-    "#, clause);
+        {clause}
+    "#, mode = mode, ps = per_system, clause = clause);
     let mut q = sqlx::query(&sql);
     if let Some(t) = tenant { q = q.bind(t); }
     q.execute(&mut **tx).await?;

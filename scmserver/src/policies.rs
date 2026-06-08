@@ -858,23 +858,51 @@ pub async fn policies_run(
 
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Helper: compute_policy_compliance_score
-// Returns the % of in-scope systems that are COMPLIANT (pass>0 && fail==0)
-// among systems that have at least one non-excluded PASS or FAIL. Returns -1.0
-// when every system is exempt (all-NA / all-excluded / not scanned) so the
-// template can render a "Not Scanned" badge instead of "0% Non-Compliant".
+// Helper: read_compliance_mode
+// Reads a per-tenant compliance-mode setting by key (0.6.5). There are two
+// independent toggles (Settings → Compliance):
+//   • "policy_compliance_mode": "test" | "system"  — how a POLICY's % is scored
+//   • "system_compliance_mode": "test" | "policy"  — how a SYSTEM's % is scored
+// Unset / unrecognised → "test".
 // ─────────────────────────────────────────────────────────────────────────────
-fn compute_policy_compliance_score(system_reports: &[crate::models::SystemReport]) -> f64 {
-    let in_scope = system_reports.iter()
-        .filter(|s| s.pass_count > 0 || s.fail_count > 0)
-        .count();
-    if in_scope == 0 {
-        return -1.0;
+pub async fn read_compliance_mode(pool: &SqlitePool, tenant_id: &str, skey: &str) -> String {
+    sqlx::query_scalar::<_, String>(
+        "SELECT value FROM settings WHERE tenant_id = ? AND skey = ?",
+    )
+    .bind(tenant_id)
+    .bind(skey)
+    .fetch_optional(pool)
+    .await
+    .ok()
+    .flatten()
+    .filter(|v| v == "system" || v == "policy" || v == "test")
+    .unwrap_or_else(|| "test".to_string())
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: compliance_pct
+// Aggregate compliance % over a set of "units", each a (pass_count, fail_count)
+// pair. A unit is a SYSTEM when scoring a policy, or a POLICY when scoring a
+// system. NA / excluded are already out of the counts upstream.
+//   • binary = true  — % of units that FULLY comply (no FAIL, ≥1 PASS) among
+//                      applicable units (≥1 PASS/FAIL). Per-system / per-policy.
+//   • binary = false — % of individual test results that passed
+//                      (total PASS / (PASS + FAIL)). Per-test.
+// Returns -1.0 ("not scanned") when nothing is applicable, so the template can
+// render a "Not Scanned" badge instead of "0% Non-Compliant".
+// ─────────────────────────────────────────────────────────────────────────────
+pub fn compliance_pct(binary: bool, units: &[(usize, usize)]) -> f64 {
+    if binary {
+        let applicable = units.iter().filter(|(p, f)| *p > 0 || *f > 0).count();
+        if applicable == 0 { return -1.0; }
+        let compliant = units.iter().filter(|(p, f)| *f == 0 && *p > 0).count();
+        (compliant as f64 / applicable as f64) * 100.0
+    } else {
+        let tp: usize = units.iter().map(|(p, _)| *p).sum();
+        let tf: usize = units.iter().map(|(_, f)| *f).sum();
+        if tp + tf == 0 { return -1.0; }
+        (tp as f64 / (tp + tf) as f64) * 100.0
     }
-    let compliant = system_reports.iter()
-        .filter(|s| s.fail_count == 0 && s.pass_count > 0)
-        .count();
-    (compliant as f64 / in_scope as f64) * 100.0
 }
 
 
@@ -1105,7 +1133,9 @@ pub async fn policies_report(
     let total_fail:     usize = system_reports.iter().map(|s| s.fail_count).sum();
     let total_na:       usize = system_reports.iter().map(|s| s.na_count).sum();
     let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
-    let compliance_score = compute_policy_compliance_score(&system_reports);
+    let pmode = read_compliance_mode(&pool, &auth.tenant_id, "policy_compliance_mode").await;
+    let units: Vec<(usize, usize)> = system_reports.iter().map(|s| (s.pass_count, s.fail_count)).collect();
+    let compliance_score = compliance_pct(pmode == "system", &units);
 
     let report_data = ReportData {
         policy_id: policy_row.get("id"),
@@ -1258,7 +1288,9 @@ async fn fetch_live_policy_report_data(
     let total_fail:     usize = system_reports.iter().map(|s| s.fail_count).sum();
     let total_na:       usize = system_reports.iter().map(|s| s.na_count).sum();
     let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
-    let compliance_score = compute_policy_compliance_score(&system_reports);
+    let pmode = read_compliance_mode(pool, tenant_id, "policy_compliance_mode").await;
+    let units: Vec<(usize, usize)> = system_reports.iter().map(|s| (s.pass_count, s.fail_count)).collect();
+    let compliance_score = compliance_pct(pmode == "system", &units);
 
     Ok(Some(ReportData {
         policy_id: policy_row.get("id"),
@@ -1972,3 +2004,55 @@ pub async fn execute_policy_run_logic(
     Ok(())
 }
 
+
+#[cfg(test)]
+mod tests {
+    use super::compliance_pct;
+
+    // (pass, fail) units — a "unit" is a system (policy scoring) or a policy
+    // (system scoring); the math is identical either way.
+    #[test]
+    fn empty_scope_is_not_scanned() {
+        assert_eq!(compliance_pct(false, &[]), -1.0);
+        assert_eq!(compliance_pct(true,  &[]), -1.0);
+        // All-NA units (no pass/fail) → -1.0 in both modes.
+        let na = vec![(0usize, 0usize), (0, 0)];
+        assert_eq!(compliance_pct(false, &na), -1.0);
+        assert_eq!(compliance_pct(true,  &na), -1.0);
+    }
+
+    #[test]
+    fn the_divergence_case() {
+        // 4 units, each with exactly 1 of 10 checks failing.
+        let u = vec![(9usize, 1usize), (9, 1), (9, 1), (9, 1)];
+        // Per-test: 36 pass / 40 total = 90%.
+        assert!((compliance_pct(false, &u) - 90.0).abs() < 1e-9);
+        // Binary (per-system / per-policy): 0 of 4 fully compliant = 0%.
+        assert_eq!(compliance_pct(true, &u), 0.0);
+    }
+
+    #[test]
+    fn all_pass_is_100_both_modes() {
+        let u = vec![(5usize, 0usize), (3, 0)];
+        assert!((compliance_pct(false, &u) - 100.0).abs() < 1e-9);
+        assert!((compliance_pct(true,  &u) - 100.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn mixed_units() {
+        // One fully-compliant (5,0), one with failures (3,2).
+        let u = vec![(5usize, 0usize), (3, 2)];
+        // Per-test: 8 pass / 10 total = 80%.
+        assert!((compliance_pct(false, &u) - 80.0).abs() < 1e-9);
+        // Binary: 1 of 2 fully compliant = 50%.
+        assert!((compliance_pct(true, &u) - 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn single_failing_unit_is_zero_binary() {
+        // The user's case: one policy with a failing test → 0% per-policy.
+        let u = vec![(1usize, 4usize)];
+        assert!((compliance_pct(false, &u) - 20.0).abs() < 1e-9); // per test: 1/5
+        assert_eq!(compliance_pct(true, &u), 0.0);                // binary: 0 of 1
+    }
+}

@@ -32,6 +32,11 @@ pub struct Settings {
     pub auto_prune_inactive: String,
     pub compliance_sat: String,
     pub compliance_marginal: String,
+    // Per-tenant compliance calculation modes (two independent toggles).
+    //   policy_compliance_mode: "test" | "system"  (how a POLICY's % is scored)
+    //   system_compliance_mode: "test" | "policy"  (how a SYSTEM's % is scored)
+    pub policy_compliance_mode: String,
+    pub system_compliance_mode: String,
     pub audit_log_retention_days: String,
     pub report_retention_days: String,
     pub notification_retention_days: String,
@@ -108,6 +113,8 @@ pub async fn settings(
         auto_prune_inactive: map.get("auto_prune_inactive").cloned().unwrap_or_else(|| "0".to_string()),
         compliance_sat:    map.get("compliance_sat").cloned().unwrap_or_else(|| "80".to_string()),
         compliance_marginal: map.get("compliance_marginal").cloned().unwrap_or_else(|| "60".to_string()),
+        policy_compliance_mode: map.get("policy_compliance_mode").cloned().unwrap_or_else(|| "test".to_string()),
+        system_compliance_mode: map.get("system_compliance_mode").cloned().unwrap_or_else(|| "test".to_string()),
         audit_log_retention_days: map.get("audit_log_retention_days").cloned().unwrap_or_else(|| "730".to_string()),
         report_retention_days: map.get("report_retention_days").cloned().unwrap_or_else(|| "0".to_string()),
         notification_retention_days: map.get("notification_retention_days").cloned().unwrap_or_else(|| "30".to_string()),
@@ -161,6 +168,7 @@ pub async fn settings(
 pub async fn settings_save(
     auth: AuthSession,
     Extension(pool): Extension<SqlitePool>,
+    Extension(sync_tx): Extension<tokio::sync::mpsc::Sender<()>>,
     RawForm(raw_form): RawForm,
 ) -> impl IntoResponse {
     if let Some(redir) = auth::authorize(&auth.role, UserRole::Admin) {
@@ -232,11 +240,23 @@ pub async fn settings_save(
         _ => return Redirect::to("/settings?error_message=Container+retention+must+be+0+(forever)+or+1-10000+days").into_response(),
     };
 
+    // Compliance modes — validated to their allowed values; anything else → "test".
+    let policy_mode = match form_data.get("policy_compliance_mode").and_then(|v| v.first()).map(String::as_str) {
+        Some("system") => "system",
+        _ => "test",
+    };
+    let system_mode = match form_data.get("system_compliance_mode").and_then(|v| v.first()).map(String::as_str) {
+        Some("policy") => "policy",
+        _ => "test",
+    };
+
     let mut updates: Vec<(&str, String)> = vec![
         ("offline_threshold",            threshold.to_string()),
         ("auto_prune_inactive",          auto_prune.to_string()),
         ("compliance_sat",               sat.to_string()),
         ("compliance_marginal",          marginal.to_string()),
+        ("policy_compliance_mode",       policy_mode.to_string()),
+        ("system_compliance_mode",       system_mode.to_string()),
         ("audit_log_retention_days",     audit_keep.to_string()),
         ("report_retention_days",        report_keep.to_string()),
         ("notification_retention_days",  notify_keep.to_string()),
@@ -305,6 +325,11 @@ pub async fn settings_save(
             return Redirect::to(&format!("/settings?error_message={}", encoded)).into_response();
         }
     }
+
+    // Recompute stored compliance aggregates — the policy/system compliance
+    // toggles (and the SAT/MARGINAL thresholds) change how dashboard / list
+    // scores are derived, so signal the sync worker to recalculate.
+    let _ = sync_tx.try_send(());
 
     info!("Settings updated by '{}'.", auth.username);
     Redirect::to("/settings?success_message=Settings+saved+successfully").into_response()

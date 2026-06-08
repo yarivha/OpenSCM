@@ -360,11 +360,12 @@ pub async fn reports_view(
     let total_fail:     usize = system_reports.iter().map(|s| s.fail_count).sum();
     let total_na:       usize = system_reports.iter().map(|s| s.na_count).sum();
     let total_excluded: usize = system_reports.iter().map(|s| s.excluded_count).sum();
-    let in_scope = system_reports.iter().filter(|s| s.pass_count > 0 || s.fail_count > 0).count();
-    let compliance_score: f64 = if in_scope == 0 { -1.0 } else {
-        let compliant = system_reports.iter().filter(|s| s.fail_count == 0 && s.pass_count > 0).count();
-        (compliant as f64 / in_scope as f64) * 100.0
-    };
+    // Mode-aware (0.6.5): honour the per-tenant POLICY compliance toggle.
+    // Archived reports recompute the % on view from their frozen per-system
+    // results, so flipping the setting changes this number too.
+    let pmode = crate::policies::read_compliance_mode(&pool, &auth.tenant_id, "policy_compliance_mode").await;
+    let units: Vec<(usize, usize)> = system_reports.iter().map(|s| (s.pass_count, s.fail_count)).collect();
+    let compliance_score = crate::policies::compliance_pct(pmode == "system", &units);
 
     // Compliance thresholds — same source as live policy report / system report.
     let compliance_sat: i64 = sqlx::query_scalar(
@@ -1243,7 +1244,7 @@ pub async fn system_reports_view(
         }
     };
 
-    let report_data: SystemReportData = match serde_json::from_str(
+    let mut report_data: SystemReportData = match serde_json::from_str(
         row.report_data.as_deref().unwrap_or("{}"),
     ) {
         Ok(d) => d,
@@ -1252,6 +1253,16 @@ pub async fn system_reports_view(
             return StatusCode::INTERNAL_SERVER_ERROR.into_response();
         }
     };
+
+    // Re-derive the headline score from the snapshot's frozen policy groups
+    // under the CURRENT system compliance mode, so flipping the toggle reflects
+    // in saved system reports too (matches saved policy reports).
+    {
+        let smode = crate::policies::read_compliance_mode(&pool, &auth.tenant_id, "system_compliance_mode").await;
+        let units: Vec<(usize, usize)> = report_data.policy_groups.iter()
+            .map(|p| (p.pass_count, p.fail_count)).collect();
+        report_data.compliance_score = crate::policies::compliance_pct(smode == "policy", &units);
+    }
 
     let compliance_sat: i64 = sqlx::query_scalar(
         "SELECT CAST(value AS INTEGER) FROM settings WHERE tenant_id = ? AND skey = 'compliance_sat'"

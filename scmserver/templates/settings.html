@@ -192,6 +192,77 @@
 
           <!-- Compliance Tab -->
           <div class="tab-pane fade" id="compliance" role="tabpanel">
+
+            <div class="row">
+              {# Policy compliance: Per test vs Per system #}
+              <div class="col-md-6">
+                <div class="card card-primary card-outline h-100">
+                  <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-shield-alt mr-1"></i> Policy Compliance</h3>
+                  </div>
+                  <div class="card-body">
+                    <small class="text-muted d-block mb-2">How a <strong>policy's</strong> score is calculated.</small>
+                    <div class="custom-control custom-radio mb-2">
+                      <input type="radio" id="pmode_test" name="policy_compliance_mode" value="test"
+                             class="custom-control-input"
+                             {% if settings.policy_compliance_mode != "system" %}checked{% endif %}>
+                      <label class="custom-control-label" for="pmode_test">
+                        <strong>Per test</strong>
+                        <small class="d-block text-muted">% of all checks passing across the policy's systems.</small>
+                      </label>
+                    </div>
+                    <div class="custom-control custom-radio">
+                      <input type="radio" id="pmode_system" name="policy_compliance_mode" value="system"
+                             class="custom-control-input"
+                             {% if settings.policy_compliance_mode == "system" %}checked{% endif %}>
+                      <label class="custom-control-label" for="pmode_system">
+                        <strong>Per system</strong>
+                        <small class="d-block text-muted">% of systems that <em>fully</em> comply (all tests pass).</small>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              {# System compliance: Per test vs Per policy #}
+              <div class="col-md-6">
+                <div class="card card-primary card-outline h-100">
+                  <div class="card-header">
+                    <h3 class="card-title"><i class="fas fa-server mr-1"></i> System Compliance</h3>
+                  </div>
+                  <div class="card-body">
+                    <small class="text-muted d-block mb-2">How a <strong>system's</strong> score is calculated.</small>
+                    <div class="custom-control custom-radio mb-2">
+                      <input type="radio" id="smode_test" name="system_compliance_mode" value="test"
+                             class="custom-control-input"
+                             {% if settings.system_compliance_mode != "policy" %}checked{% endif %}>
+                      <label class="custom-control-label" for="smode_test">
+                        <strong>Per test</strong>
+                        <small class="d-block text-muted">% of the system's checks passing.</small>
+                      </label>
+                    </div>
+                    <div class="custom-control custom-radio">
+                      <input type="radio" id="smode_policy" name="system_compliance_mode" value="policy"
+                             class="custom-control-input"
+                             {% if settings.system_compliance_mode == "policy" %}checked{% endif %}>
+                      <label class="custom-control-label" for="smode_policy">
+                        <strong>Per policy</strong>
+                        <small class="d-block text-muted">% of the system's policies it <em>fully</em> passes (one failing policy → 0%).</small>
+                      </label>
+                    </div>
+                  </div>
+                </div>
+              </div>
+
+              <div class="col-12">
+                <small class="form-text text-muted mt-1 mb-2">
+                  <strong>Per test</strong> moves smoothly as you remediate (progress view);
+                  <strong>per system / per policy</strong> is all-or-nothing (audit view). Changing either
+                  re-derives the percentages and Pass/Fail counts on the dashboard, lists, and reports.
+                </small>
+              </div>
+            </div>
+
             <div class="row mb-3">
               <div class="col-12">
                 <div class="alert alert-info">

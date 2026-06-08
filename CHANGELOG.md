@@ -8,6 +8,26 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.6.5] - 2026-06-07
+
+### Added
+- **Two independent compliance-calculation toggles** (Settings → Compliance, per-tenant) — one for how a **policy's** score is computed and one for how a **system's** score is computed. They're separate aggregations (a policy aggregates over its *systems*; a system aggregates over its *policies*), so each gets its own choice:
+  - **Policy Compliance — Per test / Per system**
+    - *Per test* (default): `total PASS ÷ (PASS + FAIL)` across the policy's systems — moves smoothly with remediation.
+    - *Per system*: `compliant systems ÷ scanned systems`, where a system counts only if **all** its tests pass — the audit view (pre-0.6.5 behaviour).
+  - **System Compliance — Per test / Per policy**
+    - *Per test* (default): `total PASS ÷ (PASS + FAIL)` of the system's own checks.
+    - *Per policy*: `passed policies ÷ applicable policies`, where the system fully passes a policy only with no failing test — so **one assigned policy with any failing test → 0%** (your scenario), not partial test credit.
+
+  The modes genuinely diverge: a fleet where every host has one stray failing check reads **~95% per test** but **0% per system/policy**. Splitting into two toggles lets you score policies and systems differently if you want (e.g. policies per-test for remediation tracking, systems per-policy for a strict host verdict).
+  - **Applied consistently across every surface.** Policy side: `update_policy_stats` (dashboard top-5 + policy list), the live policy report, and the archived/saved policy report (view + PDF). System side: `update_system_stats` (systems list + dashboard) and the live + saved system reports (recomputed on view). Each mode is read per-tenant via a correlated settings lookup, so a mixed-mode multi-tenant fleet is handled in a single recalc statement.
+  - The dashboard "Pass/Fail" counts follow the policy mode (total PASS/FAIL tests vs compliant/failed systems). Stored in `systems_passed`/`systems_failed`; names retained for schema stability, header is the generic "Pass/Fail".
+  - Switching either toggle signals a recompute (dashboard/lists update on the next sync); reports re-derive the % on each view, so they — including archived ones — reflect the current settings immediately. **No schema change.**
+  - The per-system **COMPLIANT / NON-COMPLIANT** badge is unaffected by either toggle (a system is "compliant" only if it has no failing tests); only the *percentages* change. NA and excluded results stay out of both numerator and denominator in every mode. A shared `compliance_pct(binary, units)` helper backs all four computations; 6 unit tests pin both formulas including the divergence and single-failing-unit cases.
+  - NA and excluded results stay out of both numerator and denominator in both modes (unchanged). 5 unit tests pin the two formulas, including the divergence case.
+
+---
+
 ## [0.6.4] - 2026-06-07
 
 ### Added
