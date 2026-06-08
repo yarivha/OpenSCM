@@ -2311,6 +2311,47 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v32 → v33 complete.");
     }
 
+    // v33 → v34: backfill dual-mode history columns.
+    //
+    // v33 added the per-mode history columns with DEFAULT 0.0 but did NOT
+    // backfill them, so every snapshot recorded BEFORE the upgrade reads 0 in
+    // the new columns — collapsing the trend chart to a flat-zero line (the
+    // real values still live in the legacy systems_score / policies_score).
+    // Copy the recorded value into BOTH new mode-columns, but ONLY for those
+    // pre-upgrade rows (new col still at its 0 default AND legacy col > 0), so
+    // genuine post-upgrade snapshots are never clobbered. Idempotent: once
+    // filled the WHERE clause no longer matches.
+    if version < 34 {
+        info!("Running schema migration v33 → v34 (backfill dual-mode history)...");
+
+        sqlx::query(
+            "UPDATE compliance_history
+             SET systems_score_test = systems_score,
+                 systems_score_policy = systems_score
+             WHERE systems_score > 0
+               AND systems_score_test = 0
+               AND systems_score_policy = 0",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "UPDATE compliance_history
+             SET policies_score_test = policies_score,
+                 policies_score_system = policies_score
+             WHERE policies_score > 0
+               AND policies_score_test = 0
+               AND policies_score_system = 0",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 34")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v33 → v34 complete.");
+    }
+
     Ok(())
 }
 
