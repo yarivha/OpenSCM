@@ -44,9 +44,6 @@ pub struct LocalTest {
     pub filter: Option<String>,
     #[serde(default)]
     pub app_filter: Option<String>,
-    /// "host" (default), "container", or "both".
-    #[serde(default)]
-    pub target_type: Option<String>,
     #[serde(default)]
     pub conditions: Vec<LocalCondition>,
     #[serde(default)]
@@ -193,54 +190,43 @@ fn evaluate_test(t: &LocalTest, cmd_enabled: bool, ps_enabled: bool) -> Vec<Test
                  && !c.selement.is_empty() && c.selement != "None")
         .collect();
 
-    // Same target resolution as the agent: metadata elements are always
-    // per-container; otherwise target_type ("host" default / "container" / "both").
+    // Per-container elements (EXEC + metadata) fan out across containers;
+    // everything else runs once on the host. Mirrors the agent dispatch.
     let is_per_container = conds.iter()
         .any(|c| crate::compliance::is_per_container_element(&c.element));
-    let target = t.target_type.as_deref().unwrap_or("host");
-    let run_container = is_per_container || target == "container" || target == "both";
-    let run_host      = !is_per_container && (target == "host" || target == "both");
 
-    let mut outcomes: Vec<TestOutcome> = Vec::new();
-
-    if run_container {
+    if is_per_container {
         let containers = crate::containers::enumerate().unwrap_or_default();
         if containers.is_empty() {
-            if !run_host {
-                return vec![host_outcome(t, "NA".into())];
-            }
-        } else {
-            for container in &containers {
-                let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
-                    &c.element, &c.input, &c.selement,
-                    c.condition.as_deref().unwrap_or(""),
-                    c.sinput.as_deref().unwrap_or(""),
-                    cmd_enabled, ps_enabled,
-                    Some(container),
-                )).collect();
-                outcomes.push(TestOutcome {
-                    external_id: t.external_id.clone(),
-                    name: t.name.clone(),
-                    result: crate::compliance::combine_verdict(&results, t.filter.as_deref().unwrap_or("all")),
-                    severity: t.severity.clone(),
-                    container: Some(container.name.clone()),
-                });
-            }
+            return vec![host_outcome(t, "NA".into())];
         }
+        return containers.iter().map(|container| {
+            let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
+                &c.element, &c.input, &c.selement,
+                c.condition.as_deref().unwrap_or(""),
+                c.sinput.as_deref().unwrap_or(""),
+                cmd_enabled, ps_enabled,
+                Some(container),
+            )).collect();
+            TestOutcome {
+                external_id: t.external_id.clone(),
+                name: t.name.clone(),
+                result: crate::compliance::combine_verdict(&results, t.filter.as_deref().unwrap_or("all")),
+                severity: t.severity.clone(),
+                container: Some(container.name.clone()),
+            }
+        }).collect();
     }
 
-    if run_host {
-        let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
-            &c.element, &c.input, &c.selement,
-            c.condition.as_deref().unwrap_or(""),
-            c.sinput.as_deref().unwrap_or(""),
-            cmd_enabled, ps_enabled,
-            None,
-        )).collect();
-        outcomes.push(host_outcome(t, crate::compliance::combine_verdict(&results, t.filter.as_deref().unwrap_or("all"))));
-    }
-
-    outcomes
+    // Host-scope test — single outcome.
+    let results: Vec<EvalResult> = conds.iter().map(|c| evaluate(
+        &c.element, &c.input, &c.selement,
+        c.condition.as_deref().unwrap_or(""),
+        c.sinput.as_deref().unwrap_or(""),
+        cmd_enabled, ps_enabled,
+        None,
+    )).collect();
+    vec![host_outcome(t, crate::compliance::combine_verdict(&results, t.filter.as_deref().unwrap_or("all")))]
 }
 
 fn host_outcome(t: &LocalTest, result: String) -> TestOutcome {

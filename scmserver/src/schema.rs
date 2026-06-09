@@ -1946,7 +1946,7 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         //   HEALTH_CHECK  — per-container HEALTHCHECK defined (EXISTS/NOT EXISTS)
         for name in &[
             "CONTAINER", "IMAGE", "NETWORK", "PRIVILEGED", "RUN_USER",
-            "MOUNT", "EXPOSED_PORT", "READ_ONLY_FS", "HEALTH_CHECK",
+            "MOUNT", "EXPOSED_PORT", "READ_ONLY_FS", "HEALTH_CHECK", "EXEC",
         ] {
             sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES (?)")
                 .bind(name)
@@ -2389,19 +2389,30 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         info!("Schema migration v34 → v35 complete.");
     }
 
-    // v35 → v36: backfill the tests.target_type column.
+    // v35 → v36: seed the EXEC container element.
     //
-    // target_type ("host" | "container" | "both") shipped in the fresh-install
-    // `tests` CREATE but was never added via ALTER, so databases whose `tests`
-    // table predates it lack the column. 0.7.0 began selecting it (test list +
-    // the agent's `SELECT t.*`), which fails on those older DBs. Add it if
-    // missing; existing rows default to NULL, treated as "host".
+    // EXEC runs a command inside each container via `<runtime> exec` — the
+    // container-side counterpart to the host-only CMD element. Existing DBs
+    // need it added to the elements table so it appears in the test editor.
+    // Also drops the unused `tests.target_type` column if present: an earlier
+    // 0.7.0 design used that column before it was replaced by EXEC; the drop
+    // is harmless (and a no-op) on databases that never had it.
     if version < 36 {
-        info!("Running schema migration v35 → v36 (tests.target_type)...");
-        if !column_exists(pool, "tests", "target_type").await {
-            sqlx::query("ALTER TABLE tests ADD COLUMN target_type TEXT")
-                .execute(pool).await?;
+        info!("Running schema migration v35 → v36 (seed EXEC element)...");
+
+        sqlx::query("INSERT OR IGNORE INTO elements (name) VALUES ('EXEC')")
+            .execute(pool).await?;
+
+        if column_exists(pool, "tests", "target_type").await {
+            // DROP COLUMN needs SQLite ≥ 3.35; non-fatal if the runtime is older
+            // — the unused column is harmless, so don't block startup over it.
+            if let Err(e) = sqlx::query("ALTER TABLE tests DROP COLUMN target_type")
+                .execute(pool).await
+            {
+                info!("Could not drop unused tests.target_type (harmless, leaving it): {}", e);
+            }
         }
+
         sqlx::query("UPDATE schema_info SET version = 36")
             .execute(pool)
             .await?;

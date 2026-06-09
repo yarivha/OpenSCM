@@ -855,7 +855,7 @@ pub fn is_per_container_element(name: &str) -> bool {
     matches!(
         name.trim().to_uppercase().as_str(),
         "IMAGE" | "NETWORK" | "PRIVILEGED" | "RUN_USER" | "MOUNT"
-            | "EXPOSED_PORT" | "READ_ONLY_FS" | "HEALTH_CHECK"
+            | "EXPOSED_PORT" | "READ_ONLY_FS" | "HEALTH_CHECK" | "EXEC"
     )
 }
 
@@ -969,14 +969,12 @@ pub fn evaluate(
     let selement_l  = selement.trim().to_lowercase();
     let sinput_trim = sinput.trim();
 
-    // Inside a container, only CMD (via `<runtime> exec`) and the per-container
-    // metadata elements (IMAGE, PRIVILEGED, …) have meaning. Anything else
-    // (FILE, PACKAGE, SERVICE, USER, …) has no container semantics in this
-    // version → return NA rather than silently evaluating against the host.
-    if container.is_some()
-        && element_l != "cmd"
-        && !is_per_container_element(element)
-    {
+    // Inside a container, only the per-container elements (EXEC + the metadata
+    // elements IMAGE, PRIVILEGED, …) have meaning. Anything else (FILE, PACKAGE,
+    // CMD, SERVICE, USER, …) has no container semantics → return NA rather than
+    // silently evaluating against the host. Use EXEC to run a command inside a
+    // container.
+    if container.is_some() && !is_per_container_element(element) {
         return EvalResult::Na;
     }
 
@@ -1665,25 +1663,14 @@ pub fn evaluate(
                 );
                 return EvalResult::Na;
             }
-            // Run on the host, or INSIDE the container when a container context is
-            // present (target_type container/both): `<runtime> exec <id> sh -c …`.
-            // No-shell images (scratch/distroless) make exec fail → the command
-            // errors and the test FAILs with a clear log (design §6).
-            let run = |inp: &str| -> std::io::Result<std::process::Output> {
-                if let Some(c) = container {
-                    Command::new(&c.runtime)
-                        .args(["exec", &c.runtime_id, "sh", "-c", inp])
-                        .output()
-                } else {
-                    #[cfg(unix)]
-                    { Command::new("sh").args(["-c", inp]).output() }
-                    #[cfg(windows)]
-                    { Command::new("cmd").args(["/C", inp]).output() }
-                }
-            };
+            // CMD runs on the HOST. To run a command inside a container, use the
+            // EXEC element instead (it execs via the container runtime).
             match selement_l.as_str() {
                 "output" => {
-                    let output = run(input);
+                    #[cfg(unix)]
+                    let output = Command::new("sh").args(["-c", input]).output();
+                    #[cfg(windows)]
+                    let output = Command::new("cmd").args(["/C", input]).output();
 
                     match output {
                         Ok(o) => {
@@ -1710,7 +1697,10 @@ pub fn evaluate(
                     }
                 }
                 "exit code" => {
-                    let output = run(input);
+                    #[cfg(unix)]
+                    let output = Command::new("sh").args(["-c", input]).output();
+                    #[cfg(windows)]
+                    let output = Command::new("cmd").args(["/C", input]).output();
 
                     match output {
                         Ok(o) => {
@@ -1730,6 +1720,74 @@ pub fn evaluate(
                 }
                 _ => {
                     error!("Unsupported cmd selement: '{}'. Use 'output' or 'exit code'.", selement);
+                    EvalResult::Na
+                }
+            }
+        }
+
+        // =========================================================
+        // EXEC — run a command INSIDE a container via `<runtime> exec`.
+        // A per-container element (see is_per_container_element): the dispatcher
+        // calls this once per container with that container's context. Requires
+        // cmd_enabled (it executes arbitrary commands). No-shell images
+        // (scratch/distroless) make `exec` fail → FAIL with a clear log.
+        // =========================================================
+        "exec" => {
+            if !cmd_enabled {
+                warn!("EXEC element is disabled. Set 'cmd_enabled = true' in [client] config to enable it.");
+                return EvalResult::Na;
+            }
+            let c = match container {
+                Some(c) => c,
+                // EXEC only has meaning inside a container; never run on the host.
+                None => return EvalResult::Na,
+            };
+            let run = |inp: &str| -> std::io::Result<std::process::Output> {
+                Command::new(&c.runtime).args(["exec", &c.runtime_id, "sh", "-c", inp]).output()
+            };
+            match selement_l.as_str() {
+                "output" => {
+                    match run(input) {
+                        Ok(o) => {
+                            let stdout = String::from_utf8_lossy(&o.stdout).trim().to_string();
+                            let stderr = String::from_utf8_lossy(&o.stderr).trim().to_string();
+                            let combined = match (stdout.is_empty(), stderr.is_empty()) {
+                                (false, false) => format!("{}\n{}", stdout, stderr),
+                                (true,  false) => stderr,
+                                (_,      _   ) => stdout,
+                            };
+                            debug!("EXEC [{}] '{}' output: '{}'", c.name, input, combined);
+                            if apply_string_condition(&combined, condition, sinput_trim) {
+                                EvalResult::Pass
+                            } else {
+                                EvalResult::Fail
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to exec in container '{}': {}", c.name, e);
+                            EvalResult::Fail
+                        }
+                    }
+                }
+                "exit code" => {
+                    match run(input) {
+                        Ok(o) => {
+                            let code = o.status.code().unwrap_or(-1).to_string();
+                            debug!("EXEC [{}] '{}' exit_code: {}", c.name, input, code);
+                            if apply_string_condition(&code, condition, sinput_trim) {
+                                EvalResult::Pass
+                            } else {
+                                EvalResult::Fail
+                            }
+                        }
+                        Err(e) => {
+                            error!("Failed to exec in container '{}': {}", c.name, e);
+                            EvalResult::Fail
+                        }
+                    }
+                }
+                _ => {
+                    error!("Unsupported exec selement: '{}'. Use 'output' or 'exit code'.", selement);
                     EvalResult::Na
                 }
             }

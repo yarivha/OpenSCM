@@ -1754,7 +1754,7 @@ pub async fn policies_export(
     // Fetch all tests linked to this policy.
     let test_rows = match sqlx::query(
         "SELECT t.id, t.name, t.description, t.rational, t.remediation,
-                t.severity, t.filter, t.app_filter, t.target_type, t.external_id
+                t.severity, t.filter, t.app_filter, t.external_id
          FROM tests t
          JOIN tests_in_policy tip ON t.id = tip.test_id
          WHERE tip.policy_id = ? AND tip.tenant_id = ?
@@ -1817,7 +1817,6 @@ pub async fn policies_export(
             severity:    t.try_get::<Option<String>, _>("severity").unwrap_or(None),
             filter:      t.try_get::<Option<String>, _>("filter").unwrap_or(None),
             app_filter:  t.try_get::<Option<String>, _>("app_filter").unwrap_or(None),
-            target_type: t.try_get::<Option<String>, _>("target_type").unwrap_or(None),
             conditions,
             applicability,
         });
@@ -1999,22 +1998,14 @@ pub async fn apply_policy_import(
                 .unwrap_or(None)
         } else { None };
 
-        // Normalize target_type to the known set; anything else (incl. older
-        // exports that lack the field) maps to "host".
-        let target_type = match test.target_type.as_deref() {
-            Some("container") => "container",
-            Some("both")      => "both",
-            _                 => "host",
-        };
-
         let test_id: i64 = if let Some(tid) = existing_test_id {
             sqlx::query(
                 "UPDATE tests SET name = ?, description = ?, rational = ?, remediation = ?,
-                                  severity = ?, filter = ?, app_filter = ?, target_type = ?
+                                  severity = ?, filter = ?, app_filter = ?
                  WHERE id = ? AND tenant_id = ?",
             )
             .bind(&test.name).bind(&test.description).bind(&test.rational).bind(&test.remediation)
-            .bind(&test.severity).bind(&test.filter).bind(&test.app_filter).bind(target_type)
+            .bind(&test.severity).bind(&test.filter).bind(&test.app_filter)
             .bind(tid).bind(tenant_id)
             .execute(&mut *tx).await
             .map_err(|e| format!("Test update failed: {}", e))?;
@@ -2028,11 +2019,11 @@ pub async fn apply_policy_import(
             let new_xid = test.external_id.clone()
                 .unwrap_or_else(crate::schema::generate_external_id);
             sqlx::query(
-                "INSERT INTO tests (tenant_id, name, description, rational, remediation, severity, filter, app_filter, target_type, external_id)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)",
+                "INSERT INTO tests (tenant_id, name, description, rational, remediation, severity, filter, app_filter, external_id)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)",
             )
             .bind(tenant_id).bind(&test.name).bind(&test.description).bind(&test.rational)
-            .bind(&test.remediation).bind(&test.severity).bind(&test.filter).bind(&test.app_filter).bind(target_type)
+            .bind(&test.remediation).bind(&test.severity).bind(&test.filter).bind(&test.app_filter)
             .bind(&new_xid)
             .execute(&mut *tx).await
             .map_err(|e| format!("Test insert failed: {}", e))?;

@@ -90,27 +90,39 @@ async fn container_results_do_not_distort_host_scores() {
 }
 
 #[tokio::test]
-async fn migration_adds_missing_tests_target_type() {
-    // Reproduce the 0.7.0 upgrade bug: a database whose `tests` table predates
-    // target_type, stamped at schema v35. run_migrations (v36) must add it.
+async fn fresh_install_seeds_exec_element_and_categorizes_it() {
+    // A freshly initialized DB must have EXEC in the elements table (so it shows
+    // in the test editor's Container optgroup).
+    let pool = fresh_pool().await;
+    let c: i64 = sqlx::query("SELECT COUNT(*) AS c FROM elements WHERE name = 'EXEC'")
+        .fetch_one(&pool).await.unwrap().get("c");
+    assert_eq!(c, 1, "fresh install should seed the EXEC element");
+    // And the server categorizes it as a container element (Container optgroup).
+    assert!(scmserver::tests::is_container_element("EXEC"), "EXEC must be a container element");
+}
+
+#[tokio::test]
+async fn migration_v36_seeds_exec_and_drops_orphan_target_type() {
+    // Simulate a DB at v35 that somehow carries an orphan tests.target_type
+    // column (from an earlier 0.7.0 design). v36 must seed EXEC and drop it.
     let pool = SqlitePoolOptions::new().max_connections(1)
         .connect("sqlite::memory:").await.unwrap();
     sqlx::query("CREATE TABLE schema_info (id INTEGER PRIMARY KEY, version INTEGER)")
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO schema_info (id, version) VALUES (1, 35)")
         .execute(&pool).await.unwrap();
-    sqlx::query("CREATE TABLE tests (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, name TEXT NOT NULL)")
+    sqlx::query("CREATE TABLE elements (id INTEGER PRIMARY KEY AUTOINCREMENT, name TEXT UNIQUE)")
         .execute(&pool).await.unwrap();
-
-    // Pre-condition: the column is absent.
-    assert!(sqlx::query("SELECT target_type FROM tests").fetch_all(&pool).await.is_err(),
-        "target_type should be absent before migration");
+    sqlx::query("CREATE TABLE tests (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, name TEXT NOT NULL, target_type TEXT)")
+        .execute(&pool).await.unwrap();
 
     scmserver::schema::run_migrations(&pool).await.expect("migrations");
 
-    // Post-condition: v36 added it and selecting it succeeds.
-    sqlx::query("SELECT target_type FROM tests").fetch_all(&pool).await
-        .expect("target_type column should exist after migration");
+    let exec: i64 = sqlx::query("SELECT COUNT(*) AS c FROM elements WHERE name = 'EXEC'")
+        .fetch_one(&pool).await.unwrap().get("c");
+    assert_eq!(exec, 1, "EXEC element should be seeded by v36");
+    assert!(sqlx::query("SELECT target_type FROM tests").fetch_all(&pool).await.is_err(),
+        "orphan tests.target_type column should be dropped");
     let v: i64 = sqlx::query("SELECT version FROM schema_info")
         .fetch_one(&pool).await.unwrap().get("version");
     assert!(v >= 36, "schema version should advance to >= 36, got {v}");

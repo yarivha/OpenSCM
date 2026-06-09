@@ -269,10 +269,14 @@ pub async fn systems(
         "{}".to_string()
     } else {
         let placeholders = std::iter::repeat("?").take(host_ids.len()).collect::<Vec<_>>().join(",");
+        // Only columns the list/modal actually use. Deliberately excludes the
+        // v35 `compliance_score` column (not rendered here) so a database that
+        // hasn't reached v35 still returns its inventory rather than silently
+        // dropping every container when the SELECT fails.
         let sql = format!(
             "SELECT id, host_system_id, runtime, runtime_id, name, image, image_digest, status, ip,
                     is_privileged, run_user, network_mode, exposed_ports, mounts, capabilities_add,
-                    read_only_fs, restart_policy, health_check, compliance_score, first_seen, last_seen
+                    read_only_fs, restart_policy, health_check, first_seen, last_seen
              FROM containers
              WHERE tenant_id = ? AND host_system_id IN ({})
              ORDER BY host_system_id, name",
@@ -280,14 +284,20 @@ pub async fn systems(
         );
         let mut q = sqlx::query(&sql).bind(&auth.tenant_id);
         for id in &host_ids { q = q.bind(id); }
-        let rows = q.fetch_all(&pool).await.unwrap_or_default();
+        let rows = match q.fetch_all(&pool).await {
+            Ok(r) => r,
+            Err(e) => {
+                // Don't silently hide the inventory — surface the cause.
+                error!("Failed to load container inventory for systems list: {}", e);
+                Vec::new()
+            }
+        };
         let mut map: std::collections::BTreeMap<i32, Vec<serde_json::Value>> = std::collections::BTreeMap::new();
         for row in rows {
             let host_id: i32 = row.try_get("host_system_id").unwrap_or(0);
             map.entry(host_id).or_default().push(serde_json::json!({
                 "id":               row.try_get::<i64, _>("id").ok(),
                 "host_system_id":   host_id,
-                "compliance_score": row.try_get::<Option<f64>, _>("compliance_score").ok().flatten(),
                 "runtime":          row.try_get::<String, _>("runtime").ok(),
                 "runtime_id":       row.try_get::<String, _>("runtime_id").ok(),
                 "name":             row.try_get::<String, _>("name").ok(),
