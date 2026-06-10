@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.1] - 2026-06-09
+
 ### Fixed
 - **Database errors in report/list sub-queries are no longer silently swallowed.** Eight query sites used `unwrap_or_default()` on a fetch, so a DB error (e.g. a missing column on a partially-migrated database) rendered an empty section with no trace — the same failure class that hid the 0.7.0 Systems-page container-list bug. They now log the error and degrade to the same empty fallback: test add/edit condition lists, the Systems-page agent-package lookup, per-system and container-detail container results, and the container attach in live/PDF policy reports and saved snapshots.
 
