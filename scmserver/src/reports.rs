@@ -213,7 +213,11 @@ pub async fn save_policy_report_logic(
 
     // Freeze per-container results into the snapshot too (nested under each host).
     let mut container_map = crate::policies::fetch_policy_container_groups(pool, tenant_id, id)
-        .await.unwrap_or_default();
+        .await
+        .unwrap_or_else(|e| {
+            error!("Failed to fetch container results for policy snapshot {}: {}", id, e);
+            Default::default()
+        });
     for (name, entry) in reports_map.iter_mut() {
         entry.containers = container_map.remove(name).unwrap_or_default();
     }

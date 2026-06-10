@@ -1100,7 +1100,11 @@ pub async fn policies_report(
     // Per-container results nested under their host (separate axis). Empty for
     // hosts with no container tests; a DB hiccup degrades to host-only rendering.
     let mut container_map = fetch_policy_container_groups(&pool, &auth.tenant_id, id as i64)
-        .await.unwrap_or_default();
+        .await
+        .unwrap_or_else(|e| {
+            error!("Failed to fetch container results for policy {}: {}", id, e);
+            Default::default()
+        });
 
     // Excluded findings count as NA: removed from both numerator and denominator.
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {
@@ -1376,7 +1380,11 @@ async fn fetch_live_policy_report_data(
     }
 
     let mut container_map = fetch_policy_container_groups(pool, tenant_id, id)
-        .await.unwrap_or_default();
+        .await
+        .unwrap_or_else(|e| {
+            error!("Failed to fetch container results for policy {}: {}", id, e);
+            Default::default()
+        });
 
     // Excluded findings count as NA in pass/fail tallies.
     let system_reports: Vec<SystemReport> = system_map.into_iter().map(|(name, results)| {

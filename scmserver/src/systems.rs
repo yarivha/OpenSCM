@@ -156,12 +156,13 @@ pub async fn systems(
     };
 
     // Fetch all agent packages once for upgrade-availability annotation.
+    // On a DB error, log it and degrade to no upgrade badges.
     let agent_pkgs: HashMap<String, AgentPackage> = sqlx::query_as::<_, AgentPackage>(
         "SELECT platform, version, sha256, url FROM agent_packages",
     )
     .fetch_all(&pool)
     .await
-    .unwrap_or_default()
+    .unwrap_or_else(|e| { error!("Failed to fetch agent packages: {}", e); Vec::new() })
     .into_iter()
     .map(|p| (p.platform.clone(), p))
     .collect();
@@ -1108,7 +1109,11 @@ pub async fn fetch_system_report_data(
         WHERE r.tenant_id = ? AND r.system_id = ? AND r.container_id > 0
         ORDER BY c.name, t.name
     "#)
-    .bind(tenant_id).bind(system_id).fetch_all(pool).await.unwrap_or_default();
+    .bind(tenant_id).bind(system_id).fetch_all(pool).await
+    .unwrap_or_else(|e| {
+        error!("Failed to fetch container results for system {}: {}", system_id, e);
+        Vec::new()
+    });
     let containers = crate::policies::assemble_container_groups(container_rows)
         .into_values().next().unwrap_or_default();
 
@@ -1248,7 +1253,11 @@ pub async fn container_detail(
         ORDER BY t.name
     "#)
     .bind(container_id).bind(&auth.tenant_id)
-    .fetch_all(&*pool).await.unwrap_or_default();
+    .fetch_all(&*pool).await
+    .unwrap_or_else(|e| {
+        error!("Failed to fetch results for container {}: {}", container_id, e);
+        Vec::new()
+    });
 
     let results: Vec<IndividualResult> = result_rows.iter().map(|rr| IndividualResult {
         test_name: rr.get("test_name"),

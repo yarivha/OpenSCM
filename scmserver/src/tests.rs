@@ -490,7 +490,8 @@ pub async fn tests_edit(
         }
     };
 
-    // Fetch test conditions (type='condition')
+    // Fetch test conditions (type='condition'). On a DB error, log it and
+    // degrade to an empty list rather than silently hiding the failure.
     let test_conds = sqlx::query_as::<_, TestCondition>(
         "SELECT id, tenant_id, test_id, `type`, element, input, selement, condition, sinput
          FROM test_conditions
@@ -498,7 +499,8 @@ pub async fn tests_edit(
          ORDER BY id ASC LIMIT 10",
     )
     .bind(id).bind(&auth.tenant_id)
-    .fetch_all(&*pool).await.unwrap_or_default();
+    .fetch_all(&*pool).await
+    .unwrap_or_else(|e| { error!("Failed to fetch conditions for test {}: {}", id, e); Vec::new() });
 
     // Fetch applicability conditions
     let app_conditions = sqlx::query_as::<_, TestCondition>(
@@ -508,7 +510,8 @@ pub async fn tests_edit(
          ORDER BY id ASC LIMIT 3",
     )
     .bind(id).bind(&auth.tenant_id)
-    .fetch_all(&*pool).await.unwrap_or_default();
+    .fetch_all(&*pool).await
+    .unwrap_or_else(|e| { error!("Failed to fetch applicability for test {}: {}", id, e); Vec::new() });
 
     let mut context = Context::new();
     match fetch_lookup_tables(&*pool).await {
