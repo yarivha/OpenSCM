@@ -330,7 +330,7 @@ async fn update_policy_stats(
             -- scored result for this policy's tests on an in-scope system. Used as
             -- the headline fallback for pure-container policies. -1.0 when none.
             score_container = (
-                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0 ELSE AVG(c.compliance_score) END
+                SELECT CASE WHEN COUNT(*) = 0 THEN -1.0 ELSE ROUND(AVG(c.compliance_score), 2) END
                 FROM containers c
                 WHERE c.tenant_id = policies.tenant_id
                   AND c.compliance_score >= 0
@@ -401,7 +401,7 @@ async fn update_container_stats(
             ),
             compliance_score = (
                 SELECT CASE WHEN COUNT(*) = 0 THEN -1.0
-                ELSE (CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100
+                ELSE ROUND((CAST(SUM(CASE WHEN r.result = 'PASS' THEN 1 ELSE 0 END) AS REAL) / COUNT(*)) * 100, 2)
                 END
                 FROM results r
                 WHERE r.container_id = containers.id

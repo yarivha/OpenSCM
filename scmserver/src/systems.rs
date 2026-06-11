@@ -1316,7 +1316,9 @@ pub async fn container_detail(
         "read_only_fs":   opt_i("read_only_fs"),
         "restart_policy": row.get::<Option<String>, _>("restart_policy"),
         "health_check":   opt_i("health_check"),
-        "compliance_score": row.try_get::<f64, _>("compliance_score").unwrap_or(-1.0),
+        // Round defensively: values stored before the ROUND-at-source fix
+        // (or by an older binary) may carry full float precision.
+        "compliance_score": (row.try_get::<f64, _>("compliance_score").unwrap_or(-1.0) * 100.0).round() / 100.0,
         "first_seen":     row.get::<Option<String>, _>("first_seen"),
         "last_seen":      row.get::<Option<String>, _>("last_seen"),
         "pass_count":     pass,

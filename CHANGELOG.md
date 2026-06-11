@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Fixed
+- **Container compliance percentages are now rounded to 2 decimals.** The stored per-container score and the policy-level container axis (`policies.score_container`) were written as raw SQL division results, so the report badges and the container detail page showed values like `66.66666666666667%`. Both are now `ROUND(…, 2)` at the source; existing stored values are rewritten on the first recalculation after upgrade.
+
 ---
 
 ## [0.7.2] - 2026-06-09

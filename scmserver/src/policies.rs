@@ -1232,7 +1232,10 @@ pub(crate) fn assemble_container_groups(
                 name: row.get::<Option<String>, _>("container_name").unwrap_or_default(),
                 runtime: row.get::<Option<String>, _>("runtime").unwrap_or_default(),
                 image: row.try_get("image").ok().flatten(),
-                compliance_score: row.try_get("cscore").unwrap_or(-1.0),
+                // Round defensively: values stored before the ROUND-at-source
+                // fix may carry full float precision, and saved snapshots
+                // freeze whatever is rendered here.
+                compliance_score: (row.try_get::<f64, _>("cscore").unwrap_or(-1.0) * 100.0).round() / 100.0,
                 pass_count: 0, fail_count: 0, na_count: 0,
                 results: Vec::new(),
             }

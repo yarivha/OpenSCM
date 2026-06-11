@@ -44,24 +44,25 @@ async fn container_results_do_not_distort_host_scores() {
     // One active host, two tests, one container on that host.
     sqlx::query("INSERT INTO systems (id, tenant_id, name, status) VALUES (1,'default','host1','active')")
         .execute(&pool).await.unwrap();
-    sqlx::query("INSERT INTO tests (id, tenant_id, name) VALUES (1,'default','t-host'),(2,'default','t-both')")
+    sqlx::query("INSERT INTO tests (id, tenant_id, name) VALUES (1,'default','t-host'),(2,'default','t-both'),(3,'default','t-cont')")
         .execute(&pool).await.unwrap();
     sqlx::query("INSERT INTO containers (id, tenant_id, host_system_id, runtime, runtime_id, name)
                  VALUES (1,'default',1,'docker','abc123','nginx')")
         .execute(&pool).await.unwrap();
     // Wire the system+tests through a group→policy so results survive the
     // ghost-result purge that runs at the start of every recalc.
-    wire_policy(&pool, &[1, 2]).await;
+    wire_policy(&pool, &[1, 2, 3]).await;
 
     // Host axis: t1 PASS, t2 FAIL  → 1/2 = 50%.
-    // Container axis: t1 PASS, t2 PASS → 2/2 = 100%.
-    // If the axes were NOT separated the host would see 3 PASS / 1 FAIL = 75%.
+    // Container axis: t1 PASS, t2 PASS, t3 FAIL → 2/3 = 66.67% (rounded).
+    // If the axes were NOT separated the host would see 3 PASS / 2 FAIL = 60%.
     sqlx::query(
         "INSERT INTO results (tenant_id, system_id, test_id, container_id, result) VALUES
             ('default',1,1,0,'PASS'),
             ('default',1,2,0,'FAIL'),
             ('default',1,1,1,'PASS'),
-            ('default',1,2,1,'PASS')",
+            ('default',1,2,1,'PASS'),
+            ('default',1,3,1,'FAIL')",
     ).execute(&pool).await.unwrap();
 
     scmserver::scheduler::recalculate_current_compliance(&pool).await.expect("recalc");
@@ -78,15 +79,17 @@ async fn container_results_do_not_distort_host_scores() {
     assert!((t2 - 0.0).abs() < 1e-6,
         "test 2 compliance should be 0 (host FAIL only); container PASS leaked in → got {t2}");
 
-    // Container axis = the container's own results → 100, 2 pass / 0 fail.
+    // Container axis = the container's own results → 2 pass / 1 fail, and the
+    // stored score is ROUNDed to 2 decimals (66.67, not 66.66666666666667).
     let crow = sqlx::query("SELECT compliance_score, tests_passed, tests_failed FROM containers WHERE id=1")
         .fetch_one(&pool).await.unwrap();
     let c_score: f64 = crow.get("compliance_score");
     let c_pass: i64 = crow.get("tests_passed");
     let c_fail: i64 = crow.get("tests_failed");
-    assert!((c_score - 100.0).abs() < 1e-6, "container score should be 100, got {c_score}");
+    assert!((c_score - 66.67).abs() < 1e-9,
+        "container score should be rounded to 66.67, got {c_score}");
     assert_eq!(c_pass, 2, "container tests_passed");
-    assert_eq!(c_fail, 0, "container tests_failed");
+    assert_eq!(c_fail, 1, "container tests_failed");
 }
 
 #[tokio::test]
