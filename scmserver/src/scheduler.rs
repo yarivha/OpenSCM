@@ -1043,7 +1043,7 @@ async fn prune_containers(pool: &SqlitePool) {
 // hits the lookup index / a range scan). One retention.* audit row per
 // tenant per table whose data was trimmed.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn prune_trends(pool: &SqlitePool) {
+pub async fn prune_trends(pool: &SqlitePool) {
     // (skey, table, audit action) — both passes share the loop body.
     let passes: [(&str, &str, &str); 2] = [
         ("entity_trend_retention_days", "entity_compliance_history", "retention.entity_trends_pruned"),

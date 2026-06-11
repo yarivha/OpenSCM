@@ -115,6 +115,10 @@ async fn migration_v36_seeds_exec_and_drops_orphan_target_type() {
         .execute(&pool).await.unwrap();
     sqlx::query("CREATE TABLE tests (id INTEGER PRIMARY KEY AUTOINCREMENT, tenant_id TEXT, name TEXT NOT NULL, target_type TEXT)")
         .execute(&pool).await.unwrap();
+    // Later migration blocks (v37 trend settings) touch the settings table,
+    // which every real v36 database has — give the fixture one too.
+    sqlx::query("CREATE TABLE settings (tenant_id TEXT, skey TEXT, value TEXT, description TEXT, PRIMARY KEY (tenant_id, skey))")
+        .execute(&pool).await.unwrap();
 
     scmserver::schema::run_migrations(&pool).await.expect("migrations");
 

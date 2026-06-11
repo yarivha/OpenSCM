@@ -8,6 +8,14 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.7.2] - 2026-06-09
+
+### Added
+- **Per-system and per-policy compliance trends.** The system and policy live report pages gain a **Compliance Trend** chart showing the entity's hourly history (design: `docs/design/0.7.2-entity-trends.md`). A new `entity_compliance_history` table records one snapshot per scanned system and policy every hour, carrying **both** compliance axes — so flipping a Per-test / Per-system / Per-policy toggle re-renders the whole line with no artificial step (the 0.6.6 dual-mode approach). Not-scanned entities are skipped (gaps render as gaps); tooltips show each snapshot's pass/fail tallies; the card hides until 2+ points exist. **Schema v36 → v37.**
+- **Two trend retention settings** (Settings → General): **System/Policy Trend Retention** (default 90 days — high-volume, per-entity hourly rows) and **Compliance Trend Retention** (default 365 days), both pruned in the daily retention pass with `retention.*` audit rows, `0` = keep forever. Note: the fleet-wide dashboard trend (`compliance_history`) was previously kept forever — existing installs start trimming it to 365 days on upgrade; set `0` to restore the old behaviour.
+
+---
+
 ## [0.7.1] - 2026-06-09
 
 ### Fixed
