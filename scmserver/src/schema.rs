@@ -565,6 +565,38 @@ async fn create_tables(pool: &SqlitePool) -> Result<(), sqlx::Error> {
     .execute(pool)
     .await?;
 
+    // Per-entity compliance history — hourly snapshots per system and per
+    // policy, powering the trend charts on the live report pages (design:
+    // 0.7.2-entity-trends.md). Both compliance axes are stored per row so a
+    // mode-toggle flip re-renders the whole history: a system's score_strict
+    // is its per-policy axis, a policy's is its per-system axis. entity_id is
+    // deliberately NOT a foreign key — history must not block entity deletion
+    // (delete handlers clean up; retention reaps the rest).
+    sqlx::query(
+        "CREATE TABLE IF NOT EXISTS entity_compliance_history (
+            id INTEGER PRIMARY KEY AUTOINCREMENT,
+            tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+            entity_type TEXT NOT NULL,
+            entity_id INTEGER NOT NULL,
+            check_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+            score_test REAL,
+            score_strict REAL,
+            tests_passed INTEGER,
+            tests_failed INTEGER,
+            FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+        )",
+    )
+    .execute(pool)
+    .await?;
+    // Covers the chart query (tenant, type, id, ordered by date) and makes
+    // the retention prune (check_date < cutoff) a range scan.
+    sqlx::query(
+        "CREATE INDEX IF NOT EXISTS idx_entity_history_lookup
+         ON entity_compliance_history (tenant_id, entity_type, entity_id, check_date)",
+    )
+    .execute(pool)
+    .await?;
+
     // Elements Table
     sqlx::query(
         "CREATE TABLE IF NOT EXISTS elements (
@@ -745,7 +777,9 @@ async fn seed_lookup_data(pool: &SqlitePool) -> Result<(), sqlx::Error> {
         ('default', 'audit_log_retention_days', '730', 'Days to keep audit_log rows before auto-pruning (0 = keep forever)'),
         ('default', 'report_retention_days', '0', 'Days to keep saved policy/system report snapshots before auto-pruning (0 = keep forever)'),
         ('default', 'notification_retention_days', '30', 'Days to keep bell-icon notifications before auto-pruning (0 = keep forever)'),
-        ('default', 'container_retention_days', '7', 'Days to keep container inventory rows after last_seen before auto-pruning (0 = keep forever)')"
+        ('default', 'container_retention_days', '7', 'Days to keep container inventory rows after last_seen before auto-pruning (0 = keep forever)'),
+        ('default', 'entity_trend_retention_days', '90', 'Days to keep per-system/per-policy trend snapshots before auto-pruning (0 = keep forever)'),
+        ('default', 'fleet_trend_retention_days', '365', 'Days to keep fleet-wide compliance trend snapshots before auto-pruning (0 = keep forever)')"
     )
     .execute(pool)
     .await?;
@@ -2417,6 +2451,54 @@ pub async fn run_migrations(pool: &SqlitePool) -> Result<(), sqlx::Error> {
             .execute(pool)
             .await?;
         info!("Schema migration v35 → v36 complete.");
+    }
+
+    // v36 → v37: per-entity compliance trend history (0.7.2).
+    //
+    // Hourly snapshots per system and per policy (both compliance axes per
+    // row — see the fresh-install CREATE for column semantics), powering the
+    // trend charts on the live report pages. Also seeds the two trend
+    // retention settings; fleet_trend_retention_days brings the existing
+    // compliance_history table under retention for the first time (was
+    // keep-forever; set 0 to restore that).
+    if version < 37 {
+        info!("Running schema migration v36 → v37 (entity compliance trends)...");
+
+        sqlx::query(
+            "CREATE TABLE IF NOT EXISTS entity_compliance_history (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                tenant_id VARCHAR(191) NOT NULL DEFAULT 'default',
+                entity_type TEXT NOT NULL,
+                entity_id INTEGER NOT NULL,
+                check_date DATETIME DEFAULT CURRENT_TIMESTAMP,
+                score_test REAL,
+                score_strict REAL,
+                tests_passed INTEGER,
+                tests_failed INTEGER,
+                FOREIGN KEY (tenant_id) REFERENCES tenants (id) ON DELETE CASCADE
+            )",
+        )
+        .execute(pool)
+        .await?;
+        sqlx::query(
+            "CREATE INDEX IF NOT EXISTS idx_entity_history_lookup
+             ON entity_compliance_history (tenant_id, entity_type, entity_id, check_date)",
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query(
+            "INSERT OR IGNORE INTO settings (tenant_id, skey, value, description) VALUES
+            ('default', 'entity_trend_retention_days', '90', 'Days to keep per-system/per-policy trend snapshots before auto-pruning (0 = keep forever)'),
+            ('default', 'fleet_trend_retention_days', '365', 'Days to keep fleet-wide compliance trend snapshots before auto-pruning (0 = keep forever)')"
+        )
+        .execute(pool)
+        .await?;
+
+        sqlx::query("UPDATE schema_info SET version = 37")
+            .execute(pool)
+            .await?;
+        info!("Schema migration v36 → v37 complete.");
     }
 
     Ok(())

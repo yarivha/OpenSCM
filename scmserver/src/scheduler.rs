@@ -568,6 +568,46 @@ pub async fn record_compliance_history(pool: &SqlitePool) -> Result<(), sqlx::Er
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: record_entity_history
+// Hourly per-ENTITY compliance snapshots (design: 0.7.2-entity-trends.md).
+// One row per scanned system and per scanned policy, carrying BOTH compliance
+// axes so the report trend charts re-render the whole history when the tenant
+// flips a compliance-mode toggle (the 0.6.6 dual-mode lesson):
+//   • system → score_test + score_policy  (stored as score_strict)
+//   • policy → score_test + score_system  (stored as score_strict)
+// Reads the stored aggregates maintained by every recalc — never computes.
+// Not-scanned entities (compliance_score < 0) are skipped, not stored: a gap
+// in the chart renders as a gap. Set-based INSERTs, no per-row loop.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn record_entity_history(pool: &SqlitePool) -> Result<(), sqlx::Error> {
+    sqlx::query(
+        "INSERT INTO entity_compliance_history
+            (tenant_id, entity_type, entity_id, score_test, score_strict,
+             tests_passed, tests_failed)
+         SELECT tenant_id, 'system', id, score_test, score_policy,
+                tests_passed, tests_failed
+         FROM systems
+         WHERE status = 'active' AND compliance_score >= 0",
+    )
+    .execute(pool)
+    .await?;
+
+    sqlx::query(
+        "INSERT INTO entity_compliance_history
+            (tenant_id, entity_type, entity_id, score_test, score_strict,
+             tests_passed, tests_failed)
+         SELECT tenant_id, 'policy', id, score_test, score_system,
+                systems_passed, systems_failed
+         FROM policies
+         WHERE compliance_score >= 0",
+    )
+    .execute(pool)
+    .await?;
+
+    Ok(())
+}
+
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: start_background_scheduler
@@ -701,6 +741,12 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 } else {
                     last_snapshot_hour = current_hour;
                     info!("Hourly compliance snapshot recorded successfully.");
+                }
+                // Per-system / per-policy snapshots for the report trend
+                // charts. Non-fatal: a failure here must not skip TASK D or
+                // re-run the fleet snapshot next minute.
+                if let Err(e) = record_entity_history(&loop_pool).await {
+                    error!("Hourly entity trend snapshot failed: {}", e);
                 }
 
                 // --- TASK D: VERSION UPDATE CHECK ---
