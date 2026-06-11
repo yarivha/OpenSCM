@@ -401,6 +401,14 @@ pub async fn systems_delete(
         return Redirect::to(&format!("/systems?error_message={}", encoded)).into_response();
     }
 
+    // Trend history has no FK (deletion must never be blocked by it) — clean
+    // up explicitly; anything missed ages out via entity_trend_retention_days.
+    let _ = sqlx::query(
+        "DELETE FROM entity_compliance_history
+         WHERE tenant_id = ? AND entity_type = 'system' AND entity_id = ?")
+        .bind(&auth.tenant_id).bind(id)
+        .execute(&pool).await;
+
     let _ = sync_tx.send(()).await;
     info!("System ID {} deleted by '{}'. Compliance update signaled.", id, auth.username);
     crate::audit::record(
@@ -865,6 +873,12 @@ pub async fn systems_bulk_delete(
             error!("Bulk delete: failed for system {}: {}", id, e);
         } else {
             deleted += 1;
+            // Trend history has no FK — clean up explicitly (see systems_delete).
+            let _ = sqlx::query(
+                "DELETE FROM entity_compliance_history
+                 WHERE tenant_id = ? AND entity_type = 'system' AND entity_id = ?")
+                .bind(&auth.tenant_id).bind(id)
+                .execute(&pool).await;
         }
     }
 
@@ -1192,12 +1206,21 @@ pub async fn system_report(
     // simply fall through to plain text — no link.
     let tests_metadata = fetch_tenant_tests_metadata(&auth.tenant_id, &pool).await;
 
+    // Hourly trend for this system (mode-aware; empty → card hidden).
+    let smode = crate::policies::read_compliance_mode(&pool, &auth.tenant_id, "system_compliance_mode").await;
+    let (trend_labels, trend_scores, trend_passed, trend_failed) =
+        crate::policies::fetch_entity_trend(&pool, &auth.tenant_id, "system", id as i64, smode == "policy").await;
+
     let mut context = Context::new();
     context.insert("report", &report);
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);
     context.insert("is_smtp_configured", &crate::reports::is_smtp_configured(&pool).await);
     context.insert("tests_metadata", &tests_metadata);
+    context.insert("trend_labels", &trend_labels);
+    context.insert("trend_scores", &trend_scores);
+    context.insert("trend_passed", &trend_passed);
+    context.insert("trend_failed", &trend_failed);
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
     }

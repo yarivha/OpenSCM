@@ -804,6 +804,14 @@ pub async fn policies_delete(
         return Redirect::to(&format!("/policies?error_message={}", encoded)).into_response();
     }
 
+    // Trend history has no FK (deletion must never be blocked by it) — clean
+    // up explicitly; anything missed ages out via entity_trend_retention_days.
+    let _ = sqlx::query(
+        "DELETE FROM entity_compliance_history
+         WHERE tenant_id = ? AND entity_type = 'policy' AND entity_id = ?")
+        .bind(&auth.tenant_id).bind(id)
+        .execute(&pool).await;
+
     let _ = sync_tx.send(()).await;
     info!("Policy ID {} deleted by '{}'.", id, auth.username);
     Redirect::to("/policies").into_response()
@@ -1161,11 +1169,19 @@ pub async fn policies_report(
     )
     .bind(&auth.tenant_id).fetch_one(&*pool).await.unwrap_or(60);
 
+    // Hourly trend for this policy (mode-aware; empty → card hidden).
+    let (trend_labels, trend_scores, trend_passed, trend_failed) =
+        fetch_entity_trend(&pool, &auth.tenant_id, "policy", id as i64, pmode == "system").await;
+
     let mut context = Context::new();
     context.insert("report", &report_data);
     context.insert("fail_count", &fail_count);
     context.insert("compliance_sat", &compliance_sat);
     context.insert("compliance_marginal", &compliance_marginal);
+    context.insert("trend_labels", &trend_labels);
+    context.insert("trend_scores", &trend_scores);
+    context.insert("trend_passed", &trend_passed);
+    context.insert("trend_failed", &trend_failed);
     context.insert("is_smtp_configured", &crate::reports::is_smtp_configured(&pool).await);
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
@@ -1241,6 +1257,50 @@ pub(crate) fn assemble_container_groups(
         groups.sort_by(|a, b| a.name.cmp(&b.name));
         (sys, groups)
     }).collect()
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: fetch_entity_trend
+// Hourly trend points for one system or policy, for the report-page chart
+// (0.7.2). Mode-aware: `strict` selects the all-or-nothing axis
+// (score_strict) instead of per-test, mirroring the dashboard's column pick —
+// so flipping a compliance-mode toggle re-renders the whole line, no jump.
+// Not-scanned snapshots (score < 0 on the chosen axis) are filtered out.
+// Returns (labels, scores, tests_passed, tests_failed), oldest first.
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) async fn fetch_entity_trend(
+    pool: &SqlitePool,
+    tenant_id: &str,
+    entity_type: &str,
+    entity_id: i64,
+    strict: bool,
+) -> (Vec<String>, Vec<f64>, Vec<i64>, Vec<i64>) {
+    let col = if strict { "score_strict" } else { "score_test" };
+    let rows = sqlx::query(&format!(
+        "SELECT strftime('%m-%d %H:00', check_date) AS label,
+                {col} AS score, tests_passed, tests_failed
+         FROM entity_compliance_history
+         WHERE tenant_id = ? AND entity_type = ? AND entity_id = ?
+           AND {col} >= 0
+         ORDER BY check_date ASC"))
+    .bind(tenant_id).bind(entity_type).bind(entity_id)
+    .fetch_all(pool).await
+    .unwrap_or_else(|e| {
+        error!("Failed to fetch trend for {} {}: {}", entity_type, entity_id, e);
+        Vec::new()
+    });
+
+    let mut labels = Vec::with_capacity(rows.len());
+    let mut scores = Vec::with_capacity(rows.len());
+    let mut passed = Vec::with_capacity(rows.len());
+    let mut failed = Vec::with_capacity(rows.len());
+    for r in rows {
+        labels.push(r.get::<String, _>("label"));
+        scores.push((r.get::<f64, _>("score") * 100.0).round() / 100.0);
+        passed.push(r.try_get::<i64, _>("tests_passed").unwrap_or(0));
+        failed.push(r.try_get::<i64, _>("tests_failed").unwrap_or(0));
+    }
+    (labels, scores, passed, failed)
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

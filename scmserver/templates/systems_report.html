@@ -155,6 +155,20 @@
         </div>
       </div>
 
+      {# Compliance trend — hourly per-system snapshots; hidden until 2+ points #}
+      {% if trend_labels | length > 1 %}
+      <div class="card card-outline card-primary shadow-sm">
+        <div class="card-header">
+          <h3 class="card-title font-weight-bold"><i class="fas fa-chart-line mr-2 text-primary"></i>Compliance Trend</h3>
+        </div>
+        <div class="card-body">
+          <div class="chart">
+            <canvas id="entityTrendChart" style="min-height: 220px; height: 220px; max-height: 220px; max-width: 100%;"></canvas>
+          </div>
+        </div>
+      </div>
+      {% endif %}
+
       {% if report.policy_groups | length == 0 %}
       <div class="alert alert-info">
         <i class="fas fa-info-circle mr-1"></i>
@@ -424,6 +438,52 @@
 {% endblock %}
 
 {% block scripts %}
+{% if trend_labels | length > 1 %}
+<script>
+  // Compliance trend — hourly per-system snapshots, plotted in the tenant's
+  // current compliance mode (the handler picks the column). Tooltip carries
+  // the raw pass/fail tallies for that snapshot.
+  (function () {
+    var trendPassed = {{ trend_passed | json_encode | safe }};
+    var trendFailed = {{ trend_failed | json_encode | safe }};
+    new Chart(document.getElementById('entityTrendChart').getContext('2d'), {
+      type: 'line',
+      data: {
+        labels: {{ trend_labels | json_encode | safe }},
+        datasets: [{
+          label: 'Compliance %',
+          data: {{ trend_scores | json_encode | safe }},
+          borderColor: '#007bff',
+          backgroundColor: 'rgba(0, 123, 255, 0.05)',
+          borderWidth: 2,
+          fill: true,
+          tension: 0.3,
+          pointRadius: 2
+        }]
+      },
+      options: {
+        maintainAspectRatio: false,
+        plugins: {
+          legend: { display: false },
+          tooltip: {
+            mode: 'index',
+            intersect: false,
+            callbacks: {
+              afterLabel: function (ctx) {
+                return trendPassed[ctx.dataIndex] + ' passed / ' + trendFailed[ctx.dataIndex] + ' failed';
+              }
+            }
+          }
+        },
+        scales: {
+          y: { min: 0, max: 100, ticks: { callback: function (v) { return v + '%'; } } },
+          x: { grid: { display: false } }
+        }
+      }
+    });
+  })();
+</script>
+{% endif %}
 {% if is_editor %}
 <script>
   // Right-click on a result row → choose Exclude or Unexclude. POST target is
