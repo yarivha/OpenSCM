@@ -188,6 +188,41 @@
                 </div>
               </div>
             </div>
+
+            <div class="row">
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="entity_trend_retention_days">
+                    <i class="fas fa-chart-line mr-1 text-muted"></i>
+                    System/Policy Trend Retention (days)
+                  </label>
+                  <input type="number" class="form-control" id="entity_trend_retention_days"
+                    name="entity_trend_retention_days" value="{{ settings.entity_trend_retention_days }}"
+                    min="0" max="10000">
+                  <small class="form-text text-muted">
+                    How long to keep the hourly per-system / per-policy snapshots behind the
+                    report trend charts. Set to <strong>0</strong> to keep forever. Default is
+                    <strong>90</strong> — roughly 2,200 rows per system per 90 days, so large fleets grow fast.
+                  </small>
+                </div>
+              </div>
+              <div class="col-md-6">
+                <div class="form-group">
+                  <label for="fleet_trend_retention_days">
+                    <i class="fas fa-chart-area mr-1 text-muted"></i>
+                    Compliance Trend Retention (days)
+                  </label>
+                  <input type="number" class="form-control" id="fleet_trend_retention_days"
+                    name="fleet_trend_retention_days" value="{{ settings.fleet_trend_retention_days }}"
+                    min="0" max="10000">
+                  <small class="form-text text-muted">
+                    How long to keep the fleet-wide hourly snapshots behind the dashboard's
+                    compliance trend. Set to <strong>0</strong> to keep forever. Default is
+                    <strong>365</strong> — one row per hour, cheap to keep for a full audit year.
+                  </small>
+                </div>
+              </div>
+            </div>
           </div>
 
           <!-- Compliance Tab -->

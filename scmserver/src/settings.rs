@@ -41,6 +41,8 @@ pub struct Settings {
     pub report_retention_days: String,
     pub notification_retention_days: String,
     pub container_retention_days: String,
+    pub entity_trend_retention_days: String,
+    pub fleet_trend_retention_days: String,
     pub smtp_host:     String,
     pub smtp_port:     String,
     pub smtp_username: String,
@@ -119,6 +121,8 @@ pub async fn settings(
         report_retention_days: map.get("report_retention_days").cloned().unwrap_or_else(|| "0".to_string()),
         notification_retention_days: map.get("notification_retention_days").cloned().unwrap_or_else(|| "30".to_string()),
         container_retention_days: map.get("container_retention_days").cloned().unwrap_or_else(|| "7".to_string()),
+        entity_trend_retention_days: map.get("entity_trend_retention_days").cloned().unwrap_or_else(|| "90".to_string()),
+        fleet_trend_retention_days: map.get("fleet_trend_retention_days").cloned().unwrap_or_else(|| "365".to_string()),
         smtp_host:     map.get("smtp_host").cloned().unwrap_or_default(),
         smtp_port:     map.get("smtp_port").cloned().unwrap_or_else(|| "587".to_string()),
         smtp_username: map.get("smtp_username").cloned().unwrap_or_default(),
@@ -187,6 +191,8 @@ pub async fn settings_save(
     let raw_report_keep  = form_data.get("report_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
     let raw_notify_keep  = form_data.get("notification_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
     let raw_container_keep = form_data.get("container_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_entity_trend_keep = form_data.get("entity_trend_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
+    let raw_fleet_trend_keep  = form_data.get("fleet_trend_retention_days").and_then(|v| v.first()).cloned().unwrap_or_default();
 
     let threshold: i64 = match raw_threshold.parse() {
         Ok(v) if v >= 1 => v,
@@ -240,6 +246,18 @@ pub async fn settings_save(
         _ => return Redirect::to("/settings?error_message=Container+retention+must+be+0+(forever)+or+1-10000+days").into_response(),
     };
 
+    let entity_trend_keep: i64 = match raw_entity_trend_keep.parse::<i64>() {
+        Ok(0) => 0,
+        Ok(v) if (1..=10000).contains(&v) => v,
+        _ => return Redirect::to("/settings?error_message=System%2FPolicy+trend+retention+must+be+0+(forever)+or+1-10000+days").into_response(),
+    };
+
+    let fleet_trend_keep: i64 = match raw_fleet_trend_keep.parse::<i64>() {
+        Ok(0) => 0,
+        Ok(v) if (1..=10000).contains(&v) => v,
+        _ => return Redirect::to("/settings?error_message=Compliance+trend+retention+must+be+0+(forever)+or+1-10000+days").into_response(),
+    };
+
     // Compliance modes — validated to their allowed values; anything else → "test".
     let policy_mode = match form_data.get("policy_compliance_mode").and_then(|v| v.first()).map(String::as_str) {
         Some("system") => "system",
@@ -261,6 +279,8 @@ pub async fn settings_save(
         ("report_retention_days",        report_keep.to_string()),
         ("notification_retention_days",  notify_keep.to_string()),
         ("container_retention_days",     container_keep.to_string()),
+        ("entity_trend_retention_days",  entity_trend_keep.to_string()),
+        ("fleet_trend_retention_days",   fleet_trend_keep.to_string()),
     ];
 
     // Email settings — superuser only

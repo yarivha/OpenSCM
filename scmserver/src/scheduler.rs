@@ -815,6 +815,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
                 prune_reports(&loop_pool).await;
                 prune_notifications(&loop_pool).await;
                 prune_containers(&loop_pool).await;
+                prune_trends(&loop_pool).await;
                 last_daily_prune_day = current_day;
             }
         }
@@ -1025,6 +1026,67 @@ async fn prune_containers(pool: &SqlitePool) {
             }
             Ok(_) => {}
             Err(e) => error!("container prune: delete failed for tenant '{}': {}", tenant_id, e),
+        }
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: prune_trends
+// Two retention passes for the compliance trend snapshots (0.7.2):
+//   • entity_trend_retention_days → entity_compliance_history (per-system /
+//     per-policy rows; high volume, default 90 days)
+//   • fleet_trend_retention_days  → compliance_history (the dashboard's
+//     fleet-wide trend; one row per tenant per hour, default 365 days —
+//     previously keep-forever)
+// Tenants with retention = 0 are skipped by the settings query. Cutoffs use
+// the same sargable strftime form as the other prunes (check_date < cutoff
+// hits the lookup index / a range scan). One retention.* audit row per
+// tenant per table whose data was trimmed.
+// ─────────────────────────────────────────────────────────────────────────────
+async fn prune_trends(pool: &SqlitePool) {
+    // (skey, table, audit action) — both passes share the loop body.
+    let passes: [(&str, &str, &str); 2] = [
+        ("entity_trend_retention_days", "entity_compliance_history", "retention.entity_trends_pruned"),
+        ("fleet_trend_retention_days",  "compliance_history",        "retention.fleet_trends_pruned"),
+    ];
+
+    for (skey, table, action) in passes {
+        let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
+            &format!(
+                "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
+                 WHERE skey = '{}' AND CAST(value AS INTEGER) > 0", skey),
+        )
+        .fetch_all(pool)
+        .await
+        {
+            Ok(rows) => rows,
+            Err(e) => { error!("trend prune: failed to fetch {} settings: {}", skey, e); continue; }
+        };
+
+        for (tenant_id, days) in tenants {
+            let res = sqlx::query(&format!(
+                "DELETE FROM {}
+                 WHERE tenant_id = ?
+                   AND check_date < strftime('%Y-%m-%d %H:%M:%S', 'now', '-' || ? || ' days')", table))
+            .bind(&tenant_id).bind(days)
+            .execute(pool).await;
+
+            match res {
+                Ok(r) if r.rows_affected() > 0 => {
+                    let removed = r.rows_affected();
+                    info!("trend prune: removed {} row(s) from {} older than {} day(s) for tenant '{}'.", removed, table, days, tenant_id);
+                    crate::audit::record_raw(
+                        pool, &tenant_id,
+                        None, "system",
+                        None,
+                        action,
+                        Some(table), None,
+                        Some(&format!("{{\"removed\":{},\"retention_days\":{}}}", removed, days)),
+                    ).await;
+                }
+                Ok(_) => {}
+                Err(e) => error!("trend prune: delete from {} failed for tenant '{}': {}", table, tenant_id, e),
+            }
         }
     }
 }
