@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.3] - 2026-06-12
+
 ### Added
 - **Hourly / Daily / Weekly / Monthly / Yearly ranges on the system and policy trend charts.** The Compliance Trend card on the live report pages gains the same range selector as the dashboard's fleet trend (`?range=`, default Hourly = last 24 hours; Daily = last 30 days; Weekly/Monthly = last 12; Yearly = last 10). Buckets average their hourly snapshots — score and the tooltip's pass/fail tallies alike. The card now shows from the **first** snapshot (previously hidden until two existed), so switching to a sparse bucket can't hide the selector, and it can be **collapsed** with the same minimize control as the dashboard's trend card.
 
