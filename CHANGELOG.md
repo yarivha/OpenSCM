@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Hourly / Daily / Weekly / Monthly / Yearly ranges on the system and policy trend charts.** The Compliance Trend card on the live report pages gains the same range selector as the dashboard's fleet trend (`?range=`, default Hourly = last 24 hours; Daily = last 30 days; Weekly/Monthly = last 12; Yearly = last 10). Buckets average their hourly snapshots — score and the tooltip's pass/fail tallies alike. The card now shows from the **first** snapshot (previously hidden until two existed), so switching to a sparse bucket can't hide the selector, and it can be **collapsed** with the same minimize control as the dashboard's trend card.
+
 ### Fixed
 - **Container compliance percentages are now rounded to 2 decimals.** The stored per-container score and the policy-level container axis (`policies.score_container`) were written as raw SQL division results, so the report badges and the container detail page showed values like `66.66666666666667%`. Both are now `ROUND(…, 2)` at the source; existing stored values are rewritten on the first recalculation after upgrade.
 

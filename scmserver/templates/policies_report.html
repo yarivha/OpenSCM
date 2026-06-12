@@ -168,11 +168,23 @@
         </div>
       </div>
 
-      {# Compliance trend — hourly per-policy snapshots; hidden until 2+ points #}
-      {% if trend_labels | length > 1 %}
+      {# Compliance trend — per-policy snapshots, bucketed by ?range= #}
+      {% if trend_labels | length > 0 %}
       <div class="card card-outline card-primary shadow-sm">
         <div class="card-header">
           <h3 class="card-title font-weight-bold"><i class="fas fa-chart-line mr-2 text-primary"></i>Compliance Trend</h3>
+          <div class="card-tools">
+            <div class="btn-group shadow-sm mr-2">
+              <a href="/policies/report/{{ report.policy_id }}?range=hourly"  class="btn btn-xs btn-outline-primary {% if trend_range == 'hourly'  %}active{% endif %}">Hourly</a>
+              <a href="/policies/report/{{ report.policy_id }}?range=daily"   class="btn btn-xs btn-outline-primary {% if trend_range == 'daily'   %}active{% endif %}">Daily</a>
+              <a href="/policies/report/{{ report.policy_id }}?range=weekly"  class="btn btn-xs btn-outline-primary {% if trend_range == 'weekly'  %}active{% endif %}">Weekly</a>
+              <a href="/policies/report/{{ report.policy_id }}?range=monthly" class="btn btn-xs btn-outline-primary {% if trend_range == 'monthly' %}active{% endif %}">Monthly</a>
+              <a href="/policies/report/{{ report.policy_id }}?range=yearly"  class="btn btn-xs btn-outline-primary {% if trend_range == 'yearly'  %}active{% endif %}">Yearly</a>
+            </div>
+            <button type="button" class="btn btn-tool" data-card-widget="collapse">
+              <i class="fas fa-minus"></i>
+            </button>
+          </div>
         </div>
         <div class="card-body">
           <div class="chart">
@@ -455,7 +467,7 @@
 {% endblock %}
 
 {% block scripts %}
-{% if trend_labels | length > 1 %}
+{% if trend_labels | length > 0 %}
 <script>
   // Compliance trend — hourly per-policy snapshots, plotted in the tenant's
   // current compliance mode (the handler picks the column). Tooltip carries

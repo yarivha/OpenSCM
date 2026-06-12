@@ -1206,10 +1206,11 @@ pub async fn system_report(
     // simply fall through to plain text — no link.
     let tests_metadata = fetch_tenant_tests_metadata(&auth.tenant_id, &pool).await;
 
-    // Hourly trend for this system (mode-aware; empty → card hidden).
+    // Trend for this system (mode-aware, ?range= bucketed; empty → card hidden).
     let smode = crate::policies::read_compliance_mode(&pool, &auth.tenant_id, "system_compliance_mode").await;
+    let trend_range = crate::policies::normalize_trend_range(query.range.as_deref());
     let (trend_labels, trend_scores, trend_passed, trend_failed) =
-        crate::policies::fetch_entity_trend(&pool, &auth.tenant_id, "system", id as i64, smode == "policy").await;
+        crate::policies::fetch_entity_trend(&pool, &auth.tenant_id, "system", id as i64, smode == "policy", trend_range).await;
 
     let mut context = Context::new();
     context.insert("report", &report);
@@ -1221,6 +1222,7 @@ pub async fn system_report(
     context.insert("trend_scores", &trend_scores);
     context.insert("trend_passed", &trend_passed);
     context.insert("trend_failed", &trend_failed);
+    context.insert("trend_range", &trend_range);
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
     }

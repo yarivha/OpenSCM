@@ -16,6 +16,9 @@ use chrono::{DateTime, Utc};
 pub struct ErrorQuery {
     pub error_message: Option<String>,
     pub success_message: Option<String>,
+    /// Trend-chart bucketing on the report pages (hourly/daily/weekly/monthly/
+    /// yearly), mirroring the dashboard's ?range=. None elsewhere — harmless.
+    pub range: Option<String>,
 }
 
 

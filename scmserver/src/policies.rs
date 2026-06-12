@@ -1169,9 +1169,10 @@ pub async fn policies_report(
     )
     .bind(&auth.tenant_id).fetch_one(&*pool).await.unwrap_or(60);
 
-    // Hourly trend for this policy (mode-aware; empty → card hidden).
+    // Trend for this policy (mode-aware, ?range= bucketed; empty → card hidden).
+    let trend_range = normalize_trend_range(query.range.as_deref());
     let (trend_labels, trend_scores, trend_passed, trend_failed) =
-        fetch_entity_trend(&pool, &auth.tenant_id, "policy", id as i64, pmode == "system").await;
+        fetch_entity_trend(&pool, &auth.tenant_id, "policy", id as i64, pmode == "system", trend_range).await;
 
     let mut context = Context::new();
     context.insert("report", &report_data);
@@ -1182,6 +1183,7 @@ pub async fn policies_report(
     context.insert("trend_scores", &trend_scores);
     context.insert("trend_passed", &trend_passed);
     context.insert("trend_failed", &trend_failed);
+    context.insert("trend_range", &trend_range);
     context.insert("is_smtp_configured", &crate::reports::is_smtp_configured(&pool).await);
     if let Some(msg) = query.success_message {
         context.insert("success_message", &msg);
@@ -1264,12 +1266,15 @@ pub(crate) fn assemble_container_groups(
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Helper: fetch_entity_trend
-// Hourly trend points for one system or policy, for the report-page chart
-// (0.7.2). Mode-aware: `strict` selects the all-or-nothing axis
-// (score_strict) instead of per-test, mirroring the dashboard's column pick —
-// so flipping a compliance-mode toggle re-renders the whole line, no jump.
-// Not-scanned snapshots (score < 0 on the chosen axis) are filtered out.
-// Returns (labels, scores, tests_passed, tests_failed), oldest first.
+// Trend points for one system or policy, for the report-page chart (0.7.2).
+// Mode-aware: `strict` selects the all-or-nothing axis (score_strict) instead
+// of per-test, mirroring the dashboard's column pick — so flipping a
+// compliance-mode toggle re-renders the whole line, no jump. `range` buckets
+// the hourly snapshots exactly like the dashboard's fleet trend: hourly (last
+// 24), daily (last 30), weekly / monthly (last 12), yearly (last 10); buckets
+// average their snapshots. Not-scanned points (score < 0) are filtered out.
+// Returns (labels, scores, tests_passed, tests_failed), oldest first; the
+// tallies are per-bucket averages, shown in the chart tooltip.
 // ─────────────────────────────────────────────────────────────────────────────
 pub(crate) async fn fetch_entity_trend(
     pool: &SqlitePool,
@@ -1277,15 +1282,33 @@ pub(crate) async fn fetch_entity_trend(
     entity_type: &str,
     entity_id: i64,
     strict: bool,
+    range: &str,
 ) -> (Vec<String>, Vec<f64>, Vec<i64>, Vec<i64>) {
     let col = if strict { "score_strict" } else { "score_test" };
+    // Same bucketing/format/limits as the dashboard's fleet trend.
+    let date_col: &str = match range {
+        "yearly"  => "strftime('%Y', check_date)",
+        "weekly"  => "strftime('%Y-W%W', check_date)",
+        "monthly" => "strftime('%m-%Y', check_date)",
+        "daily"   => "strftime('%Y-%m-%d', check_date)",
+        _         => "strftime('%m-%d %H:00', check_date)",
+    };
+    let limit: i32 = match range {
+        "yearly"  => 10,
+        "weekly" | "monthly" => 12,
+        "daily"   => 30,
+        _         => 24, // hourly: last 24 hours
+    };
+
     let rows = sqlx::query(&format!(
-        "SELECT strftime('%m-%d %H:00', check_date) AS label,
-                {col} AS score, tests_passed, tests_failed
+        "SELECT {date_col} AS label,
+                ROUND(AVG({col}), 2) AS score,
+                CAST(ROUND(AVG(tests_passed)) AS INTEGER) AS tests_passed,
+                CAST(ROUND(AVG(tests_failed)) AS INTEGER) AS tests_failed
          FROM entity_compliance_history
          WHERE tenant_id = ? AND entity_type = ? AND entity_id = ?
            AND {col} >= 0
-         ORDER BY check_date ASC"))
+         GROUP BY 1 ORDER BY MAX(check_date) DESC LIMIT {limit}"))
     .bind(tenant_id).bind(entity_type).bind(entity_id)
     .fetch_all(pool).await
     .unwrap_or_else(|e| {
@@ -1297,13 +1320,28 @@ pub(crate) async fn fetch_entity_trend(
     let mut scores = Vec::with_capacity(rows.len());
     let mut passed = Vec::with_capacity(rows.len());
     let mut failed = Vec::with_capacity(rows.len());
-    for r in rows {
+    // Query is newest-first (for LIMIT); the chart wants oldest-first.
+    for r in rows.into_iter().rev() {
         labels.push(r.get::<String, _>("label"));
-        scores.push((r.get::<f64, _>("score") * 100.0).round() / 100.0);
+        scores.push(r.get::<f64, _>("score"));
         passed.push(r.try_get::<i64, _>("tests_passed").unwrap_or(0));
         failed.push(r.try_get::<i64, _>("tests_failed").unwrap_or(0));
     }
     (labels, scores, passed, failed)
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: normalize_trend_range
+// Clamp a ?range= query value to the known set; anything else → "hourly".
+// ─────────────────────────────────────────────────────────────────────────────
+pub(crate) fn normalize_trend_range(range: Option<&str>) -> &'static str {
+    match range {
+        Some("daily")   => "daily",
+        Some("weekly")  => "weekly",
+        Some("monthly") => "monthly",
+        Some("yearly")  => "yearly",
+        _               => "hourly",
+    }
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
