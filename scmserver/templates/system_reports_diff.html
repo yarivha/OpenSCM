@@ -73,12 +73,12 @@
               <h4><i class="fas fa-server mr-1"></i>{{ system_name }}</h4>
               <p class="meta-line mb-1">
                 <i class="fas fa-clock mr-1"></i><strong>Older:</strong>
-                <a href="/reports/system/view/{{ old_meta.id }}">{{ old_meta.submission_date }}</a>
+                <a href="/reports/system/view/{{ old_meta.id }}" class="datetime" data-utc="{{ old_meta.submission_date }}">{{ old_meta.submission_date }}</a>
                 {% if old_meta.submitter_name %}<span class="ml-2"><i class="fas fa-user mr-1"></i>{{ old_meta.submitter_name }}</span>{% endif %}
               </p>
               <p class="meta-line mb-0">
                 <i class="fas fa-clock mr-1"></i><strong>Newer:</strong>
-                <a href="/reports/system/view/{{ new_meta.id }}">{{ new_meta.submission_date }}</a>
+                <a href="/reports/system/view/{{ new_meta.id }}" class="datetime" data-utc="{{ new_meta.submission_date }}">{{ new_meta.submission_date }}</a>
                 {% if new_meta.submitter_name %}<span class="ml-2"><i class="fas fa-user mr-1"></i>{{ new_meta.submitter_name }}</span>{% endif %}
               </p>
             </div>

@@ -76,12 +76,12 @@
               <h4>{{ old_report.policy_name }} <small class="text-muted">v{{ old_report.policy_version }}</small></h4>
               <p class="meta-line mb-1">
                 <i class="fas fa-clock mr-1"></i><strong>Older:</strong>
-                <a href="/reports/view/{{ old_report.id }}">{{ old_report.submission_date }}</a>
+                <a href="/reports/view/{{ old_report.id }}" class="datetime" data-utc="{{ old_report.submission_date }}">{{ old_report.submission_date }}</a>
                 <span class="ml-2"><i class="fas fa-user mr-1"></i>{{ old_report.submitter_name }}</span>
               </p>
               <p class="meta-line mb-0">
                 <i class="fas fa-clock mr-1"></i><strong>Newer:</strong>
-                <a href="/reports/view/{{ new_report.id }}">{{ new_report.submission_date }}</a>
+                <a href="/reports/view/{{ new_report.id }}" class="datetime" data-utc="{{ new_report.submission_date }}">{{ new_report.submission_date }}</a>
                 <span class="ml-2"><i class="fas fa-user mr-1"></i>{{ new_report.submitter_name }}</span>
               </p>
             </div>

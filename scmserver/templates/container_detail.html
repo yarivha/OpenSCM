@@ -39,8 +39,8 @@
                   <tr><th style="padding-left: 16px;">Status</th><td>{{ container.status | default(value="—") }}</td></tr>
                   <tr><th style="padding-left: 16px;">IP</th><td>{{ container.ip | default(value="—") }}</td></tr>
                   <tr><th style="padding-left: 16px;">Host</th><td><a href="/systems/report/{{ container.host_system_id }}">{{ container.host_name }}</a></td></tr>
-                  <tr><th style="padding-left: 16px;">First Seen</th><td>{{ container.first_seen | default(value="—") }}</td></tr>
-                  <tr><th style="padding-left: 16px;">Last Seen</th><td>{{ container.last_seen | default(value="—") }}</td></tr>
+                  <tr><th style="padding-left: 16px;">First Seen</th><td><span class="datetime" data-utc="{{ container.first_seen }}">{{ container.first_seen | default(value="—") }}</span></td></tr>
+                  <tr><th style="padding-left: 16px;">Last Seen</th><td><span class="datetime" data-utc="{{ container.last_seen }}">{{ container.last_seen | default(value="—") }}</span></td></tr>
                 </tbody>
               </table>
             </div>

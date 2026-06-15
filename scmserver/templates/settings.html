@@ -574,7 +574,7 @@
                         </p>
                         <small class="text-muted">
                           <i class="fas fa-key mr-1"></i>Active key: <code>{{ key_fingerprint }}</code>
-                          {% if key_created_at %}&nbsp;·&nbsp;Created {{ key_created_at }}{% endif %}
+                          {% if key_created_at %}&nbsp;·&nbsp;Created <span class="datetime" data-utc="{{ key_created_at }}">{{ key_created_at }}</span>{% endif %}
                         </small>
                       </div>
                       <button type="button" class="btn btn-outline-warning btn-sm ml-4 flex-shrink-0"

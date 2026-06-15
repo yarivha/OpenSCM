@@ -16,7 +16,7 @@ use std::sync::Arc;
 use urlencoding;
 use std::collections::BTreeMap;
 use tracing::{info, error};
-use chrono::{Local, Utc};
+use chrono::Utc;
 use genpdf::{fonts, elements, style, Element, Margins};
 
 use crate::models::{
@@ -1147,7 +1147,9 @@ pub async fn policies_report(
         policy_name: policy_row.get("name"),
         version: policy_row.get("version"),
         description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
-        submission_date: Local::now().format("%Y-%m-%d %H:%M").to_string(),
+        // Stored/displayed as canonical UTC (no tz marker); the web UI converts
+        // it to the viewer's browser timezone client-side.
+        submission_date: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         submitter_name: auth.username.clone(),
         tests_metadata,
         system_reports,
@@ -1514,7 +1516,8 @@ async fn fetch_live_policy_report_data(
         policy_name: policy_row.get("name"),
         version: policy_row.get("version"),
         description: policy_row.get::<Option<String>, _>("description").unwrap_or_default(),
-        submission_date: Local::now().format("%b %d, %Y %I:%M %p").to_string(),
+        // Canonical UTC (no tz marker); localized to the browser tz in the UI.
+        submission_date: Utc::now().format("%Y-%m-%d %H:%M:%S").to_string(),
         submitter_name: submitter_name.to_string(),
         tests_metadata,
         system_reports,

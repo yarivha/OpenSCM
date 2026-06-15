@@ -97,7 +97,7 @@
                   </p>
                   {% if report.last_seen %}
                   <p class="text-sm text-muted mb-1">
-                    <i class="fas fa-clock mr-1"></i><strong>Last Seen:</strong> {{ report.last_seen }}
+                    <i class="fas fa-clock mr-1"></i><strong>Last Seen:</strong> <span class="datetime" data-utc="{{ report.last_seen }}">{{ report.last_seen }}</span>
                   </p>
                   {% endif %}
                   {% if report.policy_groups | length > 0 %}

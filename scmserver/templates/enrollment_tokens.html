@@ -113,9 +113,9 @@ enrollment_token = "oscm_…"</pre>
                       {% elif t.status == "Expired" %}<span class="badge badge-warning">Expired</span>
                       {% else %}<span class="badge badge-warning">Used up</span>{% endif %}
                     </td>
-                    <td>{% if t.expires_at %}{{ t.expires_at }}{% else %}<span class="text-muted">never</span>{% endif %}</td>
+                    <td>{% if t.expires_at %}<span class="datetime" data-utc="{{ t.expires_at }}">{{ t.expires_at }}</span>{% else %}<span class="text-muted">never</span>{% endif %}</td>
                     <td class="text-center">{{ t.use_count }}{% if t.max_uses %} / {{ t.max_uses }}{% endif %}</td>
-                    <td>{% if t.last_used_at %}{{ t.last_used_at }}{% else %}<span class="text-muted">—</span>{% endif %}</td>
+                    <td>{% if t.last_used_at %}<span class="datetime" data-utc="{{ t.last_used_at }}">{{ t.last_used_at }}</span>{% else %}<span class="text-muted">—</span>{% endif %}</td>
                     <td class="text-right">
                       <form method="POST" action="/systems/tokens/toggle/{{ t.id }}" style="display:inline">
                         <button type="submit" class="btn btn-sm btn-outline-{% if t.enabled %}warning{% else %}success{% endif %}"

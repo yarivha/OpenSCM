@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **All timestamps in the web UI now render in the viewer's browser timezone.** Previously times were shown inconsistently — some as raw UTC, some as the server's local time. The server now emits every displayed timestamp as canonical UTC, and a single shared converter (`base.html`) localizes every `.datetime` element to the browser's zone, appending the zone abbreviation (e.g. `15/06/2026, 17:30:00 GMT+3`). Covers systems, audit log, reports (live, saved, and diffs), containers, enrollment tokens, and the active-key timestamp. The per-page duplicate converters were removed in favor of the shared one.
+
 ---
 
 ## [0.7.3] - 2026-06-12

@@ -76,7 +76,7 @@
             <table class="table table-hover table-sm mb-0 audit-table">
               <thead class="thead-light">
                 <tr>
-                  <th style="padding-left: 1rem;">Time (UTC)</th>
+                  <th style="padding-left: 1rem;">Time</th>
                   {% if cross_tenant %}<th>Tenant</th>{% endif %}
                   <th>Actor</th>
                   <th>Action</th>
@@ -88,7 +88,7 @@
               <tbody>
                 {% for e in entries %}
                 <tr class="{% if 'failure' in e.action %}audit-failure{% elif 'delete' in e.action %}audit-delete{% elif 'create' in e.action %}audit-create{% endif %}">
-                  <td class="ts" style="padding-left: 1rem;">{{ e.created_at }}</td>
+                  <td class="ts datetime" style="padding-left: 1rem;" data-utc="{{ e.created_at }}">{{ e.created_at }}</td>
                   {% if cross_tenant %}
                   <td class="tenant"><code>{{ e.tenant_id }}</code></td>
                   {% endif %}

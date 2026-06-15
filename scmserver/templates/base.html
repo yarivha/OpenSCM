@@ -374,6 +374,53 @@
   });
 </script>
 
+<script>
+  // ── Local-timezone rendering ────────────────────────────────────────────────
+  // Every timestamp the server emits is UTC. The server uses two shapes:
+  //   • ISO with an explicit marker, e.g. "2026-06-15T14:30:00Z"
+  //   • marker-less "2026-06-15 14:30:00" (SQLite CURRENT_TIMESTAMP / Utc::now)
+  // A marker-less string is assumed UTC and normalised to an ISO-Z instant so
+  // the browser doesn't misread it as local. Then it's formatted in the
+  // viewer's own timezone, with the zone abbreviation appended for clarity.
+  //
+  // Exposed globally so per-page scripts (modals, AJAX rows) can reuse it.
+  window.formatLocalTime = function (raw) {
+    if (raw === null || raw === undefined) return "";
+    var s = String(raw).trim();
+    // Pass through placeholders and non-datetime sentinels untouched.
+    if (!s || s === "N/A" || s === "—" || s === "never" || s === "Unknown") return s;
+    // No tz marker (Z or ±HH:MM) but looks like "YYYY-MM-DD[ T]HH:MM[:SS]" → UTC.
+    if (!/[zZ]$|[+\-]\d{2}:?\d{2}$/.test(s)) {
+      var m = s.match(/^(\d{4}-\d{2}-\d{2})[ T](\d{2}:\d{2}(:\d{2})?)/);
+      if (m) s = m[1] + "T" + m[2] + "Z";
+    }
+    var d = new Date(s);
+    if (isNaN(d.getTime())) return String(raw); // leave unparseable strings as-is
+    return d.toLocaleString(undefined, {
+      year: 'numeric', month: '2-digit', day: '2-digit',
+      hour: '2-digit', minute: '2-digit', second: '2-digit',
+      hour12: false, timeZoneName: 'short'
+    });
+  };
+
+  // Convert every .datetime element to local time. Idempotent: it reads the
+  // original UTC value from data-utc (falling back to the element's text the
+  // first time), so re-running — e.g. after a DataTables redraw — is safe.
+  window.applyLocalTimes = function (root) {
+    $(root || document).find('.datetime').each(function () {
+      var $el = $(this);
+      var raw = $el.attr('data-utc');
+      if (raw === undefined) { raw = $el.text().trim(); $el.attr('data-utc', raw); }
+      var out = window.formatLocalTime(raw);
+      if (out) $el.text(out);
+    });
+  };
+
+  // Run before per-page {% block scripts %} (registered below) so DataTables
+  // ingests already-localized cell text and sorts/searches on it.
+  $(function () { window.applyLocalTimes(); });
+</script>
+
 {% block scripts %}{% endblock %}
 
 <script>

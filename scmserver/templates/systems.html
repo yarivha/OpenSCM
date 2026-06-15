@@ -168,8 +168,8 @@
   		      {% endif %}
 		    </td>
                     <td><span class="badge badge-light">v{{ system.ver }}</span></td>
-                    <td class="datetime" data-utc="{{ system.last_seen }}">
-                      {{ system.last_seen }}
+                    <td>
+                      <span class="datetime" data-utc="{{ system.last_seen }}">{{ system.last_seen }}</span>
                       {% if system.is_offline %}<span class="badge badge-secondary ml-1">Offline</span>{% endif %}
                     </td>
 
@@ -411,17 +411,9 @@
 {% block scripts %}
 <script>
   $(function () {
-    // Helper function for Date formatting
-    function formatLocalTime(utcString) {
-      if (!utcString) return "N/A";
-      const date = new Date(utcString);
-      if (isNaN(date.getTime())) return utcString;
-      return date.toLocaleString(undefined, {
-        year: 'numeric', month: '2-digit', day: '2-digit',
-        hour: '2-digit', minute: '2-digit', second: '2-digit',
-        hour12: false
-      });
-    }
+    // Datetime formatting + table conversion are handled globally by
+    // window.formatLocalTime / window.applyLocalTimes (see base.html), which
+    // renders every UTC timestamp in the viewer's browser timezone.
 
     // 1. Modal Logic
     $(document).on('click', '.view-system-btn', function() {
@@ -435,8 +427,8 @@
         $('#m-ver').text(btn.data('ver'));
         $('#m-groups').text(btn.data('groups'));
 
-        $('#m-seen').text(formatLocalTime(btn.data('seen')));
-        $('#m-created').text(formatLocalTime(btn.data('created')));
+        $('#m-seen').text(window.formatLocalTime(btn.data('seen')));
+        $('#m-created').text(window.formatLocalTime(btn.data('created')));
 
         // Telemetry — only show when the agent has reported it.
         // jQuery's .data() coerces "True"/"False" strings to JS bools.
@@ -472,10 +464,8 @@
         $('#systemDetailsModal').modal('show');
     });
 
-    // 2. Initial table datetime conversion
-    $('.datetime').each(function() {
-      $(this).text(formatLocalTime($(this).data('utc')));
-    });
+    // 2. Table datetime conversion is handled globally (base.html), which runs
+    //    before this block — DataTables below ingests the localized text.
 
     // Load container inventory BEFORE DataTables init so the rowCallback
     // (below) can reference it. The blob is server-rendered JSON keyed by
