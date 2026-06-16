@@ -238,11 +238,13 @@
 {% block scripts %}
 <script>
 var complianceTrendCanvas = document.getElementById('complianceTrendChart').getContext('2d');
+var trendLabels = {{ trend_labels | json_encode | safe }};
+{% if range == 'hourly' %}trendLabels = window.localizeHourlyTrendLabels(trendLabels);{% endif %}
 new Chart(complianceTrendCanvas, {
   type: 'line',
   data: {
-    // Labels are shared between both datasets (Dates)
-    labels: {{ trend_labels | json_encode | safe }}, 
+    // Labels are shared between both datasets; hourly is shifted to local time
+    labels: trendLabels,
     datasets: [
       {
         label: 'System Compliance %',

@@ -419,6 +419,29 @@
   // Runs before the per-page scripts block (registered below) so DataTables
   // ingests already-localized cell text and sorts/searches on it.
   $(function () { window.applyLocalTimes(); });
+
+  // Compliance-trend charts bucket by UTC hour and label points "MM-DD HH:00".
+  // Shift those to the viewer's local time so the hourly axis matches the rest
+  // of the UI. Only the hourly range carries a clock; daily/weekly/monthly/
+  // yearly labels are date-only and tz-insensitive, so callers pass them
+  // through unchanged. Half-hour zones keep their minutes; DST is handled
+  // because each label is reconstructed as an absolute UTC instant.
+  window.localizeHourlyTrendLabels = function (labels) {
+    var now = new Date();
+    var pad = function (n) { return String(n).padStart(2, '0'); };
+    return labels.map(function (lbl) {
+      var m = /^(\d{2})-(\d{2}) (\d{2}):(\d{2})$/.exec(String(lbl));
+      if (!m) return lbl;
+      var d = new Date(Date.UTC(now.getUTCFullYear(), +m[1] - 1, +m[2], +m[3], +m[4]));
+      // A UTC bucket can't be in the future; a Dec label seen in early Jan
+      // belongs to the previous year.
+      if (d.getTime() - now.getTime() > 86400000) {
+        d = new Date(Date.UTC(now.getUTCFullYear() - 1, +m[1] - 1, +m[2], +m[3], +m[4]));
+      }
+      return pad(d.getMonth() + 1) + '-' + pad(d.getDate()) + ' ' +
+             pad(d.getHours()) + ':' + pad(d.getMinutes());
+    });
+  };
 </script>
 
 {% block scripts %}{% endblock %}

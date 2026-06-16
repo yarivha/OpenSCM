@@ -458,10 +458,12 @@
   (function () {
     var trendPassed = {{ trend_passed | json_encode | safe }};
     var trendFailed = {{ trend_failed | json_encode | safe }};
+    var trendLabels = {{ trend_labels | json_encode | safe }};
+    {% if trend_range == 'hourly' %}trendLabels = window.localizeHourlyTrendLabels(trendLabels);{% endif %}
     new Chart(document.getElementById('entityTrendChart').getContext('2d'), {
       type: 'line',
       data: {
-        labels: {{ trend_labels | json_encode | safe }},
+        labels: trendLabels,
         datasets: [{
           label: 'Compliance %',
           data: {{ trend_scores | json_encode | safe }},
