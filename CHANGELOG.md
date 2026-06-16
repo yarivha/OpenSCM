@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.5] - 2026-06-16
+
 ### Fixed
 - **Compliance-trend charts now plot the hourly axis in the viewer's browser timezone.** The 0.7.4 timezone work converted `.datetime` HTML elements, but the trend charts (dashboard fleet trend + system/policy report trends) render their X-axis from server-side bucket labels, which stayed in UTC. The hourly range — the only one with a clock — is now shifted to local time client-side (e.g. a `09:00` UTC point shows as `12:00` in GMT+3); daily/weekly/monthly/yearly are date-only and unchanged.
 
