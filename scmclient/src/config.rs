@@ -25,20 +25,27 @@ cfg_if! {
     if #[cfg(target_os = "linux")] {
         const CONFIG_PATH: &str = "/etc/openscm/scmclient.config";
         const KEY_PATH: &str = "/etc/openscm/keys/scmclient";
+        const LOCK_PATH: &str = "/etc/openscm/scmclient.lock";
     } else if #[cfg(target_os = "freebsd")] {
         const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
         const KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmclient";
+        const LOCK_PATH: &str = "/usr/local/etc/openscm/scmclient.lock";
     } else if #[cfg(target_os = "windows")] {
         const CONFIG_PATH: &str = r"C:\ProgramData\OpenSCM\Client\scmclient.config";
         const KEY_PATH: &str = r"C:\ProgramData\OpenSCM\Client\keys\scmclient";
+        const LOCK_PATH: &str = r"C:\ProgramData\OpenSCM\Client\scmclient.lock";
     } else if #[cfg(target_os = "macos")] {
         const CONFIG_PATH: &str = "/usr/local/etc/openscm/scmclient.config";
         const KEY_PATH: &str = "/usr/local/etc/openscm/keys/scmclient";
+        const LOCK_PATH: &str = "/usr/local/etc/openscm/scmclient.lock";
     }
 }
 
 pub fn key_path() -> &'static str { KEY_PATH }
 pub fn config_path() -> &'static str { CONFIG_PATH }
+// Single-instance advisory-lock file (same dir as the config, created by
+// check_required_directories). See the lock guard in main().
+pub fn lock_path() -> &'static str { LOCK_PATH }
 
 // ============================================================
 // REGISTRY SCHEMA (Windows)

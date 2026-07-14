@@ -62,7 +62,11 @@ fn check_required_directories() -> Result<(), Box<dyn std::error::Error>> {
 }
 
 
-#[tokio::main]
+// The agent is a strictly sequential heartbeat loop (no tokio::spawn), so a
+// single-threaded runtime is sufficient — and it avoids the multi-threaded
+// runtime's per-worker glibc malloc arenas, which never return freed memory
+// to the OS and made long-lived agents balloon to multi-GB RSS / 20-GB VSZ.
+#[tokio::main(flavor = "current_thread")]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
 
     // 1. Logging setup
@@ -156,6 +160,34 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
 	
     // 3. create required directories BEFORE logger init
     check_required_directories()?;
+
+    // 3a. Single-instance guard (daemon mode only — the `run`/`--help`/
+    //     `--version` one-shots returned above). Hold an exclusive advisory
+    //     lock for the lifetime of the process so orphaned or duplicate agents
+    //     can't pile up (the field symptom: dozens of stray scmclient daemons
+    //     accumulating across self-upgrades). The self-upgrade exec()s the
+    //     binary in place; Rust opens files O_CLOEXEC by default, so this lock
+    //     is released across the exec and the re-exec'd image re-acquires it —
+    //     no self-deadlock. Dropping `_instance_lock` (process exit) releases it.
+    let _instance_lock = {
+        use fs2::FileExt;
+        use std::io::{Seek, SeekFrom, Write};
+        let lock_path = config::lock_path();
+        let mut file = std::fs::OpenOptions::new()
+            .create(true).read(true).write(true)
+            .open(lock_path)
+            .map_err(|e| { error!("Cannot open lock file {}: {}", lock_path, e); e })?;
+        if file.try_lock_exclusive().is_err() {
+            warn!("Another scmclient instance already holds {} — exiting to avoid \
+                   duplicate agents.", lock_path);
+            return Ok(());
+        }
+        // Record our PID in the lock file for operators (best-effort, cosmetic).
+        let _ = file.set_len(0);
+        let _ = file.seek(SeekFrom::Start(0));
+        let _ = writeln!(&file, "{}", std::process::id());
+        file
+    };
 
     // 4. Load config
     info!("Loading configuration...");

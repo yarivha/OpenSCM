@@ -1,6 +1,6 @@
 [package]
 name = "scmclient"
-version = "0.7.5"
+version = "0.7.6"
 edition = "2024"
 authors = ["Yariv Hakim <yariv@openscm.io>"]
 license = "Apache-2.0"
@@ -26,6 +26,7 @@ rand = "0.8"
 base64 = "0.22.1"
 hex = "0.4"
 semver = "1.0"
+fs2 = "0.4"
 chrono = "0.4.44"
 sha1 = "0.10"
 sha2 = "0.10"

@@ -8,6 +8,15 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.7.6] - 2026-06-16
+
+### Fixed
+- **Agent (`scmclient`): stop duplicate/orphaned agents from piling up.** Field hosts accumulated dozens of stray `scmclient` daemons over successive self-upgrades (an older restart path spawned a detached copy instead of replacing the process), and some grew to multi-GB RSS. The agent now takes a **single-instance advisory lock** (`scmclient.lock`, next to the config) at startup in daemon mode; a second instance logs and exits instead of running in parallel. The lock is `O_CLOEXEC` (Rust default), so it releases across the upgrade `exec()` and the re-exec'd binary re-acquires it cleanly — no self-deadlock. The `run` / `--help` / `--version` one-shots are unaffected.
+- **Agent memory: switched to a single-threaded Tokio runtime.** The agent is a strictly sequential heartbeat loop but ran on the multi-threaded runtime, whose per-worker glibc malloc arenas never return freed memory — long-lived agents ballooned to multi-GB RSS / 20-GB VSZ. `current_thread` uses one arena, so memory plateaus low and flat. No functional change.
+  - *Operators:* existing strays are detached from the service manager, so upgrading won't clear them. Clear once with `systemctl stop scmclient && pkill -x scmclient && systemctl start scmclient` (adjust the unit name).
+
+---
+
 ## [0.7.5] - 2026-06-16
 
 ### Fixed
