@@ -6,12 +6,12 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
-### Added
-- **Run a single policy on a single system, from the system report.** Each policy card on the system compliance view gains a **Run** button that queues just that policy's tests for just that host — so after fixing a finding you can re-check the one machine instead of rescanning the fleet. Requires the Runner role; the action is audited (`policy.run_on_system`). Scans are queued to the agent, so results land on its next check-in rather than instantly, and the confirmation message says so. Requesting a policy that doesn't cover the system queues nothing and reports that, rather than a silent success.
-
 ---
 
 ## [0.7.7] - 2026-06-16
+
+### Added
+- **Run a single policy on a single system, from the system report.** Each policy card on the system compliance view gains a **Run** button that queues just that policy's tests for just that host — so after fixing a finding you can re-check the one machine instead of rescanning the fleet. Requires the Runner role; the action is audited (`policy.run_on_system`). Scans are queued to the agent, so results land on its next check-in rather than instantly, and the confirmation message says so. Requesting a policy that doesn't cover the system queues nothing and reports that, rather than a silent success.
 
 ### Fixed
 - **Data loss: a long server outage no longer deletes every system on restart.** With `auto_prune_inactive` enabled, the prune deleted any active system whose `last_seen` was older than the threshold — but while the server is down no agent *can* report, so after an outage longer than the threshold the whole fleet looked inactive and was wiped on the first 60-second tick, before any agent had a chance to check in. The prune is now gated on **server uptime**: a tenant is skipped until this server process has been running at least as long as its own threshold, so a stale `last_seen` can no longer be confused with "the server wasn't there to hear it". Genuinely absent systems are still pruned once that window has passed. Covered by regression tests.
