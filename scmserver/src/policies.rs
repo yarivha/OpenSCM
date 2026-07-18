@@ -2225,6 +2225,40 @@ pub async fn execute_policy_run_logic(
 }
 
 
+// ─────────────────────────────────────────────────────────────────────────────
+// Helper: execute_policy_run_for_system
+// Same as execute_policy_run_logic but scoped to ONE system — backs the
+// per-policy "Run" button on the system report, so an admin can re-check a
+// single host after fixing a finding instead of rescanning the whole fleet.
+//
+// The systems_in_policy → systems_in_groups join is the safety property: a
+// system the policy doesn't actually cover matches zero rows, so a crafted
+// request can't queue a policy's tests onto an unrelated host. Returns the
+// number of tests queued so the caller can distinguish "queued 42" from
+// "nothing to do" instead of reporting a silent success.
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn execute_policy_run_for_system(
+    policy_id: i32,
+    system_id: i32,
+    pool: &SqlitePool,
+    tenant_id: &str,
+) -> Result<u64, sqlx::Error> {
+    let res = sqlx::query(r#"
+        INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id)
+        SELECT ?, sig.system_id, tip.test_id
+        FROM systems_in_policy sip
+        JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+        JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
+        WHERE sip.policy_id = ?
+          AND sip.tenant_id = ?
+          AND sig.system_id = ?
+    "#)
+    .bind(tenant_id).bind(policy_id).bind(tenant_id).bind(system_id)
+    .execute(pool).await?;
+    Ok(res.rows_affected())
+}
+
+
 #[cfg(test)]
 mod tests {
     use super::compliance_pct;

@@ -289,6 +289,7 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/systems", get(systems::systems))
         .route("/systems/report/{id}", get(systems::system_report))
         .route("/systems/{id}/containers/{cid}", get(systems::container_detail))
+        .route("/systems/report/{system_id}/run/{policy_id}", post(systems::system_report_run_policy))
         .route("/systems/report/{system_id}/exclude/{test_id}", post(systems::system_report_exclude))
         .route("/systems/report/{system_id}/unexclude/{test_id}", post(systems::system_report_unexclude))
         .route("/systems/report/{id}/save", get(reports::system_report_save))

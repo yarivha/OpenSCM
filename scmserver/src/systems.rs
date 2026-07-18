@@ -18,7 +18,7 @@ use sqlx::Row;
 use std::sync::Arc;
 use urlencoding;
 use std::collections::HashMap;
-use tracing::{info, error};
+use tracing::{info, warn, error};
 use bytes::Bytes;
 use chrono::{DateTime, Utc};
 
@@ -1334,6 +1334,68 @@ pub async fn container_detail(
     render_template(&tera, Some(&pool), "container_detail.html", context, Some(auth))
         .await
         .into_response()
+}
+
+
+// ─────────────────────────────────────────────────────────────────────────────
+// POST /systems/report/{system_id}/run/{policy_id}
+// Queue a re-scan of ONE policy on ONE system — the "Run" button on each
+// policy card in the system report, for re-checking a host after fixing a
+// finding without rescanning the fleet.
+//
+// Scans are queued, not pushed: the rows land in `commands` and the agent
+// picks them up on its next heartbeat, so the flash says so rather than
+// implying the report refreshes immediately. A zero-row result means the
+// policy doesn't cover this system (see execute_policy_run_for_system) and is
+// reported as such instead of a misleading success.
+// Role: Runner
+// ─────────────────────────────────────────────────────────────────────────────
+pub async fn system_report_run_policy(
+    auth: AuthSession,
+    Path((system_id, policy_id)): Path<(i32, i32)>,
+    Extension(pool): Extension<SqlitePool>,
+    ip: crate::handlers::ClientIp,
+) -> impl IntoResponse {
+    if let Some(redir) = auth::authorize(&auth.role, UserRole::Runner) {
+        return redir;
+    }
+
+    let back = format!("/systems/report/{}", system_id);
+    match crate::policies::execute_policy_run_for_system(
+        policy_id, system_id, &pool, &auth.tenant_id,
+    ).await {
+        Ok(0) => {
+            warn!(
+                "Run requested by '{}' for policy={} on system={}, but the policy does not cover it.",
+                auth.username, policy_id, system_id
+            );
+            let msg = urlencoding::encode(
+                "Nothing queued — this policy does not apply to this system.").to_string();
+            Redirect::to(&format!("{}?error_message={}", back, msg)).into_response()
+        }
+        Ok(n) => {
+            info!(
+                "Policy {} queued for system {} by '{}' ({} test(s)).",
+                policy_id, system_id, auth.username, n
+            );
+            crate::audit::record(
+                &pool, &auth.tenant_id,
+                Some(&auth), Some(ip.as_str()),
+                "policy.run_on_system",
+                Some("system"), Some(&system_id.to_string()),
+                Some(&format!("{{\"policy_id\":{},\"tests_queued\":{}}}", policy_id, n)),
+            ).await;
+            let msg = urlencoding::encode(&format!(
+                "Queued {} test(s). Results will appear after the agent's next check-in.", n
+            )).to_string();
+            Redirect::to(&format!("{}?success_message={}", back, msg)).into_response()
+        }
+        Err(e) => {
+            error!("Failed to queue policy {} for system {}: {}", policy_id, system_id, e);
+            let msg = urlencoding::encode("Failed to queue the scan.").to_string();
+            Redirect::to(&format!("{}?error_message={}", back, msg)).into_response()
+        }
+    }
 }
 
 

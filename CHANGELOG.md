@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Run a single policy on a single system, from the system report.** Each policy card on the system compliance view gains a **Run** button that queues just that policy's tests for just that host — so after fixing a finding you can re-check the one machine instead of rescanning the fleet. Requires the Runner role; the action is audited (`policy.run_on_system`). Scans are queued to the agent, so results land on its next check-in rather than instantly, and the confirmation message says so. Requesting a policy that doesn't cover the system queues nothing and reports that, rather than a silent success.
+
 ---
 
 ## [0.7.7] - 2026-06-16

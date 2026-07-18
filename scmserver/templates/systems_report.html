@@ -214,6 +214,23 @@
             <span class="badge {% if exempt %}badge-secondary{% elif policy.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1 mr-1">
               {% if exempt %}NOT APPLICABLE{% elif policy.is_passed %}COMPLIANT{% else %}NON-COMPLIANT{% endif %}
             </span>
+            {# Re-scan just this policy on just this host — queued to the agent,
+               applied on its next heartbeat (not instant). #}
+            {% if is_runner %}
+            <form method="POST" action="/systems/report/{{ report.system_id }}/run/{{ policy.policy_id }}"
+                  style="display:inline" class="mr-1">
+              <button type="submit" class="btn btn-xs btn-outline-success"
+                      title="Re-run this policy on this system (applied on the agent's next check-in)">
+                <i class="fas fa-rocket mr-1"></i>Run
+              </button>
+            </form>
+            {% else %}
+            <button type="button" class="btn btn-xs btn-outline-secondary mr-1" disabled
+                    style="cursor: not-allowed; opacity: 0.6;"
+                    title="Requires the Runner role">
+              <i class="fas fa-lock mr-1"></i>Run
+            </button>
+            {% endif %}
             <button type="button" class="btn btn-tool" data-card-widget="collapse"><i class="fas fa-minus"></i></button>
           </div>
         </div>
