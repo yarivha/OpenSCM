@@ -630,6 +630,9 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
     let loop_pool = pool.clone();
 
     tokio::spawn(async move {
+        // When this server process came up. Used to gate the inactive-system
+        // prune so a server outage can't be mistaken for absent agents.
+        let started_at = std::time::Instant::now();
         let mut last_snapshot_hour: i32 = Utc::now().hour() as i32;
         // Track the last calendar day on which daily-prune tasks ran so
         // the daily tick fires exactly once per UTC day regardless of
@@ -731,7 +734,7 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
             }
 
             // --- TASK B: AUTO-PRUNE INACTIVE SYSTEMS ---
-            prune_inactive_systems(&loop_pool).await;
+            prune_inactive_systems(&loop_pool, started_at.elapsed()).await;
 
             // --- TASK C: HOURLY COMPLIANCE SNAPSHOT ---
             if now.minute() == 0 && current_hour != last_snapshot_hour {
@@ -827,8 +830,17 @@ pub async fn start_background_scheduler(pool: SqlitePool) {
 // Helper: prune_inactive_systems
 // For each tenant with auto_prune_inactive > 0, deletes active systems whose
 // last_seen is older than the configured number of minutes.
+//
+// `uptime` is how long THIS server process has been running, and it gates the
+// whole pass: a system is only genuinely "inactive" if it failed to check in
+// while the server was actually up to receive the heartbeat. While the server
+// is down no agent can report, so every last_seen goes stale — without this
+// guard, a server outage longer than the threshold wiped the entire fleet on
+// the first tick after restart, before any agent had a chance to check in.
+// We therefore skip a tenant until the server has been up at least as long as
+// its own threshold; only then is a still-stale system provably absent.
 // ─────────────────────────────────────────────────────────────────────────────
-async fn prune_inactive_systems(pool: &SqlitePool) {
+pub async fn prune_inactive_systems(pool: &SqlitePool, uptime: Duration) {
     let tenants: Vec<(String, i64)> = match sqlx::query_as::<_, (String, i64)>(
         "SELECT tenant_id, CAST(value AS INTEGER) FROM settings
          WHERE skey = 'auto_prune_inactive' AND CAST(value AS INTEGER) > 0",
@@ -841,6 +853,18 @@ async fn prune_inactive_systems(pool: &SqlitePool) {
     };
 
     for (tenant_id, minutes) in tenants {
+        // Downtime guard (see the header): until the server has been up for the
+        // tenant's own threshold, a stale last_seen can't be distinguished from
+        // "the server wasn't there to hear it", so pruning is unsafe.
+        if uptime < Duration::from_secs(minutes.max(0) as u64 * 60) {
+            info!(
+                "Auto-prune: skipping tenant '{}' — server uptime {}m < threshold {}m; \
+                 waiting for agents to check in before judging them inactive.",
+                tenant_id, uptime.as_secs() / 60, minutes
+            );
+            continue;
+        }
+
         // Compute the cutoff timestamp in Rust rather than doing per-row
         // strftime math in SQL.  `last_seen < ?` is sargable, so with
         // idx_systems_prune (tenant_id, status, last_seen) this is a range
