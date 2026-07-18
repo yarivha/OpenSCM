@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.7] - 2026-06-16
+
 ### Fixed
 - **Data loss: a long server outage no longer deletes every system on restart.** With `auto_prune_inactive` enabled, the prune deleted any active system whose `last_seen` was older than the threshold — but while the server is down no agent *can* report, so after an outage longer than the threshold the whole fleet looked inactive and was wiped on the first 60-second tick, before any agent had a chance to check in. The prune is now gated on **server uptime**: a tenant is skipped until this server process has been running at least as long as its own threshold, so a stale `last_seen` can no longer be confused with "the server wasn't there to hear it". Genuinely absent systems are still pruned once that window has passed. Covered by regression tests.
 
