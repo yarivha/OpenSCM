@@ -2,6 +2,11 @@
 
 {% block head %}
 <style>
+  /* Active status-filter badge — ring + full opacity so it reads as "on". */
+  .status-filter { opacity: 0.85; }
+  .status-filter:hover { opacity: 1; }
+  .status-filter.filter-active { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
+
   /* Theme-aware Verdict Box */
   .verdict-box {
     border: 1px solid #dee2e6;
@@ -151,16 +156,18 @@
             {{ system.system_name }}
           </h3>
           <div class="card-tools">
-            <span class="badge badge-success-soft text-success mr-1" title="Passed">
+            {# Clicking a count filters this card's rows to that status; click
+               again to clear. See the status-filter JS. #}
+            <span class="badge badge-success-soft text-success mr-1 status-filter" data-filter="pass" title="Show only passed">
               <i class="fas fa-check-circle mr-1"></i>{{ system.pass_count }}
             </span>
-            <span class="badge badge-danger-soft text-danger mr-1" title="Failed">
+            <span class="badge badge-danger-soft text-danger mr-1 status-filter" data-filter="fail" title="Show only failed">
               <i class="fas fa-times-circle mr-1"></i>{{ system.fail_count }}
             </span>
-            <span class="badge badge-light text-secondary mr-1" title="Not Applicable">
+            <span class="badge badge-light text-secondary mr-1 status-filter" data-filter="na" title="Show only not-applicable">
               <i class="fas fa-minus-circle mr-1"></i>{{ system.na_count }}
             </span>
-            <span class="badge badge-light text-secondary mr-2" title="Excluded">
+            <span class="badge badge-light text-secondary mr-2 status-filter" data-filter="excluded" title="Show only excluded">
               <i class="fas fa-ban mr-1"></i>{{ system.excluded_count }}
             </span>
             <span class="badge {% if exempt %}badge-secondary{% elif system.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1">
@@ -180,7 +187,11 @@
             </thead>
             <tbody>
               {% for res in system.results %}
-              <tr>
+              {% set row_status = "fail" %}
+              {% if res.is_excluded %}{% set row_status = "excluded" %}
+              {% elif res.status == "PASS" %}{% set row_status = "pass" %}
+              {% elif res.status == "NA" %}{% set row_status = "na" %}{% endif %}
+              <tr class="report-row" data-status="{{ row_status }}">
                 <td style="padding-left: 20px;">
                   {% set meta = tests_metadata | filter(attribute="name", value=res.test_name) | first %}
                   {% if meta %}
@@ -371,6 +382,31 @@
   $(function() {
     $('[data-toggle="tooltip"]').tooltip();
   });
+
+  // ── Status filter ───────────────────────────────────────────────────────────
+  // Clicking a PASS / FAIL / NA / EXCLUDED count in a card header filters that
+  // card's rows to the matching status; clicking the active one clears it.
+  (function () {
+    function applyFilter(card, want) {
+      card.querySelectorAll('tr.report-row').forEach(function (row) {
+        row.style.display = (!want || row.getAttribute('data-status') === want) ? '' : 'none';
+      });
+      card.querySelectorAll('tr.evidence-detail').forEach(function (ev) {
+        ev.style.display = 'none';
+      });
+    }
+    document.querySelectorAll('.status-filter').forEach(function (badge) {
+      badge.style.cursor = 'pointer';
+      badge.addEventListener('click', function () {
+        var card = badge.closest('.card');
+        if (!card) return;
+        var alreadyActive = badge.classList.contains('filter-active');
+        card.querySelectorAll('.status-filter').forEach(function (b) { b.classList.remove('filter-active'); });
+        if (alreadyActive) { applyFilter(card, null); }
+        else { badge.classList.add('filter-active'); applyFilter(card, badge.getAttribute('data-filter')); }
+      });
+    });
+  })();
 
   $('#testDetailModal').on('show.bs.modal', function (event) {
     var trigger = $(event.relatedTarget);
