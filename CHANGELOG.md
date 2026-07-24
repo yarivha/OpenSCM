@@ -6,6 +6,9 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Added
+- **Click a PASS / FAIL / NA / EXCLUDED count to filter the report to those elements.** On the system and policy compliance reports, the status counts in each card header are now clickable: click **Failed** to show only that card's failing tests, click again (or another status) to change or clear the filter. Scoped per card so each policy (system report) or system (policy report) filters independently. Purely client-side — no reload. On the system report, `NOT_SCANNED` rows fall under the NA filter to match that report's NA count.
+
 ---
 
 ## [0.7.7] - 2026-06-16

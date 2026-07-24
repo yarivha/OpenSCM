@@ -12,6 +12,10 @@
     background: rgba(255,255,255,0.05);
   }
   .status-icon { width: 20px; text-align: center; }
+  /* Active status-filter badge — ring + full opacity so it reads as "on". */
+  .status-filter { opacity: 0.85; }
+  .status-filter:hover { opacity: 1; }
+  .status-filter.filter-active { opacity: 1; outline: 2px solid currentColor; outline-offset: 1px; }
   @media print {
     .btn, .main-footer, .breadcrumb { display: none !important; }
     .content-wrapper { margin-left: 0 !important; }
@@ -199,16 +203,18 @@
             <small class="text-muted ml-1">v{{ policy.policy_version }}</small>
           </h3>
           <div class="card-tools">
-            <span class="badge badge-success-soft text-success mr-1" title="Passed">
+            {# Clicking a count filters this card's rows to that status; click
+               again (or the active one) to clear. See the status-filter JS. #}
+            <span class="badge badge-success-soft text-success mr-1 status-filter" data-filter="pass" title="Show only passed">
               <i class="fas fa-check-circle mr-1"></i>{{ policy.pass_count }}
             </span>
-            <span class="badge badge-danger-soft text-danger mr-1" title="Failed">
+            <span class="badge badge-danger-soft text-danger mr-1 status-filter" data-filter="fail" title="Show only failed">
               <i class="fas fa-times-circle mr-1"></i>{{ policy.fail_count }}
             </span>
-            <span class="badge badge-light text-secondary mr-1" title="Not Applicable">
+            <span class="badge badge-light text-secondary mr-1 status-filter" data-filter="na" title="Show only not-applicable">
               <i class="fas fa-minus-circle mr-1"></i>{{ policy.na_count }}
             </span>
-            <span class="badge badge-light text-secondary mr-2" title="Excluded">
+            <span class="badge badge-light text-secondary mr-2 status-filter" data-filter="excluded" title="Show only excluded">
               <i class="fas fa-ban mr-1"></i>{{ policy.excluded_count }}
             </span>
             <span class="badge {% if exempt %}badge-secondary{% elif policy.is_passed %}badge-success{% else %}badge-danger{% endif %} px-2 py-1 mr-1">
@@ -250,8 +256,15 @@
             </thead>
             <tbody>
               {% for res in policy.results %}
-              <tr {% if res.is_excludable and is_editor and res.system_id and res.test_id and res.status != "NOT_SCANNED" %}
-                  class="result-row"
+              {% set row_status = "fail" %}
+              {% if res.is_excluded %}{% set row_status = "excluded" %}
+              {% elif res.status == "PASS" %}{% set row_status = "pass" %}
+              {# NOT_SCANNED is folded into the NA count on this report, so it
+                 filters under NA too — keeping the badge number == what shows. #}
+              {% elif res.status == "NA" or res.status == "NOT_SCANNED" %}{% set row_status = "na" %}{% endif %}
+              <tr class="report-row{% if res.is_excludable and is_editor and res.system_id and res.test_id and res.status != "NOT_SCANNED" %} result-row{% endif %}"
+                  data-status="{{ row_status }}"
+                  {% if res.is_excludable and is_editor and res.system_id and res.test_id and res.status != "NOT_SCANNED" %}
                   data-system-id="{{ res.system_id }}"
                   data-test-id="{{ res.test_id }}"
                   data-excluded="{{ res.is_excluded }}"
@@ -467,6 +480,41 @@
 {% endblock %}
 
 {% block scripts %}
+<script>
+  // ── Status filter ───────────────────────────────────────────────────────────
+  // Clicking a PASS / FAIL / NA / EXCLUDED count in a policy card header filters
+  // that card's result rows to the matching status; clicking the active one
+  // again clears it. Scoped to the card so each policy filters independently.
+  (function () {
+    function applyFilter(card, want) {
+      card.querySelectorAll('tr.report-row').forEach(function (row) {
+        var show = !want || row.getAttribute('data-status') === want;
+        row.style.display = show ? '' : 'none';
+      });
+      // Collapse any expanded "why?" evidence rows so they can't outlive a
+      // hidden parent row.
+      card.querySelectorAll('tr.evidence-detail').forEach(function (ev) {
+        ev.style.display = 'none';
+      });
+    }
+
+    document.querySelectorAll('.status-filter').forEach(function (badge) {
+      badge.style.cursor = 'pointer';
+      badge.addEventListener('click', function () {
+        var card = badge.closest('.card');
+        if (!card) return;
+        var want = badge.getAttribute('data-filter');
+        var alreadyActive = badge.classList.contains('filter-active');
+
+        card.querySelectorAll('.status-filter').forEach(function (b) {
+          b.classList.remove('filter-active');
+        });
+        if (alreadyActive) { applyFilter(card, null); }       // toggle off → show all
+        else { badge.classList.add('filter-active'); applyFilter(card, want); }
+      });
+    });
+  })();
+</script>
 {% if trend_labels | length > 0 %}
 <script>
   // Compliance trend — hourly per-system snapshots, plotted in the tenant's
