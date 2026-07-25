@@ -18,14 +18,6 @@ For full documentation, installation guides, and user manual visit **[openscm.io
 ## Documentation
 To check out docs, visit [openscm.io](https://openscm.io).
 
-## Sponsor
-
-If you find this project helpful, please consider sponsoring us to support ongoing development and maintenance.
-
-[![GitHub Sponsors](https://img.shields.io/badge/GitHub-Sponsors-ea4aaa?style=for-the-badge&logo=github-sponsors&logoColor=white)](https://github.com/sponsors/yarivha)
-
-
-
 ## 🚀 Key Features
 
 - **Privacy-First** — agents report results only, no raw system data leaves your network
