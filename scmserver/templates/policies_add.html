@@ -1,4 +1,11 @@
 {% extends "base.html" %}
+{# Uses the Duallistbox widget, so it opts into the library base.html omits. #}
+{% block form_libs_css %}
+<link rel="stylesheet" href="/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
+{% endblock %}
+{% block form_libs %}
+<script src="/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
+{% endblock %}
 
 {% block head %}
 <style>

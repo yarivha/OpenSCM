@@ -9,8 +9,9 @@
   <link rel="stylesheet" href="https://fonts.googleapis.com/css?family=Source+Sans+Pro:300,400,400i,700&display=fallback">
   <!-- Font Awesome -->
   <link rel="stylesheet" href="/plugins/fontawesome-free/css/all.min.css">
-  <!-- Ionicons -->
-  <link rel="stylesheet" href="https://code.ionicframework.com/ionicons/2.0.1/css/ionicons.min.css">
+  {# Ionicons (external CDN) dropped: no `ion-*` icon is used anywhere, and a
+     third-party request per page load is dead latency — and a hang on an
+     air-gapped install, which is a normal deployment for this product. #}
   <!-- Theme style -->
   <link rel="stylesheet" href="/dist/css/adminlte.min.css">
   <!-- overlayScrollbars -->
@@ -19,11 +20,10 @@
   <link rel="stylesheet" href="/plugins/datatables-bs4/css/dataTables.bootstrap4.min.css">
   <link rel="stylesheet" href="/plugins/datatables-responsive/css/responsive.bootstrap4.min.css">
   <link rel="stylesheet" href="/plugins/datatables-buttons/css/buttons.bootstrap4.min.css">
-  <!-- Select2 -->
-  <link rel="stylesheet" href="/plugins/select2/css/select2.min.css">
-  <link rel="stylesheet" href="/plugins/select2-bootstrap4-theme/select2-bootstrap4.min.css">
-  <!-- Bootstrap4 Duallistbox -->
-  <link rel="stylesheet" href="/plugins/bootstrap4-duallistbox/bootstrap-duallistbox.min.css">
+  {# Select2 / Duallistbox stylesheets ship with their libraries — see the
+     form_libs block near the scripts; only the form pages that use those
+     widgets pull them in. #}
+  {% block form_libs_css %}{% endblock %}
 
   {% block head %}{% endblock %}
 </head>
@@ -290,15 +290,16 @@
 
 <!-- jQuery -->
 <script src="/plugins/jquery/jquery.min.js"></script>
-<!-- jQuery UI -->
-<script src="/plugins/jquery-ui/jquery-ui.min.js"></script>
-<script>
-  $.widget.bridge('uibutton', $.ui.button)
-</script>
+{# jQuery UI (252 KB) was loaded only for AdminLTE's `$.widget.bridge('uibutton',
+   $.ui.button)` shim, which exists to dodge a Bootstrap/jQuery-UI button name
+   clash — a clash that only arises when jQuery UI is present. No jQuery UI
+   widget is used anywhere in the app, so both are gone. Likewise inputmask
+   (100 KB) and moment (60 KB): loaded on every page, referenced by nothing. #}
 <!-- Bootstrap 4 -->
 <script src="/plugins/bootstrap/js/bootstrap.bundle.min.js"></script>
-<!-- ChartJS -->
-<script src="/plugins/chart.js/Chart.min.js"></script>
+{# Chart.js (172 KB) — only the dashboard and the two live report pages draw
+   charts, so they opt in rather than every page paying for it. #}
+{% block chart_libs %}{% endblock %}
 <!-- overlayScrollbars -->
 <script src="/plugins/overlayScrollbars/js/jquery.overlayScrollbars.min.js"></script>
 <!-- AdminLTE App -->
@@ -319,23 +320,21 @@
 <script src="/plugins/datatables-buttons/js/buttons.html5.min.js"></script>
 <script src="/plugins/datatables-buttons/js/buttons.print.min.js"></script>
 <script src="/plugins/datatables-buttons/js/buttons.colVis.min.js"></script>
-<!-- Bootstrap4 Duallistbox -->
-<script src="/plugins/bootstrap4-duallistbox/jquery.bootstrap-duallistbox.min.js"></script>
-<!-- Select2 -->
-<script src="/plugins/select2/js/select2.full.min.js"></script>
-<!-- Moment.js -->
-<script src="/plugins/moment/moment.min.js"></script>
-<!-- InputMask -->
-<script src="/plugins/inputmask/jquery.inputmask.min.js"></script>
+{# Select2 and Duallistbox are each used by a handful of form pages, so those
+   pages opt in (see systems_edit.html / policies_add.html). #}
+{% block form_libs %}{% endblock %}
 
 <script>
   $(function () {
-    // Initialize Select2
-    $('.select2').select2();
-    $('.select2bs4').select2({ theme: 'bootstrap4' });
-
-    // Initialize Duallistbox
-    $('.duallistbox').bootstrapDualListbox();
+    // Initialise the optional form widgets only when the page opted into the
+    // library — otherwise these calls throw and abort the rest of the block.
+    if ($.fn.select2) {
+      $('.select2').select2();
+      $('.select2bs4').select2({ theme: 'bootstrap4' });
+    }
+    if ($.fn.bootstrapDualListbox) {
+      $('.duallistbox').bootstrapDualListbox();
+    }
   });
 </script>
 

@@ -1,4 +1,8 @@
 {% extends "base.html" %}
+{# Draws Chart.js graphs, so it opts into the library base.html omits. #}
+{% block chart_libs %}
+<script src="/plugins/chart.js/Chart.min.js"></script>
+{% endblock %}
 
 {% block head %}
 <style>

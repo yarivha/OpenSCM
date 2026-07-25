@@ -424,5 +424,11 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
                 async move { init_guard(flag, req, next).await }
             })
         })
+        // Compress responses (gzip/brotli, negotiated via Accept-Encoding).
+        // The UI ships megabytes of vendor JS/CSS plus large HTML report
+        // tables, all highly compressible. Outermost so it applies to every
+        // route; tower-http adds `Vary: accept-encoding` and skips responses
+        // that are already encoded or too small to be worth it.
+        .layer(tower_http::compression::CompressionLayer::new())
         .with_state(cookie_key)
 }

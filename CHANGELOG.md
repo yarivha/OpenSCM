@@ -7,9 +7,13 @@ All notable changes to OpenSCM are documented here.
 ## [Unreleased]
 
 ### Changed
-- **UI performance: pages load dramatically less JavaScript.** Two fixes to what was ~4.8 MB of vendor JS/CSS on *every* page view:
-  - **Static assets are now cacheable.** They were served with no validator, so browsers re-downloaded all 4.8 MB on every navigation. Assets now carry an `ETag` (scoped to the build version) and `Cache-Control: max-age=3600`, and conditional requests get a `304` — repeat navigations transfer a few hundred bytes instead of megabytes. The short max-age plus a version-scoped ETag means an upgrade still picks up new assets rather than pinning stale ones.
-  - **The Excel/PDF export libraries (~2.2 MB) are no longer loaded everywhere.** `jszip` + `pdfmake` + `vfs_fonts` were downloaded *and parsed* on all pages, though only the five pages with Excel/PDF table buttons can use them. Those pages now opt in; every other page — dashboard, all report views, settings — is **2.2 MB lighter** and skips the associated JS parse cost.
+- **UI performance: a typical page now transfers ~290 KB instead of ~4.8 MB, and almost nothing on repeat visits.** Every page previously pulled 4,847 KB of vendor JS/CSS across 31 files, uncompressed and uncacheable. Four independent fixes:
+  - **Static assets are now cacheable.** They were served with no validator, so browsers re-downloaded everything on every navigation. Assets now carry an `ETag` (scoped to the build version) and `Cache-Control: max-age=3600`, and conditional requests get a `304` — repeat navigations transfer a few hundred bytes. The short max-age plus a version-scoped ETag means an upgrade still picks up new assets rather than pinning stale ones.
+  - **Responses are compressed** (gzip/brotli, negotiated per request). Worth ~82% on the remaining assets and on the large HTML report tables.
+  - **Unused libraries removed.** jQuery UI (252 KB, loaded only for an AdminLTE shim that guards against a clash which cannot occur once jQuery UI is gone), InputMask (100 KB) and Moment.js (60 KB) were on every page and referenced by nothing. The external Ionicons CDN stylesheet is also gone — no `ion-*` icon is used, and dropping it removes a third-party request per page load (which also blocked page render on air-gapped installs).
+  - **Heavy optional libraries are now opt-in per page.** `jszip`/`pdfmake`/`vfs_fonts` (2.2 MB) load only on the five pages with Excel/PDF table buttons; Chart.js only on the dashboard and the two live report pages; Select2 and Duallistbox only on the form pages that use those widgets. Beyond bandwidth this removes the JS parse cost on every other page.
+
+  Net: a baseline page goes from **4,847 KB / 31 files** to **1,954 KB / 19 files**, or **~290 KB** on the wire once compressed — then near-zero on subsequent navigations.
 
 ---
 
