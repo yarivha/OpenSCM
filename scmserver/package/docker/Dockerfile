@@ -8,7 +8,7 @@ LABEL org.opencontainers.image.title="OpenSCM Server" \
       org.opencontainers.image.vendor="OpenSCM" \
       org.opencontainers.image.url="https://openscm.io" \
       org.opencontainers.image.documentation="https://openscm.io" \
-      org.opencontainers.image.source="https://github.com/yarivha/OpenSCM" \
+      org.opencontainers.image.source="https://github.com/easysysio/OpenSCM" \
       org.opencontainers.image.licenses="FSL-1.1-ALv2"
 
 # Binary is staged at the build context root by the CI workflow

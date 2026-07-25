@@ -187,7 +187,7 @@ Report them responsibly to **security@openscm.io** — we respond within 48 hour
 ## 🛡️ Support
 
 - **Docs & User Guide:** [openscm.io](https://openscm.io)
-- **Bugs:** [GitHub Issues](https://github.com/yarivha/OpenSCM/issues)
+- **Bugs:** [GitHub Issues](https://github.com/easysysio/OpenSCM/issues)
 
 ---
 

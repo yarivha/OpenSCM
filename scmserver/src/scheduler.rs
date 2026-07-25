@@ -1137,7 +1137,7 @@ async fn check_for_updates(pool: &SqlitePool) {
     };
 
     let resp = match client
-        .get("https://api.github.com/repos/yarivha/OpenSCM/releases/latest")
+        .get("https://api.github.com/repos/easysysio/OpenSCM/releases/latest")
         .send()
         .await
     {
