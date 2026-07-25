@@ -6,6 +6,11 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+### Changed
+- **UI performance: pages load dramatically less JavaScript.** Two fixes to what was ~4.8 MB of vendor JS/CSS on *every* page view:
+  - **Static assets are now cacheable.** They were served with no validator, so browsers re-downloaded all 4.8 MB on every navigation. Assets now carry an `ETag` (scoped to the build version) and `Cache-Control: max-age=3600`, and conditional requests get a `304` — repeat navigations transfer a few hundred bytes instead of megabytes. The short max-age plus a version-scoped ETag means an upgrade still picks up new assets rather than pinning stale ones.
+  - **The Excel/PDF export libraries (~2.2 MB) are no longer loaded everywhere.** `jszip` + `pdfmake` + `vfs_fonts` were downloaded *and parsed* on all pages, though only the five pages with Excel/PDF table buttons can use them. Those pages now opt in; every other page — dashboard, all report views, settings — is **2.2 MB lighter** and skips the associated JS parse cost.
+
 ---
 
 ## [0.7.9] - 2026-06-16

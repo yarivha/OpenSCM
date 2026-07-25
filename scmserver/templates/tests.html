@@ -1,4 +1,11 @@
 {% extends "base.html" %}
+{# This page has Excel/PDF DataTables buttons, so it opts into the heavy
+   export libraries that base.html leaves out by default. #}
+{% block export_libs %}
+<script src="/plugins/jszip/jszip.min.js"></script>
+<script src="/plugins/pdfmake/pdfmake.min.js"></script>
+<script src="/plugins/pdfmake/vfs_fonts.js"></script>
+{% endblock %}
 
 {% block head %}
 <style>

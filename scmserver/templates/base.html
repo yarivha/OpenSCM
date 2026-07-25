@@ -310,9 +310,12 @@
 <script src="/plugins/datatables-responsive/js/responsive.bootstrap4.min.js"></script>
 <script src="/plugins/datatables-buttons/js/dataTables.buttons.min.js"></script>
 <script src="/plugins/datatables-buttons/js/buttons.bootstrap4.min.js"></script>
-<script src="/plugins/jszip/jszip.min.js"></script>
-<script src="/plugins/pdfmake/pdfmake.min.js"></script>
-<script src="/plugins/pdfmake/vfs_fonts.js"></script>
+{# Excel/PDF export libs — jszip + pdfmake + vfs_fonts total ~2.2 MB, which
+   every page previously downloaded AND parsed even though only the few pages
+   with "excel"/"pdf" DataTables buttons can use them. Those pages opt in by
+   overriding this block (see systems.html); everything else pays nothing.
+   Must stay ahead of buttons.html5, which binds to these at load time. #}
+{% block export_libs %}{% endblock %}
 <script src="/plugins/datatables-buttons/js/buttons.html5.min.js"></script>
 <script src="/plugins/datatables-buttons/js/buttons.print.min.js"></script>
 <script src="/plugins/datatables-buttons/js/buttons.colVis.min.js"></script>

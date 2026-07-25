@@ -198,14 +198,58 @@ pub fn check_required_directories() -> Result<(), Box<dyn Error>> {
 // Helper: serve_embedded_static_file
 // Serves a static asset from the embedded STATIC_FILES_DIR directory.
 // Returns 404 if the path is not found in the bundle.
+//
+// Caching: every page pulls ~4.8 MB of vendor JS/CSS (AdminLTE, jQuery,
+// DataTables, Chart.js, pdfmake …). Without validators the browser re-fetched
+// all of it on every navigation, which dominated page-load time. Assets are
+// compiled into the binary, so their content is fixed for a given build: we
+// emit a strong ETag derived from the build version + path + length and answer
+// If-None-Match with 304, turning repeat loads into a few hundred bytes.
+// max-age is deliberately short (1 h) rather than "immutable" because the URLs
+// carry no content hash — after an upgrade the changed ETag makes the first
+// revalidation serve the new file instead of pinning stale assets for a year.
 // ─────────────────────────────────────────────────────────────────────────────
-pub async fn serve_embedded_static_file(path: PathBuf) -> impl IntoResponse {
+pub async fn serve_embedded_static_file(
+    path: PathBuf,
+    req_headers: axum::http::HeaderMap,
+) -> impl IntoResponse {
     let path_str = path.to_str().unwrap_or("");
     match STATIC_FILES_DIR.get_file(path_str) {
         Some(file) => {
+            // Build-scoped validator: app_version changes on every release, so
+            // upgrades invalidate; length guards edits within one version.
+            let etag = format!(
+                "\"{}-{:x}\"",
+                app_version(),
+                {
+                    // Cheap FNV-1a over path + length — no hashing of the whole
+                    // file on every request (some assets are megabytes).
+                    let mut h: u64 = 0xcbf29ce484222325;
+                    for b in path_str.as_bytes().iter().chain(&file.contents().len().to_le_bytes()) {
+                        h ^= *b as u64;
+                        h = h.wrapping_mul(0x100000001b3);
+                    }
+                    h
+                }
+            );
+
+            // Conditional request → 304 with no body.
+            if let Some(inm) = req_headers.get(header::IF_NONE_MATCH).and_then(|v| v.to_str().ok()) {
+                if inm.split(',').any(|t| t.trim() == etag) {
+                    return axum::response::Response::builder()
+                        .status(StatusCode::NOT_MODIFIED)
+                        .header(header::ETAG, &etag)
+                        .header(header::CACHE_CONTROL, "public, max-age=3600")
+                        .body(Body::empty())
+                        .unwrap();
+                }
+            }
+
             let mime_type = mime_guess::from_path(path).first_or_octet_stream();
             axum::response::Response::builder()
                 .header(header::CONTENT_TYPE, mime_type.to_string())
+                .header(header::ETAG, &etag)
+                .header(header::CACHE_CONTROL, "public, max-age=3600")
                 .body(Body::from(Bytes::from(file.contents())))
                 .unwrap()
         }
@@ -363,8 +407,9 @@ pub fn create_core_router(state: AppState, cookie_key: axum_extra::extract::cook
         .route("/systems/upgrade_all",  post(systems::systems_upgrade_all))
         .route("/send", post(client::send))
         .route("/result", post(client::receive_result))
-        .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>| async move {
-            serve_embedded_static_file(PathBuf::from(path)).await
+        .route("/{*path}", get(|axum::extract::Path(path): axum::extract::Path<String>,
+                                headers: axum::http::HeaderMap| async move {
+            serve_embedded_static_file(PathBuf::from(path), headers).await
         }))
         .fallback(handlers::not_found)
         .layer(Extension(state.pool))
