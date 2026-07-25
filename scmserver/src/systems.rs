@@ -1386,7 +1386,7 @@ pub async fn system_report_run_policy(
                 Some(&format!("{{\"policy_id\":{},\"tests_queued\":{}}}", policy_id, n)),
             ).await;
             let msg = urlencoding::encode(&format!(
-                "Queued {} test(s). Results will appear after the agent's next check-in.", n
+                "{} test(s) queued for this system. Results will appear after the agent's next check-in.", n
             )).to_string();
             Redirect::to(&format!("{}?success_message={}", back, msg)).into_response()
         }

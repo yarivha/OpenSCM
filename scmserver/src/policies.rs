@@ -2234,8 +2234,8 @@ pub async fn execute_policy_run_logic(
 // The systems_in_policy → systems_in_groups join is the safety property: a
 // system the policy doesn't actually cover matches zero rows, so a crafted
 // request can't queue a policy's tests onto an unrelated host. Returns the
-// number of tests queued so the caller can distinguish "queued 42" from
-// "nothing to do" instead of reporting a silent success.
+// number of the policy's tests that APPLY to this system (0 = not covered), so
+// the caller can report "queued 42" vs "this policy doesn't apply here".
 // ─────────────────────────────────────────────────────────────────────────────
 pub async fn execute_policy_run_for_system(
     policy_id: i32,
@@ -2243,7 +2243,30 @@ pub async fn execute_policy_run_for_system(
     pool: &SqlitePool,
     tenant_id: &str,
 ) -> Result<u64, sqlx::Error> {
-    let res = sqlx::query(r#"
+    // Count what APPLIES first, separately from the insert. `INSERT OR IGNORE`
+    // reports rows_affected = 0 when the commands are already pending (a prior
+    // run or the policy's schedule queued them and the agent hasn't consumed
+    // them yet), so using that count would wrongly report a covered policy as
+    // "does not apply to this system". COUNT(DISTINCT) mirrors the INSERT's
+    // dedup when a system sits in several of the policy's groups.
+    let applicable: i64 = sqlx::query_scalar(r#"
+        SELECT COUNT(DISTINCT tip.test_id)
+        FROM systems_in_policy sip
+        JOIN systems_in_groups sig ON sip.group_id = sig.group_id
+        JOIN tests_in_policy tip ON sip.policy_id = tip.policy_id
+        WHERE sip.policy_id = ?
+          AND sip.tenant_id = ?
+          AND sig.system_id = ?
+    "#)
+    .bind(policy_id).bind(tenant_id).bind(system_id)
+    .fetch_one(pool).await?;
+
+    if applicable == 0 {
+        return Ok(0); // policy genuinely doesn't cover this system
+    }
+
+    // Queue them. Idempotent — already-pending commands are left as they are.
+    sqlx::query(r#"
         INSERT OR IGNORE INTO commands (tenant_id, system_id, test_id)
         SELECT ?, sig.system_id, tip.test_id
         FROM systems_in_policy sip
@@ -2255,7 +2278,8 @@ pub async fn execute_policy_run_for_system(
     "#)
     .bind(tenant_id).bind(policy_id).bind(tenant_id).bind(system_id)
     .execute(pool).await?;
-    Ok(res.rows_affected())
+
+    Ok(applicable as u64)
 }
 
 

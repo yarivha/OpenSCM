@@ -103,16 +103,19 @@ async fn does_not_cross_tenant_boundaries() {
 }
 
 #[tokio::test]
-async fn re_running_is_idempotent() {
+async fn re_running_while_already_queued_still_reports_the_tests() {
     let pool = fresh_pool().await;
     seed(&pool).await;
 
     scmserver::policies::execute_policy_run_for_system(100, 1, &pool, "default").await.unwrap();
     // A second click before the agent checks in must not duplicate the queue
-    // (INSERT OR IGNORE against the commands primary key).
+    // (INSERT OR IGNORE against the commands primary key) — but it must still
+    // report the applicable tests. Returning the insert's rows_affected here
+    // yielded 0, which the handler surfaced as the bogus "this policy does not
+    // apply to this system".
     let second = scmserver::policies::execute_policy_run_for_system(100, 1, &pool, "default")
         .await.expect("run");
 
-    assert_eq!(second, 0, "already-queued tests are not re-inserted");
+    assert_eq!(second, 2, "still reports the 2 applicable tests, not 0");
     assert_eq!(queued_for(&pool, 1).await, 2, "queue still holds exactly the two tests");
 }

@@ -8,6 +8,13 @@ All notable changes to OpenSCM are documented here.
 
 ---
 
+## [0.7.9] - 2026-06-16
+
+### Fixed
+- **"Nothing queued — this policy does not apply to this system" when running a policy that clearly does apply.** The per-policy **Run** button reported the row count from its `INSERT OR IGNORE`, which is **0 when the tests are already queued** — e.g. clicking Run twice, or running a policy whose scheduled scan is still pending the agent's next check-in. That legitimate case was misreported as the policy not covering the host. Applicability is now counted separately from the insert, so Run reports the policy's applicable tests whether or not they were already queued; a genuinely uncovered system still reports that correctly.
+
+---
+
 ## [0.7.8] - 2026-06-16
 
 ### Added
