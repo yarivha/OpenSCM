@@ -6,6 +6,10 @@ All notable changes to OpenSCM are documented here.
 
 ## [Unreleased]
 
+---
+
+## [0.7.10] - 2026-07-25
+
 ### Changed
 - **UI performance: a typical page now transfers ~290 KB instead of ~4.8 MB, and almost nothing on repeat visits.** Every page previously pulled 4,847 KB of vendor JS/CSS across 31 files, uncompressed and uncacheable. Four independent fixes:
   - **Static assets are now cacheable.** They were served with no validator, so browsers re-downloaded everything on every navigation. Assets now carry an `ETag` (scoped to the build version) and `Cache-Control: max-age=3600`, and conditional requests get a `304` — repeat navigations transfer a few hundred bytes. The short max-age plus a version-scoped ETag means an upgrade still picks up new assets rather than pinning stale ones.
